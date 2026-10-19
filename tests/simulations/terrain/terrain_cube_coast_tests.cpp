@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 
 #include "core/classes.hpp"
+#include "core/grid_shapes.hpp"
 #include "core/mesh/cell_grid.hpp"
 #include "core/procedural_noise.hpp"
 #include "simulations/terrain/climate_landforms.hpp"
@@ -240,7 +241,7 @@ TEST(TerrainCubeCoast, ImportedMountainsOnTheCube)
     {
         const CellId c = grid.locate(mesh::unitvector(0.0, longitude));
         int x = 0, y = 0;
-        cg::legacyslot(grid, c, x, y);
+        legacyslot(grid, c, x, y);
         if (raw[static_cast<std::size_t>(x)][static_cast<std::size_t>(y)] == 0)
             ridgecells++;
         raw[static_cast<std::size_t>(x)][static_cast<std::size_t>(y)] = 2000;
@@ -266,7 +267,7 @@ TEST(TerrainCubeCoast, ImportedMountainsOnTheCube)
             ASSERT_GE(n, 0);
         }
         int x = 0, y = 0;
-        cg::legacyslot(grid, c, x, y);
+        legacyslot(grid, c, x, y);
         EXPECT_TRUE(okmountains[static_cast<std::size_t>(x)][static_cast<std::size_t>(y)]);
     }
     EXPECT_GT(mountains, 0);

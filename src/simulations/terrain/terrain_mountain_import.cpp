@@ -11,13 +11,16 @@
 #include "core/classes.hpp"
 #include "world/functions.hpp"
 #include "world/planet.hpp"
+#include "core/deterministic_random.hpp"
+#include "core/grid_shapes.hpp"
 #include "simulations/terrain/terrain_coasts.hpp"
+#include "simulations/terrain/terrain_elevation.hpp"
 
 using namespace std;
 using mesh::CellId;
 
 // createmountainsfromraw on the cell grid (T8 W2-T2): the raw ridges read from their legacy slots
-// (terrain::coastgrid::legacyslot), the ridge clean-ups on the neighbour table, the distances
+// (legacyslot, core/grid_shapes.hpp), the ridge clean-ups on the neighbour table, the distances
 // from the central peaks within the legacy pixels' km, the variation from sphere noise.
 
 namespace
@@ -50,14 +53,14 @@ void spheremountainsfromraw(planet& world, vector<vector<int>>& rawmountainsslot
 {
     const mesh::CellGrid& grid = world.grid();
     const size_t count = grid.cellcount();
-    const double pixelkm = cg::legacypixelkm(world);
+    const double pixelkm = terrain::legacycellkm(world);
     int maxelev = world.maxelevation();
 
     vector<int> rawmountains(count, 0);
     for (CellId c = 0; c < count; c++)
     {
         int x = 0, y = 0;
-        cg::legacyslot(grid, c, x, y);
+        legacyslot(grid, c, x, y);
         rawmountains[c] = rawmountainsslots[static_cast<size_t>(x)][static_cast<size_t>(y)];
     }
 
@@ -68,12 +71,12 @@ void spheremountainsfromraw(planet& world, vector<vector<int>>& rawmountainsslot
     vector<int> mountainridges(count, 0);
     vector<int> mountainheights(count, 0);
 
-    const vector<int> heightsfractal = cg::spherefractal(world, 0x6d0e0001, cg::finenoise(), maxelev); // This will vary the heights of the peaks in the subsidiary ridges.
-    const vector<int> radiusfractal = cg::spherefractal(world, 0x6d0e0002, cg::grain16noise(), maxelev); // This will vary the effective radius of each mountain point.
+    const vector<float> heightsfractal = terrain::spherefractal(world, deterministiccontextseed(world.seed(), 0x6d0e0001), cg::finefractal(), (float)maxelev); // This will vary the heights of the peaks in the subsidiary ridges.
+    const vector<float> radiusfractal = terrain::spherefractal(world, deterministiccontextseed(world.seed(), 0x6d0e0002), terrain::canyonmaskfractal(), (float)maxelev); // This will vary the effective radius of each mountain point (grain 16, valuemod 0.2 to 3-6: the canyon mask's set).
 
     float maxradius = 6; // The bigger this is, the wider the mountain ranges will be (pixels).
 
-    const vector<CellId> order = cg::columnorder(grid);
+    const vector<CellId> order = columnmajorcells(grid);
     auto nb = [&](CellId c, int slot) { return grid.neighbour(c, slot); };
     auto raw = [&](std::int32_t n) { return n >= 0 ? rawmountains[n] : 0; };
     auto clear = [&](std::int32_t n) { if (n >= 0) rawmountains[n] = 0; };
@@ -324,7 +327,7 @@ void spheremountainsfromraw(planet& world, vector<vector<int>>& rawmountainsslot
         const mesh::Vec3 p = grid.centre(c);
         const mesh::TangentFrame frame = mesh::tangentframe(p, grid.radius_m());
 
-        for (const CellId n : cg::cellswithinkm(world, p, sqrt(maxradius * maxradius + maxradius) * pixelkm))
+        for (const CellId n : terrain::cellswithinkm(world, c, sqrt(maxradius * maxradius + maxradius) * pixelkm))
         {
             double east = 0.0, north = 0.0;
             cg::totangent(frame, grid.centre(n), east, north);
@@ -367,7 +370,7 @@ void spheremountainsfromraw(planet& world, vector<vector<int>>& rawmountainsslot
         if (thismountaindist < maxradius - 2.0f)
             thismountaindist = thismountaindist * 0.8f;
 
-        float distmult = (float)radiusfractal[c];
+        float distmult = (float)(int)radiusfractal[c];
         distmult = distmult * heightmult2;
 
         if (distmult < 0.95f)
@@ -378,7 +381,7 @@ void spheremountainsfromraw(planet& world, vector<vector<int>>& rawmountainsslot
 
         thisheight = thisheight * thismountaindist * heightmult;
 
-        float thisheightmult = (float)heightsfractal[c]; // This is to vary it using the fractal
+        float thisheightmult = (float)(int)heightsfractal[c]; // This is to vary it using the fractal
         thisheightmult = thisheightmult * heightmult2;
 
         if (thisheightmult < 0.95f)
@@ -459,7 +462,7 @@ void spheremountainsfromraw(planet& world, vector<vector<int>>& rawmountainsslot
             world.setmountainheight(c, static_cast<float>(mountainheights[c]));
 
             int x = 0, y = 0;
-            cg::legacyslot(grid, c, x, y);
+            legacyslot(grid, c, x, y);
             OKmountains[static_cast<size_t>(x)][static_cast<size_t>(y)] = 1; // Mark them as user-added, so we won't tinker with their heights later.
         }
     }

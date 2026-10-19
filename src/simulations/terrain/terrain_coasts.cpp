@@ -15,10 +15,11 @@
 #include "core/classes.hpp"
 #include "core/deterministic_random.hpp"
 #include "core/mesh/mesh_geometry.hpp"
-#include "core/parallel_rows.hpp"
-#include "simulations/landscape/spherical_noise.hpp"
+#include "core/grid_shapes.hpp"
 #include "simulations/terrain/coast_queries.hpp"
+#include "simulations/terrain/terrain_elevation.hpp"
 #include "simulations/terrain/terrain_parameters.hpp"
+#include "simulations/terrain/terrain_volcanoes.hpp"
 #include "world/functions.hpp"
 #include "world/planet.hpp"
 
@@ -27,34 +28,6 @@ using namespace terrain::coastgrid;
 using mesh::CellId;
 
 // The cell-grid helpers (terrain_coasts.hpp).
-
-vector<CellId> terrain::coastgrid::columnorder(const mesh::CellGrid& grid)
-{
-    vector<CellId> cells;
-    cells.reserve(grid.cellcount());
-    if (grid.kind() == mesh::GridKind::latlon && !grid.issubgrid())
-    {
-        const CellId columns = static_cast<CellId>(grid.columns());
-        const CellId rows = static_cast<CellId>(grid.rows());
-        for (CellId x = 0; x < columns; x++)
-            for (CellId y = 0; y < rows; y++)
-                cells.push_back(y * columns + x);
-    }
-    else if (grid.kind() == mesh::GridKind::cube && !grid.issubgrid())
-    {
-        const CellId n = static_cast<CellId>(grid.facecells());
-        for (CellId face = 0; face < 6; face++)
-            for (CellId i = 0; i < n; i++)
-                for (CellId j = 0; j < n; j++)
-                    cells.push_back(face * n * n + j * n + i);
-    }
-    else
-    {
-        for (CellId c = 0; c < grid.cellcount(); c++)
-            cells.push_back(c);
-    }
-    return cells;
-}
 
 std::int32_t terrain::coastgrid::offset(const mesh::CellGrid& grid, CellId c, int dx, int dy, bool clamped)
 {
@@ -110,50 +83,6 @@ bool terrain::coastgrid::coast(const planet& world, CellId c)
     return world.sea(c) == 1 && borders(world, c, false);
 }
 
-void terrain::coastgrid::legacyslot(const mesh::CellGrid& grid, CellId c, int& x, int& y)
-{
-    if (grid.kind() == mesh::GridKind::latlon)
-    {
-        x = grid.column(c);
-        y = grid.row(c);
-        return;
-    }
-    x = static_cast<int>(c % ARRAYWIDTH);
-    y = static_cast<int>(c / ARRAYWIDTH);
-}
-
-double terrain::coastgrid::legacypixelkm(const planet& world)
-{
-    const double columns = static_cast<double>(std::max(1, tuning::terrain::sphere_noise_coast::legacyColumns));
-    return 2.0 * 3.14159265358979323846 * world.grid().radius_m() / 1000.0 / columns;
-}
-
-vector<CellId> terrain::coastgrid::cellswithinkm(const planet& world, const mesh::Vec3& p, double radius_km)
-{
-    const mesh::CellGrid& grid = world.grid();
-    vector<CellId> cells = mesh::cellswithin(grid, p, std::max(0.0, radius_km) * 1000.0);
-    if (cells.empty())
-    {
-        const CellId c = grid.locate(p);
-        if (c != mesh::nocell)
-            cells.push_back(c);
-    }
-    return cells;
-}
-
-double terrain::coastgrid::distancekm(const planet& world, const mesh::Vec3& p, const mesh::Vec3& q)
-{
-    return mesh::greatcircle_m(p, q, world.grid().radius_m()) / 1000.0;
-}
-
-mesh::Vec3 terrain::coastgrid::movedpoint(const planet& world, CellId c, double east_km, double north_km)
-{
-    const mesh::CellGrid& grid = world.grid();
-    if (east_km == 0.0 && north_km == 0.0)
-        return grid.centre(c);
-    return mesh::fromtangent(mesh::tangentframe(grid.centre(c), grid.radius_m()), east_km, north_km);
-}
-
 double terrain::coastgrid::uniformdraw()
 {
     const double high = static_cast<double>(random(0, 32767));
@@ -161,11 +90,22 @@ double terrain::coastgrid::uniformdraw()
     return (high * 32768.0 + low) / 1073741824.0;
 }
 
-mesh::Vec3 terrain::coastgrid::randompoint()
+terrain::SphereFractal terrain::coastgrid::finefractal()
 {
-    const double u = uniformdraw();
-    const double v = uniformdraw();
-    return mesh::uniformpoint(u, v);
+    namespace sc = tuning::terrain::sphere_noise_coast;
+    return { sc::fineWavelengthKm, sc::finePersistence, sc::fineMean, sc::fineDeviation };
+}
+
+terrain::SphereFractal terrain::coastgrid::trenchfractal()
+{
+    namespace sn = tuning::terrain::sphere_noise;
+    return { sn::warpVaryWavelengthKm, sn::warpVaryPersistence, sn::warpVaryMean, sn::warpVaryDeviation };
+}
+
+terrain::SphereFractal terrain::coastgrid::ridgeanglefractal()
+{
+    namespace sn = tuning::terrain::sphere_noise;
+    return { sn::warpVaryWavelengthKm, sn::warpVaryPersistence, 0.5, tuning::terrain::sphere_noise_coast::ridgeAngleDeviation };
 }
 
 double terrain::coastgrid::cellchance(const planet& world, CellId c, double perpixel)
@@ -174,7 +114,7 @@ double terrain::coastgrid::cellchance(const planet& world, CellId c, double perp
         return 1.0;
     if (perpixel <= 0.0)
         return 0.0;
-    const double pixel_m = legacypixelkm(world) * 1000.0;
+    const double pixel_m = terrain::legacycellkm(world) * 1000.0;
     const double pixels = world.grid().area_m2(c) / (pixel_m * pixel_m);
     return 1.0 - std::pow(1.0 - perpixel, pixels);
 }
@@ -182,7 +122,7 @@ double terrain::coastgrid::cellchance(const planet& world, CellId c, double perp
 vector<CellId> terrain::coastgrid::stamptemplate(const planet& world, const mesh::Vec3& p, const boolshapetemplate& shape, bool mirroreast, bool mirrorsouth)
 {
     const mesh::CellGrid& grid = world.grid();
-    const double pixelkm = legacypixelkm(world);
+    const double pixelkm = terrain::legacycellkm(world);
     const mesh::TangentFrame frame = mesh::tangentframe(p, grid.radius_m());
     const int imwidth = shape.xsize();
     const int imheight = shape.ysize();
@@ -208,144 +148,12 @@ vector<CellId> terrain::coastgrid::stamptemplate(const planet& world, const mesh
     return cells;
 }
 
-bool terrain::coastgrid::getoceanridge(const planet& world, CellId c, int slot)
-{
-    return slot >= 1 && slot <= 8 && (world.oceanridges(c) & (1 << (slot - 1))) != 0;
-}
-
-namespace
-{
-// Removes the bit of slot at c and the reverse bit at its neighbour; get/set read and write the code.
-template <typename Get, typename Set, typename Emptied>
-void deleteridgecode(const mesh::CellGrid& grid, CellId c, int slot, Get&& get, Set&& set, Emptied&& emptied)
-{
-    if (slot < 1 || slot > 8)
-        return;
-    const int code = 1 << (slot - 1);
-    int current = get(c);
-    if ((current & code) == 0) // If there isn't a ridge going this way
-        return;
-    current -= code;
-    set(c, current);
-    if (current == 0)
-        emptied(c);
-
-    // Now remove one going the other way.
-    const std::int32_t n = grid.neighbour(c, slot);
-    if (n < 0)
-        return;
-    const int back = 1 << (grid.reverse(c, slot) - 1);
-    int other = get(static_cast<CellId>(n));
-    if ((other & back) == 0)
-        return;
-    other -= back;
-    set(static_cast<CellId>(n), other);
-    if (other == 0)
-        emptied(static_cast<CellId>(n));
-}
-}
-
-void terrain::coastgrid::deleteridge(planet& world, CellId c, int slot)
-{
-    deleteridgecode(world.grid(), c, slot,
-        [&](CellId cell) { return world.mountainridge(cell); },
-        [&](CellId cell, int value) { world.setmountainridge(cell, value); },
-        [&](CellId cell) { world.setmountainheight(cell, 0); });
-}
-
-void terrain::coastgrid::deleteoceanridge(planet& world, CellId c, int slot)
-{
-    deleteridgecode(world.grid(), c, slot,
-        [&](CellId cell) { return world.oceanridges(cell); },
-        [&](CellId cell, int value) { world.setoceanridges(cell, value); },
-        [](CellId) {});
-}
-
-namespace sn = tuning::terrain::sphere_noise_coast;
-
-terrain::coastgrid::LegacyNoise terrain::coastgrid::grain8noise()
-{
-    return { sn::grain8WavelengthKm, sn::grain8Persistence, sn::grain8Mean, sn::grain8Deviation };
-}
-
-terrain::coastgrid::LegacyNoise terrain::coastgrid::grain16noise()
-{
-    return { sn::grain16WavelengthKm, sn::grain16Persistence, sn::grain16Mean, sn::grain16Deviation };
-}
-
-terrain::coastgrid::LegacyNoise terrain::coastgrid::grain4noise()
-{
-    return { sn::grain4WavelengthKm, sn::grain4Persistence, sn::grain4Mean, sn::grain4Deviation };
-}
-
-terrain::coastgrid::LegacyNoise terrain::coastgrid::finenoise()
-{
-    return { sn::fineWavelengthKm, sn::finePersistence, sn::fineMean, sn::fineDeviation };
-}
-
-namespace
-{
-landscape::FractalNoise noisesettings(const planet& world, int salt, const terrain::coastgrid::LegacyNoise& legacy)
-{
-    landscape::FractalNoise noise;
-    noise.seed = deterministiccontextseed(world.seed(), salt);
-    noise.radius_km = world.grid().radius_m() / 1000.0;
-    noise.wavelength_km = std::max(1.0, legacy.wavelength_km);
-    noise.persistence = legacy.persistence;
-    // Octaves from the first wavelength down to sphere_noise_coast.shortest_km.
-    const double shortest = std::max(1.0, static_cast<double>(sn::shortestKm));
-    int octaves = 1;
-    while (noise.wavelength_km / std::ldexp(1.0, octaves) >= shortest && octaves < 24)
-        octaves++;
-    noise.octaves = octaves;
-    return noise;
-}
-}
-
-terrain::coastgrid::SphereNoise::SphereNoise(const planet& world, int salt, const LegacyNoise& noise)
-    : legacy_(noise), field_(noisesettings(world, salt, noise))
-{
-    normalisation_ = field_.normalisation() > 0.0 ? field_.normalisation() : 1.0;
-}
-
-int terrain::coastgrid::SphereNoise::value(const mesh::Vec3& p, int maximum) const
-{
-    const double share = std::clamp(legacy_.mean + legacy_.deviation * z(p), 0.0, 1.0);
-    return std::max(1, static_cast<int>(share * static_cast<double>(maximum)));
-}
-
 void terrain::coastgrid::totangent(const mesh::TangentFrame& frame, const mesh::Vec3& p, double& east_km, double& north_km)
 {
     const double along = mesh::dot(p, frame.origin);
     const double scale = along > 1e-9 ? 1.0 / along : 1e9;
     east_km = mesh::dot(p, frame.east) * scale * frame.radius_m / 1000.0;
     north_km = mesh::dot(p, frame.north) * scale * frame.radius_m / 1000.0;
-}
-
-vector<double> terrain::coastgrid::spherenoise(const planet& world, int salt, const LegacyNoise& legacy)
-{
-    const mesh::CellGrid& grid = world.grid();
-    const SphereNoise noise(world, salt, legacy);
-
-    vector<double> values(grid.cellcount(), 0.0);
-    parallelforrows(0, static_cast<int>(grid.cellcount()) - 1, [&](int first, int last)
-    {
-        for (int c = first; c <= last; c++)
-            values[static_cast<size_t>(c)] = noise.z(grid.centre(static_cast<CellId>(c)));
-    });
-    return values;
-}
-
-vector<int> terrain::coastgrid::spherefractal(const planet& world, int salt, const LegacyNoise& legacy, int maximum)
-{
-    const vector<double> z = spherenoise(world, salt, legacy);
-    vector<int> values(z.size(), 1);
-    for (size_t c = 0; c < z.size(); c++)
-    {
-        const double share = std::clamp(legacy.mean + legacy.deviation * z[c], 0.0, 1.0);
-        values[c] = std::max(1, static_cast<int>(share * static_cast<double>(maximum)));
-    }
-    return values;
 }
 
 namespace
@@ -368,21 +176,13 @@ bool surfacebelowseaat(const planet& world, std::int32_t n)
     return n < 0 || world.surfacebelowsea(static_cast<CellId>(n));
 }
 
-// The legacy cell-size in km: the planet's radius x pi / rows (rows: the lat-lon export's on the cube).
-float cellsizekm(const planet& world)
-{
-    const mesh::CellGrid& grid = world.grid();
-    const int rows = grid.kind() == mesh::GridKind::latlon ? grid.rows() : 2 * grid.facecells();
-    return world.radius() / 1000.0f * 3.14159265358979f / static_cast<float>(rows);
-}
-
 // The sizes (cell counts) of the 4-connected components of sea (base at or below sea level); 0 on land.
 vector<int> seaareas(planet& world)
 {
     const mesh::CellGrid& grid = world.grid();
     vector<int> area(grid.cellcount(), 0);
     vector<char> checked(grid.cellcount(), 0);
-    vector<CellId> order = columnorder(grid);
+    vector<CellId> order = columnmajorcells(grid);
     vector<CellId> component;
 
     for (auto it = order.rbegin(); it != order.rend(); ++it)
@@ -431,7 +231,7 @@ void removesmallseas(planet& world, int minseasize, int level)
 
     // Now turn all the points whose area is too small into land.
 
-    for (const CellId c : columnorder(grid))
+    for (const CellId c : columnmajorcells(grid))
     {
         if (world.basebelowsea(c) && area[c] < minseasize)
             world.setnomfloat(c, static_cast<float>(level));
@@ -490,7 +290,7 @@ void removestraights(planet& world)
         }
     };
 
-    for (const CellId c : columnorder(grid)) // First do vertical/horizontal lines.
+    for (const CellId c : columnmajorcells(grid)) // First do vertical/horizontal lines.
     {
         if (!world.surfacebelowsea(c))
             continue;
@@ -539,7 +339,7 @@ void removestraights(planet& world)
             world.setnomfloat(static_cast<CellId>(target), world.nomfloat(static_cast<CellId>(source)));
     };
 
-    for (const CellId c : columnorder(grid)) // Now do diagonals.
+    for (const CellId c : columnmajorcells(grid)) // Now do diagonals.
     {
         if (!hasnorthandsouth(grid, c) || world.surfacebelowsea(c))
             continue;
@@ -651,7 +451,7 @@ void widenchannels(planet& world)
         if (n >= 0)
             world.setnomfloat(static_cast<CellId>(n), lowered);
     };
-    const vector<CellId> order = columnorder(grid);
+    const vector<CellId> order = columnmajorcells(grid);
 
     auto land = [&](std::int32_t n) { return n >= 0 && !world.sea(static_cast<CellId>(n)); }; // a cell, and not sea
 
@@ -691,13 +491,13 @@ void loweroceans(planet& world)
     const mesh::CellGrid& grid = world.grid();
     int sealevel = world.sealevel();
 
-    for (const CellId c : columnorder(grid))
+    for (const CellId c : columnmajorcells(grid))
     {
         if (world.sea(c) && world.nomfloat(c) > static_cast<float>(sealevel - 170))
         {
             bool nearland = 0;
 
-            for (const CellId n : cellswithinkm(world, grid.centre(c), 2.5 * legacypixelkm(world)))
+            for (const CellId n : terrain::cellswithinkm(world, c, 2.5 * terrain::legacycellkm(world)))
             {
                 if (world.sea(n) == 0)
                 {
@@ -722,7 +522,7 @@ void normalisecoasts(planet& world, int landheight, int seadepth, int severity)
 
     float depth, elev;
 
-    const vector<CellId> order = columnorder(grid);
+    const vector<CellId> order = columnmajorcells(grid);
 
     for (const CellId c : order)
     {
@@ -764,36 +564,29 @@ void normalisecoasts(planet& world, int landheight, int seadepth, int severity)
         });
     }
 
-    // The reach of the smoothing and its square are set in km (tuning::terrain::ocean_floor);
-    // in cells they are the km over the cell size, and under half a cell there is none.
-    const float cellkm = cellsizekm(world);
-    const int reach = cellkm > 0.0f ? static_cast<int>(lroundf(tuning::terrain::ocean_floor::coastSmoothingRadiusKm / cellkm)) : 0;
-
-    if (reach < 1)
-        return;
+    // The sea cells within the reach (km, tuning::terrain::ocean_floor) of a coastal sea cell are
+    // each averaged over the sea cells within the reach of themselves.
+    const double reach_km = tuning::terrain::ocean_floor::coastSmoothingRadiusKm;
 
     vector<char> done(count, 0);
 
-    int amount = reach;
-    int amount2 = reach;
-
     auto smootharound = [&](CellId c)
     {
-        box(grid, c, amount, [&](CellId kk, int, int)
+        for (const CellId kk : terrain::cellswithinkm(world, c, reach_km))
         {
             if (done[kk] == 0 && world.sea(kk) == 1 && coast(world, kk) == 0)
             {
                 float total = 0.0f;
                 int crount = 0;
 
-                box(grid, kk, amount2, [&](CellId mm, int, int)
+                for (const CellId mm : terrain::cellswithinkm(world, kk, reach_km))
                 {
                     if (world.sea(mm) == 1)
                     {
                         crount++;
                         total = total + world.nomfloat(mm);
                     }
-                });
+                }
 
                 if (total != 0)
                 {
@@ -804,7 +597,7 @@ void normalisecoasts(planet& world, int landheight, int seadepth, int severity)
                     world.setnoshade(kk, 1);
                 }
             }
-        });
+        }
     };
 
     for (const CellId c : order)
@@ -824,76 +617,6 @@ void normalisecoasts(planet& world, int landheight, int seadepth, int severity)
     }
 }
 
-namespace
-{
-// terrain::detail::makemountainisland on a cube cell (its (x, y) form serves lat-lon): the
-// same draws and stamps, the neighbour by slot and the ridge stored at both ends.
-void makemountainislandcell(planet& world, CellId c, float peakheight)
-{
-    const mesh::CellGrid& grid = world.grid();
-    int sealevel = world.sealevel();
-
-    int iterations = random(1, 3);
-
-    for (int n = 1; n <= iterations; n++)
-    {
-        int landheight = sealevel + random(5, 50);
-
-        int dx = 0;
-        int dy = 0;
-
-        do
-        {
-            dx = -2 + random(1, 3);
-            dy = -2 + random(1, 3);
-
-        } while (dx == 0 && dy == 0);
-
-        static const int slots[3][3] = { { 8, 1, 2 }, { 7, 0, 3 }, { 6, 5, 4 } }; // [dy + 1][dx + 1]
-        const int slot = slots[dy + 1][dx + 1];
-        const std::int32_t next = grid.neighbour(c, slot);
-
-        if (next < 0)
-            return;
-
-        const CellId cc = static_cast<CellId>(next);
-
-        if (world.mountainheightfloat(c) < peakheight)
-            world.setmountainheight(c, peakheight);
-
-        if (world.mountainheightfloat(cc) < peakheight)
-            world.setmountainheight(cc, peakheight);
-
-        box(grid, c, 1, [&](CellId m, int, int) { world.setmountainisland(m, 1); }); // Mark it all out as mountain islands!
-        box(grid, cc, 1, [&](CellId m, int, int) { world.setmountainisland(m, 1); });
-
-        if (world.nomfloat(c) < landheight)
-            world.setnomfloat(c, static_cast<float>(landheight));
-
-        if (world.nomfloat(cc) < landheight)
-            world.setnomfloat(cc, static_cast<float>(landheight));
-
-        // If there isn't a ridge between them, make one.
-
-        const int code = 1 << (slot - 1);
-
-        if ((world.mountainridge(c) & code) == 0)
-        {
-            world.setmountainridge(c, world.mountainridge(c) + code);
-
-            const int back = 1 << (grid.reverse(c, slot) - 1);
-
-            if ((world.mountainridge(cc) & back) == 0)
-                world.setmountainridge(cc, world.mountainridge(cc) + back);
-        }
-
-        c = cc;
-
-        peakheight = peakheight + randomsign(random(static_cast<int>(peakheight) / 4, static_cast<int>(peakheight) / 2));
-    }
-}
-}
-
 // This notes down all the very small islands on the map.
 
 void checkislands(planet& world)
@@ -901,7 +624,7 @@ void checkislands(planet& world)
     const mesh::CellGrid& grid = world.grid();
     int sealevel = world.sealevel();
 
-    for (const CellId c : columnorder(grid))
+    for (const CellId c : columnmajorcells(grid))
     {
         if (!hasnorthandsouth(grid, c))
             continue;
@@ -947,10 +670,7 @@ void checkislands(planet& world)
                 {
                     volcano = totalheight - static_cast<float>(sealevel);
 
-                    if (grid.kind() == mesh::GridKind::latlon)
-                        terrain::detail::makemountainisland(world, grid.column(c), grid.row(c), volcano);
-                    else
-                        makemountainislandcell(world, c, volcano);
+                    terrain::makemountainisland(world, c, volcano);
 
                     if (extinct == 1)
                         volcano = 0 - volcano;
@@ -970,7 +690,7 @@ void extendnoshade(planet& world)
 
     vector<char> extra(grid.cellcount(), 0); // This is to mark all cells touching the no-shade ones as themselves no-shade.
 
-    for (const CellId c : columnorder(grid))
+    for (const CellId c : columnmajorcells(grid))
     {
         if (world.noshade(c) == 1)
         {

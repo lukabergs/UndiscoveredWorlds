@@ -16,8 +16,8 @@ using S = GenerationStageId;
 // Kinds and notes describe the current stages. Access lists and the stochastic
 // flag come from world_process_access.inc (measured, see world_processes.hpp);
 // the flags set here cover generators the analysis cannot see (the tectonics
-// engine's own stream, society and mineral streams). No process is cube-ready
-// yet (cubeready false): each W2 port of docs/architecture/sphere-mesh.md sets it.
+// engine's own stream, society and mineral streams). A process is cube-ready
+// (cubeready) when its W2 port of docs/architecture/sphere-mesh.md lists it below.
 std::vector<WorldProcessDefinition> buildprocesses()
 {
     std::vector<WorldProcessDefinition> processes =
@@ -85,8 +85,19 @@ std::vector<WorldProcessDefinition> buildprocesses()
           "Physical resource layers, gold placers and optional society. In an eroded world it applies the erosion run's exhumation to the deposits, so it runs once per world." },
     };
 
+    // The processes ported to the cell grid (sphere-mesh.md section 4), by W2 step.
+    const std::vector<GenerationStageId> cubeready =
+    {
+        // W2-T2: coasts, shelves and arid landforms.
+        S::ocean_cleanup, S::coastline_refinement, S::coastline_adjustment, S::island_check, S::arid_features,
+    };
+
     for (WorldProcessDefinition& process : processes)
+    {
         applymeasuredaccess(process);
+        if (std::find(cubeready.begin(), cubeready.end(), process.stage) != cubeready.end())
+            process.cubeready = true;
+    }
     return processes;
 }
 }

@@ -13,7 +13,11 @@
 #include "core/mesh/mesh_geometry.hpp"
 #include "world/functions.hpp"
 #include "world/planet.hpp"
+#include "core/deterministic_random.hpp"
+#include "core/grid_shapes.hpp"
 #include "simulations/terrain/terrain_coasts.hpp"
+#include "simulations/terrain/terrain_elevation.hpp"
+#include "simulations/terrain/terrain_ridges.hpp"
 #include "simulations/terrain/terrain_parameters.hpp"
 
 using namespace std;
@@ -26,7 +30,7 @@ using mesh::CellId;
 // legacy Catmull-Rom curves in the tangent plane at their middle, joined by great-circle arcs;
 // circles are the cells within the radius; fault seeds are drawn by area; the fault's area is
 // the quadrilateral in the tangent plane at its middle. Ridge angles are relative to each cell's
-// local east and north (sphere-mesh.md section 5).
+// local east and north (sphere-mesh.md section 5); every chance is per legacy pixel area.
 
 namespace
 {
@@ -67,7 +71,7 @@ mesh::Vec3 fromlegacyplane(const mesh::TangentFrame& frame, twofloats point, dou
 void spheredrawoceanridgeline(const planet& world, const mesh::Vec3& from, const mesh::Vec3& to, vector<int>& array, int value, int keyfrom, int keyto)
 {
     const mesh::CellGrid& grid = world.grid();
-    const double pixelkm = cg::legacypixelkm(world);
+    const double pixelkm = terrain::legacycellkm(world);
     const std::uint64_t lineseed = deterministiccontextseed(world.seed(), 0x51a9e245);
 
     const mesh::Vec3 sum = from + to;
@@ -179,7 +183,7 @@ bool insidequad(const twofloats quad[4], twofloats p)
 void spherecreateoceanfault(planet& world, CellId mid, int mindist, int maxdist, vector<int>& ridgesmap, int masksize)
 {
     const mesh::CellGrid& grid = world.grid();
-    const double pixelkm = cg::legacypixelkm(world);
+    const double pixelkm = terrain::legacycellkm(world);
     const std::uint64_t faultseed = deterministiccontextseed(world.seed(), 0x7f4a7c15);
 
     int minshiftdist = 2;
@@ -264,7 +268,7 @@ void spherecreateoceanfault(planet& world, CellId mid, int mindist, int maxdist,
 
     vector<CellId> mask;
     vector<char> inmask(grid.cellcount(), 0);
-    for (const CellId c : cg::cellswithinkm(world, grid.centre(mid), (masksize / 2 + 1) * pixelkm))
+    for (const CellId c : terrain::cellswithinkm(world, mid, (masksize / 2 + 1) * pixelkm))
     {
         if (mesh::dot(grid.centre(c), frame.origin) <= 0.0)
             continue;
@@ -286,7 +290,7 @@ void spherecreateoceanfault(planet& world, CellId mid, int mindist, int maxdist,
         {
             const std::int32_t n = grid.neighbour(c, slot);
             if (n < 0 || inmask[n] == 0)
-                cg::deleteoceanridge(world, c, slot);
+                terrain::deleteoceanridge(world, c, slot);
         }
     }
 
@@ -333,9 +337,7 @@ void spherecreateoceanfault(planet& world, CellId mid, int mindist, int maxdist,
 
     for (size_t k = 0; k < count; k++)
     {
-        const CellId target = grid.locate(cg::movedpoint(world, mask[k], xshift * pixelkm, -yshift * pixelkm));
-        if (target == mesh::nocell)
-            continue;
+        const CellId target = terrain::movedcell(world, mask[k], xshift * pixelkm, -yshift * pixelkm);
         ridgesmap[target] = oldridgesmap[k];
         world.setoceanrifts(target, oldoceanrifts[k]);
         world.setoceanridges(target, oldoceanridges[k]);
@@ -349,12 +351,12 @@ void sphereoceanridges(planet& world, worldgrid<bool>& shelves)
 {
     const mesh::CellGrid& grid = world.grid();
     const size_t count = grid.cellcount();
-    const double pixelkm = cg::legacypixelkm(world);
+    const double pixelkm = terrain::legacycellkm(world);
     int maxelev = world.maxelevation();
     const std::uint64_t ridgeseed = deterministiccontextseed(world.seed(), 0x0cea6e51);
     fast_srand(deterministicfastseed(ridgeseed));
 
-    const vector<CellId> order = cg::columnorder(grid);
+    const vector<CellId> order = columnmajorcells(grid);
 
     vector<int> nearestshelfdist(count, 0);
     vector<std::int32_t> nearestshelf(count, -1);
@@ -426,10 +428,10 @@ void sphereoceanridges(planet& world, worldgrid<bool>& shelves)
 
     const int gridsize = max(1, tuning::terrain::oceanridges::gridSize);
     const int halfgrid = gridsize / 2 - 1;
-    const int coarsecells = max(1, static_cast<int>(lround(tuning::terrain::sphere_noise_coast::legacyColumns / (4.0 * gridsize))));
+    const int coarsecells = max(1, static_cast<int>(lround(tuning::terrain::sphere_noise::legacyColumns / (4.0 * gridsize))));
     const shared_ptr<const mesh::CellGrid> coarse = mesh::makecubegrid(coarsecells, grid.radius_m());
     const size_t points = coarse->cellcount();
-    const vector<CellId> coarseorder = cg::columnorder(*coarse);
+    const vector<CellId> coarseorder = columnmajorcells(*coarse);
 
     vector<int> gridvalue(points, 0);
 
@@ -437,7 +439,7 @@ void sphereoceanridges(planet& world, worldgrid<bool>& shelves)
     {
         const mesh::Vec3 p = coarse->centre(k);
         double best = 1e30;
-        for (const CellId c : cg::cellswithinkm(world, p, (halfgrid + 0.5) * pixelkm))
+        for (const CellId c : terrain::cellswithinkm(world, grid.locate(p), (halfgrid + 0.5) * pixelkm))
         {
             if (boundaries[c] == 0)
                 continue;
@@ -485,8 +487,9 @@ void sphereoceanridges(planet& world, worldgrid<bool>& shelves)
     // Each point's location, its distance to the closest shelf, and the points north, northeast,
     // east and southeast of it; then each point shifted by a sphere noise and a random amount.
 
-    const cg::SphereNoise shiftx(world, 0x0cea0001, cg::grain8noise());
-    const cg::SphereNoise shifty(world, 0x0cea0002, cg::grain8noise());
+    // The shift fields at the cells under the points (grain 8: the terrain fractal's set).
+    const vector<float> shiftx = terrain::spherefractal(world, deterministiccontextseed(world.seed(), 0x0cea0001), terrain::terrainfractal(), (float)maxelev);
+    const vector<float> shifty = terrain::spherefractal(world, deterministiccontextseed(world.seed(), 0x0cea0002), terrain::terrainfractal(), (float)maxelev);
 
     int maxshift = tuning::terrain::oceanridges::maxShift;
     int maxadditionalshift = tuning::terrain::oceanridges::maxAdditionalShift;
@@ -501,8 +504,9 @@ void sphereoceanridges(planet& world, worldgrid<bool>& shelves)
         const CellId k = pointcell[static_cast<size_t>(thispoint)];
         const mesh::Vec3 p = coarse->centre(k);
 
-        float xshift = (float)shiftx.value(p, maxelev) / div - (float)maxshift;
-        float yshift = (float)shifty.value(p, maxelev) / div - (float)maxshift;
+        const CellId under = grid.locate(p);
+        float xshift = (float)(int)shiftx[under] / div - (float)maxshift;
+        float yshift = (float)(int)shifty[under] / div - (float)maxshift;
 
         xshift = max(-(float)maxshift, min((float)maxshift, xshift));
         yshift = max(-(float)maxshift, min((float)maxshift, yshift));
@@ -620,9 +624,9 @@ void sphereoceanridges(planet& world, worldgrid<bool>& shelves)
         const mesh::Vec3 p = grid.centre(r);
         const float riftheightdiv = (float)(ridges[r] * heightmult) / 1000.0f;
 
-        for (const CellId n : cg::cellswithinkm(world, p, (firstmaxradius + 0.5) * pixelkm))
+        for (const CellId n : terrain::cellswithinkm(world, r, (firstmaxradius + 0.5) * pixelkm))
         {
-            const int radius = smallestradius(cg::distancekm(world, p, grid.centre(n)) / pixelkm);
+            const int radius = smallestradius(terrain::distancekm(world, r, n) / pixelkm);
             if (radius > firstmaxradius)
                 continue;
             const int mult = firstmaxradius + 1 - radius;
@@ -652,7 +656,9 @@ void sphereoceanridges(planet& world, worldgrid<bool>& shelves)
                 hash ^= static_cast<unsigned int>(c) + 0x9e3779b9u + (hash << 6) + (hash >> 2);
                 hash ^= static_cast<unsigned int>(thisheight) + 0x9e3779b9u + (hash << 6) + (hash >> 2);
 
-                if ((hash % 4000000u) < static_cast<unsigned int>(std::max(1, thisheight / 10)))
+                const double perpixel = static_cast<double>(std::max(1, thisheight / 10)) / 4000000.0;
+
+                if (static_cast<double>(hash % 4000000u) / 4000000.0 < cg::cellchance(world, c, perpixel))
                 {
                     const int minvolcano = std::max(1, thisheight / 4);
                     const int maxvolcano = std::max(minvolcano, (thisheight / 4) * 3);
@@ -675,9 +681,9 @@ void sphereoceanridges(planet& world, worldgrid<bool>& shelves)
         const int ridgeheight = ridges[r] * heightmult;
         const int heightdivs = ridgeheight / maxradius;
 
-        for (const CellId n : cg::cellswithinkm(world, p, (maxradius + 0.5) * pixelkm))
+        for (const CellId n : terrain::cellswithinkm(world, r, (maxradius + 0.5) * pixelkm))
         {
-            const int radius = smallestradius(cg::distancekm(world, p, grid.centre(n)) / pixelkm);
+            const int radius = smallestradius(terrain::distancekm(world, r, n) / pixelkm);
             if (radius > maxradius)
                 continue;
             const int mult = maxradius + 1 - radius;
@@ -708,8 +714,7 @@ void sphereoceanridges(planet& world, worldgrid<bool>& shelves)
     // Now we have to work out the angles of lines crossing the rifts, relative to each cell's
     // east and north, blended with an angle field (the legacy fractal's values wrapped at 360).
 
-    const cg::SphereNoise anglefield(world, 0x0cea0003, cg::grain4noise());
-    const double degreesperdeviation = tuning::terrain::sphere_noise_coast::ridgeAngleDegreesPerDeviation;
+    const vector<float> anglefield = terrain::spherefractal(world, deterministiccontextseed(world.seed(), 0x0cea0003), cg::ridgeanglefractal(), 360.0f);
 
     short dist = tuning::terrain::oceanridges::ridgeAngleSearchDistance;
 
@@ -735,11 +740,7 @@ void sphereoceanridges(planet& world, worldgrid<bool>& shelves)
         while (angle > 360.0f)
             angle = angle - 360.0f;
 
-        double fieldangle = fmod(anglefield.z(grid.centre(c)) * degreesperdeviation, 360.0);
-        if (fieldangle < 0.0)
-            fieldangle += 360.0;
-
-        int angle2 = wrappedaverage((int)angle, (int)fieldangle + 1, 360);
+        int angle2 = wrappedaverage((int)angle, (int)anglefield[c], 360);
 
         while (angle2 > 180)
             angle2 = angle2 - 180;
@@ -756,7 +757,7 @@ void sphereoceanridges(planet& world, worldgrid<bool>& shelves)
         for (int slot = 1; slot <= mesh::slotcount; slot++)
         {
             const std::int32_t n = grid.neighbour(c, slot);
-            if (n >= 0 && ridgedistances[n] == ridgedistances[c] && !cg::getoceanridge(world, c, slot))
+            if (n >= 0 && ridgedistances[n] == ridgedistances[c] && !terrain::getoceanridge(world, c, slot))
                 world.setoceanridges(c, world.oceanridges(c) + (1 << (slot - 1)));
         }
     }
@@ -771,7 +772,7 @@ void sphereoceanridges(planet& world, worldgrid<bool>& shelves)
         short total = 0;
 
         for (int dir = 1; dir <= 8; dir++)
-            if (cg::getoceanridge(world, c, dir))
+            if (terrain::getoceanridge(world, c, dir))
                 total++;
 
         if (total > 2)
@@ -793,8 +794,8 @@ void sphereoceanridges(planet& world, worldgrid<bool>& shelves)
 
                 for (int dir = a; dir != b; dir = dir + step)
                 {
-                    if (cg::getoceanridge(world, c, dir))
-                        cg::deleteoceanridge(world, c, dir);
+                    if (terrain::getoceanridge(world, c, dir))
+                        terrain::deleteoceanridge(world, c, dir);
                 }
             }
         }
@@ -804,13 +805,13 @@ void sphereoceanridges(planet& world, worldgrid<bool>& shelves)
 
     int maxdisplace = tuning::terrain::oceanridges::regionalDisplacement;
 
-    const vector<int> ridgefractal = cg::spherefractal(world, 0x0cea0004, cg::finenoise(), maxelev);
+    const vector<float> ridgefractal = terrain::spherefractal(world, deterministiccontextseed(world.seed(), 0x0cea0004), cg::finefractal(), (float)maxelev);
 
     div = (float)maxelev / ((float)maxdisplace * 2.0f);
 
     for (CellId c = 0; c < count; c++)
     {
-        float amount = (float)ridgefractal[c];
+        float amount = (float)(int)ridgefractal[c];
 
         amount = amount / div;
         amount = amount - (float)maxdisplace;
@@ -843,7 +844,7 @@ void sphereoceanridges(planet& world, worldgrid<bool>& shelves)
             if (c == mesh::nocell || world.sea(c) != 1)
                 continue;
 
-            for (const CellId r : cg::cellswithinkm(world, grid.centre(c), (lookdist + 0.5) * pixelkm))
+            for (const CellId r : terrain::cellswithinkm(world, c, (lookdist + 0.5) * pixelkm))
             {
                 if (world.oceanrifts(r) != 0)
                 {
@@ -885,7 +886,7 @@ void sphereoceantrenches(planet& world, worldgrid<bool>& shelves)
 {
     const mesh::CellGrid& grid = world.grid();
     const size_t count = grid.cellcount();
-    const double pixelkm = cg::legacypixelkm(world);
+    const double pixelkm = terrain::legacycellkm(world);
     int maxelev = world.maxelevation();
 
     int trenchmin = maxelev / 2; // Values in the fractal higher than this will spawn trenches.
@@ -895,17 +896,17 @@ void sphereoceantrenches(planet& world, worldgrid<bool>& shelves)
     int div = max(1, (maxelev - trenchmin) / maxradius);
 
     vector<char> trenchmap(count, 0);
-    const vector<int> fractal = cg::spherefractal(world, 0x7e4c0001, cg::grain4noise(), maxelev);
-    const vector<CellId> order = cg::columnorder(grid);
+    const vector<float> fractal = terrain::spherefractal(world, deterministiccontextseed(world.seed(), 0x7e4c0001), cg::trenchfractal(), (float)maxelev);
+    const vector<CellId> order = columnmajorcells(grid);
 
     for (const CellId c : order)
     {
-        if (shelves[c] == 1 && fractal[c] > trenchmin && sphereshelfedge(world, shelves, c))
+        if (shelves[c] == 1 && (int)fractal[c] > trenchmin && sphereshelfedge(world, shelves, c))
         {
-            int radius = (fractal[c] - trenchmin) / div;
+            int radius = ((int)fractal[c] - trenchmin) / div;
 
             if (radius > 0)
-                for (const CellId n : cg::cellswithinkm(world, grid.centre(c), (radius + 0.5) * pixelkm))
+                for (const CellId n : terrain::cellswithinkm(world, c, (radius + 0.5) * pixelkm))
                     trenchmap[n] = 1;
         }
     }

@@ -13,7 +13,7 @@
 
 #include "core/mesh/cell_grid.hpp"
 #include "core/mesh/mesh_geometry.hpp"
-#include "simulations/landscape/spherical_noise.hpp"
+#include "simulations/terrain/terrain_elevation.hpp"
 
 class planet;
 class boolshapetemplate;
@@ -22,10 +22,10 @@ namespace terrain::coastgrid
 {
 using mesh::CellId;
 
-// The cells in the order of the legacy loops "for x { for y }": on lat-lon column by column,
-// each from north to south; on the cube face by face, each face column by column (i outer, j
-// inner); a subgrid in ascending id order. The order of "for y { for x }" is the id order.
-std::vector<CellId> columnorder(const mesh::CellGrid& grid);
+// The column order, legacy slots, km helpers, positions by area and sphere fractals are the
+// terrain stages' (core/grid_shapes.hpp: columnmajorcells, legacyslot; terrain_elevation.hpp:
+// legacycellkm, cellswithinkm, distancekm, movedcell, randomcellbyarea, spherefractal); the
+// ridge codes are terrain_ridges.hpp's.
 
 // A slot (1..8) turned clockwise by turn eighths.
 inline int turned(int slot, int turn) { return ((slot - 1 + turn) % 8 + 8) % 8 + 1; }
@@ -50,7 +50,8 @@ std::int32_t offset(const mesh::CellGrid& grid, CellId c, int dx, int dy, bool c
 
 // The square box of half-width r around c in the legacy order (dx from -r to r outer, dy from
 // -r to r inner): f(cell, dx, dy) for every offset that stays on the grid. A callback that
-// returns bool stops the walk when it returns false.
+// returns bool stops the walk when it returns false. For neighbour-scale tests (r of 1 or 2
+// cells); distances use cellswithinkm.
 template <typename F>
 void box(const mesh::CellGrid& grid, CellId c, int r, F&& f);
 
@@ -60,29 +61,20 @@ void box(const mesh::CellGrid& grid, CellId c, int r, F&& f);
 bool outline(const planet& world, CellId c);
 bool coast(const planet& world, CellId c);
 
-// The slot [x][y] of a cell in a legacy ARRAYWIDTH x ARRAYHEIGHT array (the vector<vector<>>
-// arguments of functions other modules call): column and row on lat-lon; elsewhere the id folded
-// into rows of ARRAYWIDTH.
-void legacyslot(const mesh::CellGrid& grid, CellId c, int& x, int& y);
-
 // disruptseacoastline on a cell: base elevations above avedepth lowered to it in the disc of
 // the legacy box of half-width size / 2 around centre.
 void disruptseacoastline(planet& world, CellId centre, float avedepth, bool raise, int size);
 
-// Sphere forms of the legacy pixel geometry (tuning::terrain::sphere_noise_coast).
+// The fractals of these functions that the terrain stages do not have
+// (terrain.sphere_noise_coast.*, and terrain.sphere_noise.warp_vary_* for the trenches):
+// the rough short-grain fractals of the imported mountains and the ridge displacement, the
+// trench fractal, and the ridge angle field (a share of 360 degrees).
+terrain::SphereFractal finefractal();
+terrain::SphereFractal trenchfractal();
+terrain::SphereFractal ridgeanglefractal();
 
-// The legacy pixel, 2 pi R / legacy_columns km.
-double legacypixelkm(const planet& world);
-// The cells whose centres lie within radius_km of p, ascending id; at least the cell containing p.
-std::vector<CellId> cellswithinkm(const planet& world, const mesh::Vec3& p, double radius_km);
-// Great-circle distance in km.
-double distancekm(const planet& world, const mesh::Vec3& p, const mesh::Vec3& q);
-// The point east_km and north_km from a cell centre in its tangent plane (gnomonic).
-mesh::Vec3 movedpoint(const planet& world, CellId c, double east_km, double north_km);
 // A uniform number in [0, 1) from two draws of the ambient sequence (random(0, 32767)).
 double uniformdraw();
-// A position drawn by area from the ambient sequence.
-mesh::Vec3 randompoint();
 // The chance that a cell sees at least one event of a chance per legacy pixel: 1 - (1 - p)^(A / pixel area).
 double cellchance(const planet& world, CellId c, double perpixel);
 
@@ -91,44 +83,9 @@ double cellchance(const planet& world, CellId c, double perpixel);
 // in the legacy loop order (i outer, j inner), each cell once.
 std::vector<CellId> stamptemplate(const planet& world, const mesh::Vec3& p, const boolshapetemplate& shape, bool mirroreast, bool mirrorsouth);
 
-// Ridge codes on a cell (one bit per neighbour slot, stored at both ends: at the neighbour in
-// its reverse slot). deleteridge also clears the mountain height of a cell left without ridges.
-bool getoceanridge(const planet& world, CellId c, int slot);
-void deleteridge(planet& world, CellId c, int slot);
-void deleteoceanridge(planet& world, CellId c, int slot);
-
-// A legacy createfractal on the sphere: per cell maximum x clamp(mean + deviation z, 0, 1), at
-// least 1, z the noise at the centre over its normalisation (unit deviation).
-struct LegacyNoise
-{
-    double wavelength_km = 0.0;
-    double persistence = 0.5;
-    double mean = 0.5;
-    double deviation = 0.2;
-};
-LegacyNoise grain8noise();
-LegacyNoise grain16noise();
-LegacyNoise grain4noise();
-LegacyNoise finenoise();
-// The unit-deviation noise z per cell (seed: the world seed and salt).
-std::vector<double> spherenoise(const planet& world, int salt, const LegacyNoise& noise);
-// The same noise as a function of any unit vector: z = sum / normalisation.
-class SphereNoise
-{
-public:
-    SphereNoise(const planet& world, int salt, const LegacyNoise& noise);
-    double z(const mesh::Vec3& p) const { return field_.sum(p.x, p.y, p.z) / normalisation_; }
-    int value(const mesh::Vec3& p, int maximum) const; // the legacy fractal's value there
-
-private:
-    LegacyNoise legacy_;
-    landscape::FractalNoiseField field_;
-    double normalisation_ = 1.0;
-};
 // The inverse of mesh::fromtangent: the gnomonic east and north km of p in the frame (p in the
 // frame's hemisphere).
 void totangent(const mesh::TangentFrame& frame, const mesh::Vec3& p, double& east_km, double& north_km);
-std::vector<int> spherefractal(const planet& world, int salt, const LegacyNoise& noise, int maximum);
 
 template <typename F>
 void box(const mesh::CellGrid& grid, CellId c, int r, F&& f)

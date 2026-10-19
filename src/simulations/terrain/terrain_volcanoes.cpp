@@ -107,15 +107,18 @@ void terrain::makemountainisland(planet& world, mesh::CellId c, float peakheight
         if (world.nomfloat(next) < landheight)
             world.setnomfloat(next, static_cast<float>(landheight));
 
-        // If there isn't a ridge between them, make one. The legacy code gives the neighbour the
-        // same direction code (dir + 8, less 8), not the reverse; kept as it was.
+        // If there isn't a ridge between them, make one: stored at both ends, at the neighbour in
+        // the reverse slot (T8 W2-T2 review decision; the legacy code gave the neighbour the same
+        // direction code, dir + 8 less 8, a bug).
 
         if (getridge(world, c, dir) == 0)
         {
-            const int code = terrain::detail::getcode(dir);
+            world.setmountainridge(c, world.mountainridge(c) + terrain::detail::getcode(dir));
 
-            world.setmountainridge(c, world.mountainridge(c) + code);
-            world.setmountainridge(next, world.mountainridge(next) + code);
+            const int back = world.grid().reverse(c, dir);
+
+            if (getridge(world, next, back) == 0)
+                world.setmountainridge(next, world.mountainridge(next) + terrain::detail::getcode(back));
         }
 
         c = next;

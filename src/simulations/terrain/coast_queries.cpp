@@ -12,6 +12,7 @@
 #include "core/classes.hpp"
 #include "core/mesh/mesh_geometry.hpp"
 #include "simulations/terrain/terrain_coasts.hpp"
+#include "simulations/terrain/terrain_elevation.hpp"
 #include "world/planet.hpp"
 #include "world/functions.hpp"
 
@@ -126,7 +127,7 @@ std::int32_t terrain::coastgrid::nearestsea(const planet& world, CellId c, bool 
     const mesh::Vec3 p = grid.centre(c);
     std::int32_t best = -1;
     double bestdistance = numeric_limits<double>::max();
-    for (const CellId n : cellswithinkm(world, p, limit_km))
+    for (const CellId n : terrain::cellswithinkm(world, c, limit_km))
     {
         if (n == c || (world.sea(n) == 1) == land)
             continue;
@@ -307,14 +308,14 @@ void sphereshelvesvoronoi(planet& world, vector<int>& voronoi, int pointdist)
 {
     const mesh::CellGrid& grid = world.grid();
     const size_t count = grid.cellcount();
-    const double spacing_m = static_cast<double>(max(1, pointdist)) * legacypixelkm(world) * 1000.0;
+    const double spacing_m = static_cast<double>(max(1, pointdist)) * terrain::legacycellkm(world) * 1000.0;
     const int seeds = max(1, static_cast<int>(lround(grid.totalarea_m2() / (spacing_m * spacing_m))));
 
     vector<mesh::Vec3> points;
     points.reserve(static_cast<size_t>(seeds) + 1);
     points.push_back(mesh::Vec3{});
     for (int k = 1; k <= seeds; k++)
-        points.push_back(randompoint());
+        points.push_back(grid.centre(terrain::randomcellbyarea(world))); // seeds at cell centres drawn by area
 
     vector<double> best(count, numeric_limits<double>::max());
     fill(voronoi.begin(), voronoi.end(), 0);

@@ -1,17 +1,27 @@
 #include "simulations/terrain/import_elements.hpp"
 
-// On the cell grid since T8 W2-T2: sphere noise (terrain::coastgrid::spherefractal) replaces the
-// legacy fractals; the functions that still take legacy arrays get their values in the legacy
-// slots (terrain::coastgrid::legacyslot).
+// On the cell grid since T8 W2-T2: sphere noise (terrain::spherefractal) replaces the legacy
+// fractals; the functions that still take legacy arrays get their values in the legacy slots
+// (legacyslot, core/grid_shapes.hpp).
 
-#include "simulations/terrain/terrain_coasts.hpp"
+#include "core/deterministic_random.hpp"
+#include "core/grid_shapes.hpp"
+#include "simulations/terrain/terrain_elevation.hpp"
 #include "world/functions.hpp"
 
 using mesh::CellId;
-namespace cg = terrain::coastgrid;
 
 namespace
 {
+// The legacy fractals' whole values.
+vector<int> legacyvalues(const vector<float>& values)
+{
+    vector<int> whole(values.size());
+    for (size_t c = 0; c < values.size(); c++)
+        whole[c] = static_cast<int>(values[c]);
+    return whole;
+}
+
 // Per-cell values in a legacy ARRAYWIDTH x ARRAYHEIGHT array, at the cells' legacy slots.
 vector<vector<int>> legacyarray(const planet& world, const vector<int>& values)
 {
@@ -20,7 +30,7 @@ vector<vector<int>> legacyarray(const planet& world, const vector<int>& values)
     for (CellId c = 0; c < grid.cellcount(); c++)
     {
         int x = 0, y = 0;
-        cg::legacyslot(grid, c, x, y);
+        legacyslot(grid, c, x, y);
         array[static_cast<size_t>(x)][static_cast<size_t>(y)] = values[c];
     }
     return array;
@@ -66,15 +76,15 @@ void generateimportedseabed(planet& world)
     int sealevel = world.sealevel();
 
     // A sphere noise for the legacy warped fractal (its warp only moved the field).
-    const vector<int> seafractal = cg::spherefractal(world, 0x5eab0001, cg::grain8noise(), maxelev);
+    const vector<float> seafractal = terrain::spherefractal(world, deterministiccontextseed(world.seed(), 0x5eab0001), terrain::terrainfractal(), (float)maxelev);
 
     float coastalvarreduce = (float)maxelev / 3000.0f;
 
-    for (const CellId c : cg::columnorder(world.grid()))
+    for (const CellId c : columnmajorcells(world.grid()))
     {
         if (world.sea(c) == 1)
         {
-            float var = (float)(seafractal[c] - maxelev / 2);
+            float var = (float)((int)seafractal[c] - maxelev / 2);
             var = var / coastalvarreduce;
 
             int newval = world.nom(c) + (int)var;
@@ -102,7 +112,7 @@ void generateimportedlandelevation(planet& world)
 
     // First, make a fractal map (a sphere noise for the legacy warped fractal).
 
-    vector<int> values = cg::spherefractal(world, 0x1a4d0001, cg::grain8noise(), 12750);
+    vector<int> values = legacyvalues(terrain::spherefractal(world, deterministiccontextseed(world.seed(), 0x1a4d0001), terrain::terrainfractal(), 12750.0f));
     for (int& value : values)
         value += fractaladd;
     vector<vector<int>> fractal = legacyarray(world, values);
@@ -131,7 +141,7 @@ void generateimportedmountainchains(planet& world, boolshapetemplate landshape[]
 
     // First, make a fractal map.
 
-    vector<int> values = cg::spherefractal(world, 0xc4a10001, cg::grain8noise(), 12750);
+    vector<int> values = legacyvalues(terrain::spherefractal(world, deterministiccontextseed(world.seed(), 0xc4a10001), terrain::terrainfractal(), 12750.0f));
     for (int& value : values)
         value += fractaladd;
     vector<vector<int>> fractal = legacyarray(world, values);
@@ -172,7 +182,7 @@ void generateimportedcraters(planet& world, std::vector<int>& squareroot)
 
     if (totalsea > 40) // If there's sea, add some variation to how prominent the craters are. This will create some gaps in the craters so they don't get entirely filled up by the depression filling.
     {
-        const vector<int> fractal = cg::spherefractal(world, 0xc4a70001, cg::grain8noise(), maxelev);
+        const vector<int> fractal = legacyvalues(terrain::spherefractal(world, deterministiccontextseed(world.seed(), 0xc4a70001), terrain::terrainfractal(), (float)maxelev));
 
         for (CellId c = 0; c < world.cellcount(); c++)
         {

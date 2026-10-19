@@ -12,7 +12,10 @@
 #include "core/classes.hpp"
 #include "core/mesh/mesh_geometry.hpp"
 #include "simulations/terrain/coast_queries.hpp"
+#include "core/deterministic_random.hpp"
+#include "core/grid_shapes.hpp"
 #include "simulations/terrain/terrain_coasts.hpp"
+#include "simulations/terrain/terrain_elevation.hpp"
 #include "world/functions.hpp"
 #include "world/planet.hpp"
 
@@ -32,22 +35,23 @@ void spherecontinentalshelves(planet& world, worldgrid<bool>& shelves, int point
 {
     const mesh::CellGrid& grid = world.grid();
     const size_t count = grid.cellcount();
-    const double pixelkm = legacypixelkm(world);
+    const double pixelkm = terrain::legacycellkm(world);
     int maxelev = world.maxelevation();
     int midelev = maxelev / 2;
 
     vector<char> outline(count, 0);
 
-    const vector<int> fractal = spherefractal(world, 0x5e1f0001, grain8noise(), maxelev);
-    const vector<int> fractalx = spherefractal(world, 0x5e1f0002, grain8noise(), maxelev);
-    const vector<int> fractaly = spherefractal(world, 0x5e1f0003, grain8noise(), maxelev);
+    const float maximum = static_cast<float>(maxelev);
+    const vector<float> fractal = terrain::spherefractal(world, deterministiccontextseed(world.seed(), 0x5e1f0001), terrain::terrainfractal(), maximum);
+    const vector<float> fractalx = terrain::spherefractal(world, deterministiccontextseed(world.seed(), 0x5e1f0002), terrain::terrainfractal(), maximum);
+    const vector<float> fractaly = terrain::spherefractal(world, deterministiccontextseed(world.seed(), 0x5e1f0003), terrain::terrainfractal(), maximum);
 
     int maxwarp = 60;
     int warpdiv = max(1, maxelev / maxwarp);
     int maxradius = 20;
     int raddiv = max(1, maxelev / maxradius);
 
-    const vector<CellId> order = columnorder(grid);
+    const vector<CellId> order = columnmajorcells(grid);
 
     for (const CellId c : order)
     {
@@ -55,18 +59,18 @@ void spherecontinentalshelves(planet& world, worldgrid<bool>& shelves, int point
             continue;
 
         // The centre of this circle, offset to make the shelves more interesting (east and south in pixels).
-        const int warpdistx = (fractalx[c] - midelev) / warpdiv;
-        const int warpdisty = (fractaly[c] - midelev) / warpdiv;
-        const mesh::Vec3 target = movedpoint(world, c, warpdistx * pixelkm, -warpdisty * pixelkm);
+        const int warpdistx = (static_cast<int>(fractalx[c]) - midelev) / warpdiv;
+        const int warpdisty = (static_cast<int>(fractaly[c]) - midelev) / warpdiv;
+        const CellId target = terrain::movedcell(world, c, warpdistx * pixelkm, -warpdisty * pixelkm);
 
         // A line from the outline to that centre, so that there is no gap in the shelf.
-        for (const CellId n : mesh::cellsalongarc(grid, grid.centre(c), target))
+        for (const CellId n : mesh::cellsalongarc(grid, grid.centre(c), grid.centre(target)))
             outline[n] = 1;
 
         // Now we can draw a circle.
-        const int radius = fractal[c] / raddiv;
+        const int radius = static_cast<int>(fractal[c]) / raddiv;
         if (radius > 0)
-            for (const CellId n : cellswithinkm(world, target, (radius + 0.5) * pixelkm))
+            for (const CellId n : terrain::cellswithinkm(world, target, (radius + 0.5) * pixelkm))
                 outline[n] = 1;
     }
 
@@ -130,7 +134,7 @@ void spherecontinentalshelves(planet& world, worldgrid<bool>& shelves, int point
         {
             bool nearsea = 0;
 
-            for (const CellId n : cellswithinkm(world, grid.centre(c), (mindist + 0.5) * pixelkm))
+            for (const CellId n : terrain::cellswithinkm(world, c, (mindist + 0.5) * pixelkm))
             {
                 if (shelves[n] == 0)
                 {
@@ -140,7 +144,7 @@ void spherecontinentalshelves(planet& world, worldgrid<bool>& shelves, int point
             }
 
             if (nearsea == 0)
-                for (const CellId n : cellswithinkm(world, grid.centre(c), (radius + 0.5) * pixelkm))
+                for (const CellId n : terrain::cellswithinkm(world, c, (radius + 0.5) * pixelkm))
                     circles[n] = 1;
         }
     }
@@ -177,7 +181,7 @@ void removeshelfgaps(planet& world, worldgrid<bool>& shelves)
     vector<double> area(count, 0.0);
     vector<char> checked(count, 0);
     vector<CellId> component;
-    const vector<CellId> order = columnorder(grid);
+    const vector<CellId> order = columnmajorcells(grid);
 
     auto enterable = [&](CellId c) { return shelves[c] == 0; };
 

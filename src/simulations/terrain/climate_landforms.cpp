@@ -13,7 +13,10 @@
 #include "world/planet.hpp"
 #include "world/functions.hpp"
 #include "simulations/terrain/climate_landforms.hpp"
+#include "core/grid_shapes.hpp"
 #include "simulations/terrain/terrain_coasts.hpp"
+#include "simulations/terrain/terrain_elevation.hpp"
+#include "simulations/terrain/terrain_ridges.hpp"
 
 using namespace std;
 using mesh::CellId;
@@ -35,7 +38,7 @@ void checkergelevation(planet& world)
     vector<char> thiserg(count, 0);
     vector<CellId> erg;
 
-    for (const CellId start : cg::columnorder(grid))
+    for (const CellId start : columnmajorcells(grid))
     {
         if (world.special(start) != 120 || checked[start] != 0)
             continue;
@@ -128,7 +131,7 @@ void spheredrawspeciallake(planet& world, int shapenumber, CellId centre, int la
         return;
     }
 
-    const double pixelkm = cg::legacypixelkm(world);
+    const double pixelkm = terrain::legacycellkm(world);
     const double minlakedistance = 4.0; // Minimum distance between lakes (pixels).
     int maxmountainlakeheight = 1000; // Ignore mountains smaller than this.
 
@@ -150,7 +153,7 @@ void spheredrawspeciallake(planet& world, int shapenumber, CellId centre, int la
 
         if (special == 110 || special == 120)
         {
-            for (const CellId n : cg::cellswithinkm(world, grid.centre(c), 1.5 * pixelkm))
+            for (const CellId n : terrain::cellswithinkm(world, c, 1.5 * pixelkm))
                 if (world.climate(n) != 5 || world.riverjan(n) > 0 || world.riverjul(n) > 0)
                     return; // Don't put lakes onto inappropriate climates.
         }
@@ -158,7 +161,7 @@ void spheredrawspeciallake(planet& world, int shapenumber, CellId centre, int la
         if (cg::outline(world, c))
             return;
 
-        for (const CellId n : cg::cellswithinkm(world, grid.centre(c), (minlakedistance + 0.5) * pixelkm))
+        for (const CellId n : terrain::cellswithinkm(world, c, (minlakedistance + 0.5) * pixelkm))
         {
             if (thislake[n] != 0 && thislake[n] != lakeno && canoverlap == 0) // There's another lake here already!
                 return;
@@ -187,7 +190,7 @@ void spheredrawspeciallake(planet& world, int shapenumber, CellId centre, int la
         if (world.mountainheightfloat(c) != 0) // Remove any mountains that might be here.
         {
             for (int dir = 1; dir <= 8; dir++)
-                cg::deleteridge(world, c, dir);
+                terrain::deleteridge(world, c, dir);
         }
     }
 
@@ -202,7 +205,7 @@ void spherecreateergs(planet& world, boolshapetemplate smalllake[], boolshapetem
 {
     const mesh::CellGrid& grid = world.grid();
     const size_t count = grid.cellcount();
-    const double pixelkm = cg::legacypixelkm(world);
+    const double pixelkm = terrain::legacycellkm(world);
     int worldsize = world.size();
 
     vector<short> ergprobability(count, 0); // This is the probability of making an erg here.
@@ -224,7 +227,7 @@ void spherecreateergs(planet& world, boolshapetemplate smalllake[], boolshapetem
 
         int overlap = random(1, 100);
 
-        const mesh::Vec3 centre = cg::randompoint();
+        const mesh::Vec3 centre = grid.centre(terrain::randomcellbyarea(world));
 
         const bool leftr = random(0, 1) == 1; // If it's 1 then we reverse it left-right
         const bool downr = random(0, 1) == 1; // If it's 1 then we reverse it top-bottom
@@ -242,7 +245,7 @@ void spherecreateergs(planet& world, boolshapetemplate smalllake[], boolshapetem
 
     vector<int> thislake(count, 0);
 
-    for (const CellId c : cg::columnorder(grid))
+    for (const CellId c : columnmajorcells(grid))
     {
         if (world.climate(c) == 5 && ergprobability[c] != 0) // If this is a hot desert
         {
@@ -250,7 +253,7 @@ void spherecreateergs(planet& world, boolshapetemplate smalllake[], boolshapetem
             {
                 bool goahead = 1;
 
-                for (const CellId n : cg::cellswithinkm(world, grid.centre(c), (mindist + 0.5) * pixelkm)) // Check that there aren't any lakes too close.
+                for (const CellId n : terrain::cellswithinkm(world, c, (mindist + 0.5) * pixelkm)) // Check that there aren't any lakes too close.
                 {
                     if (world.truelake(n) != 0)
                         goahead = 0;
@@ -291,7 +294,7 @@ void spherecreatesaltpans(planet& world, boolshapetemplate smalllake[], boolshap
 {
     (void)largelake;
     const mesh::CellGrid& grid = world.grid();
-    const double pixelkm = cg::legacypixelkm(world);
+    const double pixelkm = terrain::legacycellkm(world);
 
     const double saltchance = 1.0 / 1000.0; // Probability of salt pans in any given desert pixel.
     const double mindist = 2.0; // Minimum distance to existing lakes etc. (pixels)
@@ -300,7 +303,7 @@ void spherecreatesaltpans(planet& world, boolshapetemplate smalllake[], boolshap
 
     vector<int> thislake(grid.cellcount(), 0);
 
-    for (const CellId c : cg::columnorder(grid))
+    for (const CellId c : columnmajorcells(grid))
     {
         if (world.climate(c) == 5) // If this is a hot desert
         {
@@ -308,7 +311,7 @@ void spherecreatesaltpans(planet& world, boolshapetemplate smalllake[], boolshap
             {
                 bool goahead = 1;
 
-                for (const CellId n : cg::cellswithinkm(world, grid.centre(c), (mindist + 0.5) * pixelkm)) // Check that there aren't any other lakes too close.
+                for (const CellId n : terrain::cellswithinkm(world, c, (mindist + 0.5) * pixelkm)) // Check that there aren't any other lakes too close.
                 {
                     if (world.lakesurfacefloat(n) != 0)
                         goahead = 0;
@@ -369,7 +372,7 @@ void refineroughnessmap(planet& world)
         return n < 0 ? c : static_cast<CellId>(n);
     };
 
-    for (const CellId c : cg::columnorder(grid))
+    for (const CellId c : columnmajorcells(grid))
     {
         if (world.sea(c) == 0)
         {

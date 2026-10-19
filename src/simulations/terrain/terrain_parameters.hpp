@@ -102,25 +102,11 @@ inline float referenceErodibility = 1.0f;
 
 namespace sphere_noise_coast
 {
-inline int legacyColumns = 2048;
-inline float shortestKm = 39.0f;
-inline float grain8WavelengthKm = 5000.0f;
-inline float grain8Persistence = 0.5f;
-inline float grain8Mean = 0.358f;
-inline float grain8Deviation = 0.173f;
-inline float grain16WavelengthKm = 2500.0f;
-inline float grain16Persistence = 0.5f;
-inline float grain16Mean = 0.344f;
-inline float grain16Deviation = 0.138f;
-inline float grain4WavelengthKm = 10000.0f;
-inline float grain4Persistence = 0.5f;
-inline float grain4Mean = 0.335f;
-inline float grain4Deviation = 0.109f;
 inline float fineWavelengthKm = 160.0f;
 inline float finePersistence = 0.7f;
 inline float fineMean = 0.5f;
 inline float fineDeviation = 0.25f;
-inline float ridgeAngleDegreesPerDeviation = 180.0f;
+inline float ridgeAngleDeviation = 0.25f;
 }
 
 // Every value above, by its recipe name.
@@ -200,25 +186,11 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "terrain.subgrid.reference_m", &subgrid::referenceM },
         { "terrain.subgrid.reference_runoff_mm_yr", &subgrid::referenceRunoffMmYr },
         { "terrain.subgrid.reference_erodibility", &subgrid::referenceErodibility },
-        { "terrain.sphere_noise_coast.legacy_columns", &sphere_noise_coast::legacyColumns },
-        { "terrain.sphere_noise_coast.shortest_km", &sphere_noise_coast::shortestKm },
-        { "terrain.sphere_noise_coast.grain8_wavelength_km", &sphere_noise_coast::grain8WavelengthKm },
-        { "terrain.sphere_noise_coast.grain8_persistence", &sphere_noise_coast::grain8Persistence },
-        { "terrain.sphere_noise_coast.grain8_mean", &sphere_noise_coast::grain8Mean },
-        { "terrain.sphere_noise_coast.grain8_deviation", &sphere_noise_coast::grain8Deviation },
-        { "terrain.sphere_noise_coast.grain16_wavelength_km", &sphere_noise_coast::grain16WavelengthKm },
-        { "terrain.sphere_noise_coast.grain16_persistence", &sphere_noise_coast::grain16Persistence },
-        { "terrain.sphere_noise_coast.grain16_mean", &sphere_noise_coast::grain16Mean },
-        { "terrain.sphere_noise_coast.grain16_deviation", &sphere_noise_coast::grain16Deviation },
-        { "terrain.sphere_noise_coast.grain4_wavelength_km", &sphere_noise_coast::grain4WavelengthKm },
-        { "terrain.sphere_noise_coast.grain4_persistence", &sphere_noise_coast::grain4Persistence },
-        { "terrain.sphere_noise_coast.grain4_mean", &sphere_noise_coast::grain4Mean },
-        { "terrain.sphere_noise_coast.grain4_deviation", &sphere_noise_coast::grain4Deviation },
         { "terrain.sphere_noise_coast.fine_wavelength_km", &sphere_noise_coast::fineWavelengthKm },
         { "terrain.sphere_noise_coast.fine_persistence", &sphere_noise_coast::finePersistence },
         { "terrain.sphere_noise_coast.fine_mean", &sphere_noise_coast::fineMean },
         { "terrain.sphere_noise_coast.fine_deviation", &sphere_noise_coast::fineDeviation },
-        { "terrain.sphere_noise_coast.ridge_angle_degrees_per_deviation", &sphere_noise_coast::ridgeAngleDegreesPerDeviation },
+        { "terrain.sphere_noise_coast.ridge_angle_deviation", &sphere_noise_coast::ridgeAngleDeviation },
     };
     return entries;
 }
