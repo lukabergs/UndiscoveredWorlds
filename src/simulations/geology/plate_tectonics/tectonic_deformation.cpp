@@ -57,6 +57,7 @@ std::vector<mesh::Vec3> distribute(const columns::Metric& metric, const std::vec
     if (size==0 || owners.size()!=size ||
         continent.size()!=size || rigid.size()!=size || !std::isfinite(p.peak_distance_km) || p.peak_distance_km<0 ||
         !std::isfinite(p.distance_variation) || p.distance_variation<0 || p.distance_variation>.5 ||
+        !std::isfinite(p.distance_variation_wavelength_km) || p.distance_variation_wavelength_km<=0 ||
         !std::isfinite(p.subduction_coupling) || p.subduction_coupling<0 || p.subduction_coupling>1 || !std::isfinite(p.time_myr))
         throw std::runtime_error("Invalid distributed deformation inputs");
     auto result=rigid;
@@ -94,15 +95,19 @@ std::vector<mesh::Vec3> distribute(const columns::Metric& metric, const std::vec
     constexpr double pi=3.14159265358979323846;
     const auto bits=static_cast<uint32_t>(seed)*1664525U+1013904223U;
     const double phase=2*pi*bits/4294967296.0;
-    // E4: replace. The peak's variation on the 4N x 2N lat-lon proxy.
-    const auto extent_km=metric.extent_km();
+    // The peak's variation on the sphere: two plane waves through the globe with the torus
+    // pattern's wave vectors (2 pi / L) (e1 + e2) and (2 pi / L) (e1 / 2 - 3 e2 / 2), L the
+    // variation's wavelength, in a frame seeded by the seed.
+    const double radius_km=metric.grid().radius_m()/1000;
+    const double wavenumber=2*pi*radius_km/p.distance_variation_wavelength_km;
+    const auto axes=sphere_noise::frame(bits);
     for (uint32_t i=0;i<size;++i) if (counts[i]) {
         divide(correction[i],counts[i]);
-        const auto position=metric.unitposition(i);
-        const double x=position[0],y=position[1];
-        const double variation=.5*(std::sin(2*pi*(4*x+2*y)+phase)+std::cos(2*pi*(2*x-3*y)-phase));
+        const mesh::Vec3 position=metric.grid().position(i);
+        const double x=wavenumber*mesh::dot(position,axes[0]),y=wavenumber*mesh::dot(position,axes[1]);
+        const double variation=.5*(std::sin(x+y+phase)+std::cos(.5*x-1.5*y-phase));
         peak[i]=p.peak_distance_km*1000*(1+p.distance_variation*variation);
-        peak[i]*=tectonics::variation::multiplier(x,y,extent_km[0],extent_km[1],p.time_myr,seed,4,
+        peak[i]*=tectonics::variation::multiplier(position,radius_km,p.time_myr,seed,4,
             p.process_variation,p.process_wavelength_km,p.process_period_myr);
         distance[i]=.5*metric.width_m(i); source[i]=i;
         queue.emplace(distance[i],i,i);

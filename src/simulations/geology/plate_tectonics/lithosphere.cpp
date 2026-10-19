@@ -18,7 +18,7 @@
  *****************************************************************************/
 
 #include "simulations/geology/plate_tectonics/lithosphere.hpp"
-#include "simulations/geology/plate_tectonics/simplexnoise.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_sphere_noise.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_boundary_graph.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_deforming_regions.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_junction_coupling.hpp"
@@ -56,49 +56,12 @@ static constexpr uint32_t MAX_BUOYANCY_AGE = 20;
 
 namespace {
 
-struct FractalNoiseConfig {
-    float octaves;
-    float persistence;
-    float scale;
-    float noise_scale;
-    float offset_a;
-    float offset_b;
-    float offset_c;
-    float offset_d;
-};
-
-
-struct TorusSize {
-    uint32_t width = 0, height = 0;
-};
-
-float wrap_coordinate(float value, float period) {
-    float wrapped = std::fmod(value, period);
-    if (wrapped < 0.0f) {
-        wrapped += period;
-    }
-    return wrapped;
-}
-
-FractalNoiseConfig make_noise_config(SimpleRandom& randsource, float octaves, float persistence,
-                                     float scale, float noise_scale) {
-    const uint32_t seed = randsource.next();
-    return FractalNoiseConfig {
-        octaves,
-        persistence,
-        scale,
-        noise_scale,
-        17.0f + static_cast<float>((seed * 13U) % 1024U) * 0.03125f,
-        29.0f + static_cast<float>((seed * 29U) % 1024U) * 0.03125f,
-        43.0f + static_cast<float>((seed * 43U) % 1024U) * 0.03125f,
-        61.0f + static_cast<float>((seed * 61U) % 1024U) * 0.03125f,
-    };
-}
-
-FractalNoiseConfig make_noise_config(uint32_t seed, float octaves, float persistence,
-                                     float scale, float noise_scale) {
-    SimpleRandom randsource(seed);
-    return make_noise_config(randsource, octaves, persistence, scale, noise_scale);
+// The torus engine's seeding noise on the sphere (E4): a field keeps the torus' octaves and
+// persistence; its frequency f (the torus' scale x noise scale x the coordinate factor it was
+// read at) sets the wavelength unit_km / f (scenario.initial_noise_wavelength_km).
+tectonics::sphere_noise::Octaves seeding_noise(uint32_t seed, double unit_km, double radius_km, int octaves,
+                                               double persistence, double frequency) {
+    return tectonics::sphere_noise::Octaves(seed, unit_km / frequency, radius_km, octaves, persistence);
 }
 
 float clamp_unit(float value) {
@@ -115,37 +78,6 @@ float smoothstep(float edge0, float edge1, float value) {
     }
     const float t = clamp_unit((value - edge0) / (edge1 - edge0));
     return t * t * (3.0f - 2.0f * t);
-}
-
-float sample_wrapped_octave_noise(float x, float y, const TorusSize& dimension,
-                                  float octaves, float persistence, float scale,
-                                  float noise_scale, float lo_bound, float hi_bound,
-                                  float offset_a, float offset_b, float offset_c,
-                                  float offset_d) {
-    const float width = static_cast<float>(dimension.width);
-    const float height = static_cast<float>(dimension.height);
-    const float wrapped_x = wrap_coordinate(x, width) / width;
-    const float wrapped_y = wrap_coordinate(y, height) / height;
-    const float theta = wrapped_x * 2.0f * PI;
-    const float phi = wrapped_y * 2.0f * PI;
-    const float sin_theta = std::sin(theta);
-    const float cos_theta = std::cos(theta);
-    const float sin_phi = std::sin(phi);
-    const float cos_phi = std::cos(phi);
-
-    return scaled_octave_noise_4d(octaves, persistence, scale, lo_bound, hi_bound,
-                                  offset_a + sin_theta * noise_scale,
-                                  offset_b + cos_theta * noise_scale,
-                                  offset_c + sin_phi * noise_scale,
-                                  offset_d + cos_phi * noise_scale);
-}
-
-float sample_toroidal_noise(float x, float y, const TorusSize& dimension,
-                            const FractalNoiseConfig& config) {
-    return sample_wrapped_octave_noise(x, y, dimension, config.octaves, config.persistence,
-                                       config.scale, config.noise_scale, -1.0f, 1.0f,
-                                       config.offset_a, config.offset_b, config.offset_c,
-                                       config.offset_d);
 }
 
 float logistic(float value, float sharpness) {
@@ -421,6 +353,9 @@ lithosphere::lithosphere(const tectonics::scenario::Scenario& params) noexcept(f
     if (!std::isfinite(params.initial_margin_width_m) || params.initial_margin_width_m<0 || params.initial_margin_width_m>4000 ||
         (params.initial_margin_width_m>0 && !params.boundary_conditioned_terrain))
         throw runtime_error("Initial margin width requires boundary-conditioned terrain and 0..4000 m");
+    if (!std::isfinite(params.initial_noise_wavelength_km) || params.initial_noise_wavelength_km <= 0 ||
+        !std::isfinite(params.initial_noise_warp_km) || params.initial_noise_warp_km < 0)
+        throw runtime_error("Initial noise wavelength must be positive and its warp nonnegative (km)");
     if (params.margin_processes.process_variation>0 && !params.margin_processes.enabled)
         throw runtime_error("Process variation requires isostatic columns and active margins");
     if (!std::isfinite(params.continental_fraction) || params.continental_fraction<0 || params.continental_fraction>1 ||
@@ -452,6 +387,7 @@ lithosphere::lithosphere(const tectonics::scenario::Scenario& params) noexcept(f
     if ((params.transport_subdivision != 1 && params.transport_subdivision != 2 && params.transport_subdivision != 4) ||
         !std::isfinite(params.deformation_peak_km) || params.deformation_peak_km < 0 ||
         !std::isfinite(params.deformation_variation) || params.deformation_variation < 0 || params.deformation_variation > .5 ||
+        !std::isfinite(params.deformation_variation_wavelength_km) || params.deformation_variation_wavelength_km <= 0 ||
         !std::isfinite(params.subduction_coupling) || params.subduction_coupling < 0 || params.subduction_coupling > 1 ||
         !std::isfinite(params.coastal_gpe_strength) || params.coastal_gpe_strength < 0 || params.coastal_gpe_strength > 1)
         throw runtime_error("Invalid transport subdivision or distributed deformation parameters");
@@ -1367,50 +1303,46 @@ void lithosphere::seedInitialTopography(float ocean_coverage, int32_t sea_level_
     }
     SimpleRandom topo_rng(_randsource);
 
-    const FractalNoiseConfig warp_x_noise = make_noise_config(topo_rng, 4.0f, 0.58f, 0.45f, 1.6f);
-    const FractalNoiseConfig warp_y_noise = make_noise_config(topo_rng, 4.0f, 0.58f, 0.45f, 1.6f);
-    const FractalNoiseConfig continent_macro_noise =
-        make_noise_config(topo_rng, 5.0f, 0.57f, 0.16f, 0.95f);
-    const FractalNoiseConfig continent_detail_noise =
-        make_noise_config(topo_rng, 6.0f, 0.59f, 0.42f, 1.85f);
-    const FractalNoiseConfig coast_breakup_noise =
-        make_noise_config(topo_rng, 6.0f, 0.57f, 0.62f, 2.2f);
-    const FractalNoiseConfig shelf_noise = make_noise_config(topo_rng, 6.0f, 0.61f, 0.85f, 2.9f);
-    const FractalNoiseConfig sea_base_noise = make_noise_config(topo_rng, 7.0f, 0.63f, 1.15f, 3.9f);
-    const FractalNoiseConfig sea_detail_noise =
-        make_noise_config(topo_rng, 7.0f, 0.61f, 1.95f, 5.6f);
-    const FractalNoiseConfig sea_micro_noise = make_noise_config(topo_rng, 5.0f, 0.48f, 3.95f, 10.2f);
-    const FractalNoiseConfig land_noise = make_noise_config(topo_rng, 6.0f, 0.56f, 0.95f, 3.6f);
-    const FractalNoiseConfig foothill_noise =
-        make_noise_config(topo_rng, 6.0f, 0.53f, 1.55f, 4.7f);
-    const FractalNoiseConfig mountain_noise =
-        make_noise_config(topo_rng, 5.0f, 0.47f, 2.45f, 6.3f);
-    const FractalNoiseConfig ridge_noise = make_noise_config(topo_rng, 5.0f, 0.50f, 2.6f, 7.4f);
-    const FractalNoiseConfig trench_noise = make_noise_config(topo_rng, 5.0f, 0.48f, 3.8f, 9.8f);
+    // The torus engine's fields on the sphere (seeding_noise): octaves, persistence and
+    // frequency, the last with the coordinate factor each field was read at.
+    const double radius_km = grid_->radius_m() / 1000;
+    const double unit_km = scenario.initial_noise_wavelength_km;
+    const auto field = [&](int octaves, double persistence, double frequency) {
+        return seeding_noise(topo_rng.next(), unit_km, radius_km, octaves, persistence, frequency);
+    };
+    const auto warp_x_noise = field(4, 0.58, 0.45 * 1.6);
+    const auto warp_y_noise = field(4, 0.58, 0.45 * 1.6);
+    const auto continent_macro_noise = field(5, 0.57, 0.16 * 0.95);
+    const auto continent_detail_noise = field(6, 0.59, 0.42 * 1.85 * 1.15);
+    const auto coast_breakup_noise = field(6, 0.57, 0.62 * 2.2 * 1.55);
+    const auto shelf_noise = field(6, 0.61, 0.85 * 2.9 * 1.4);
+    const auto sea_base_noise = field(7, 0.63, 1.15 * 3.9 * 1.15);
+    const auto sea_detail_noise = field(7, 0.61, 1.95 * 5.6 * 2.3);
+    const auto sea_micro_noise = field(5, 0.48, 3.95 * 10.2 * 4.8);
+    const auto land_noise = field(6, 0.56, 0.95 * 3.6 * 1.55);
+    const auto foothill_noise = field(6, 0.53, 1.55 * 4.7 * 2.15);
+    const auto mountain_noise = field(5, 0.47, 2.45 * 6.3 * 3.05);
+    const auto ridge_noise = field(5, 0.50, 2.6 * 7.4 * 2.1);
+    const auto trench_noise = field(5, 0.48, 3.8 * 9.8 * 2.35);
+    // The warp's third component (the torus had two axes).
+    const auto warp_z_noise = field(4, 0.58, 0.45 * 1.6);
+    const auto at = [](const tectonics::sphere_noise::Octaves& noise, const mesh::Vec3& q) {
+        return static_cast<float>(noise(q));
+    };
 
-    std::vector<float> warped_x(map_area);
-    std::vector<float> warped_y(map_area);
+    std::vector<mesh::Vec3> warped(map_area);
     std::vector<float> continentality(map_area);
     std::vector<float> raw_height(map_area);
     std::vector<uint8_t> is_land(map_area, 0);
 
-    // E4: replace. The torus noise read at each cell's position on the 4N x 2N lat-lon proxy
-    // (its column and row as the torus' x and y).
-    const tectonics::grid::LatLonProxy proxy(*grid_);
-    const TorusSize torus{proxy.width(), proxy.height()};
-    const auto proxy_x = [&](uint32_t index) { return static_cast<float>(proxy.cellposition(index)[0] - 0.5); };
-    const auto proxy_y = [&](uint32_t index) { return static_cast<float>(proxy.cellposition(index)[1] - 0.5); };
+    // Each cell's centre moved by the warp, then the fields read there.
     for (uint32_t index = 0; index < map_area; ++index) {
-        const float x = proxy_x(index), y = proxy_y(index);
-        const float warp_x = sample_toroidal_noise(x, y, torus, warp_x_noise) * 18.0f;
-        const float warp_y = sample_toroidal_noise(x, y, torus, warp_y_noise) * 18.0f;
-        const float sample_x = x + warp_x;
-        const float sample_y = y + warp_y;
-        warped_x[index] = sample_x;
-        warped_y[index] = sample_y;
-        const float macro = sample_toroidal_noise(sample_x, sample_y, torus, continent_macro_noise);
-        const float detail = sample_toroidal_noise(sample_x * 1.15f, sample_y * 1.15f, torus, continent_detail_noise);
-        const float coast_breakup = sample_toroidal_noise(sample_x * 1.55f, sample_y * 1.55f, torus, coast_breakup_noise);
+        const mesh::Vec3 q = tectonics::sphere_noise::warp(grid_->position(index), warp_x_noise, warp_y_noise,
+                                                           warp_z_noise, scenario.initial_noise_warp_km, radius_km);
+        warped[index] = q;
+        const float macro = at(continent_macro_noise, q);
+        const float detail = at(continent_detail_noise, q);
+        const float coast_breakup = at(coast_breakup_noise, q);
         continentality[index] = macro * 0.70f + detail * 0.22f + coast_breakup * 0.08f;
     }
 
@@ -1436,29 +1368,17 @@ void lithosphere::seedInitialTopography(float ocean_coverage, int32_t sea_level_
 
     for (uint32_t index = 0; index < map_area; ++index) {
         {
-            const float sample_x = warped_x[index];
-            const float sample_y = warped_y[index];
-            const float detail = sample_toroidal_noise(sample_x * 1.15f, sample_y * 1.15f,
-                                                       torus, continent_detail_noise);
-            const float shelf = sample_toroidal_noise(sample_x * 1.4f, sample_y * 1.4f,
-                                                      torus, shelf_noise);
-            const float sea_base = sample_toroidal_noise(sample_x * 1.15f, sample_y * 1.15f,
-                                                         torus, sea_base_noise);
-            const float sea_detail = sample_toroidal_noise(sample_x * 2.3f, sample_y * 2.3f,
-                                                           torus, sea_detail_noise);
-            const float sea_micro = sample_toroidal_noise(sample_x * 4.8f, sample_y * 4.8f,
-                                                          torus, sea_micro_noise);
-            const float land_detail = sample_toroidal_noise(sample_x * 1.55f, sample_y * 1.55f,
-                                                            torus, land_noise);
-            const float foothills = sample_toroidal_noise(sample_x * 2.15f, sample_y * 2.15f,
-                                                          torus, foothill_noise);
-            const float mountains =
-                1.0f - std::abs(sample_toroidal_noise(sample_x * 3.05f, sample_y * 3.05f,
-                                                      torus, mountain_noise));
-            const float ridge = 1.0f - std::abs(sample_toroidal_noise(sample_x * 2.1f, sample_y * 2.1f,
-                                                                      torus, ridge_noise));
-            const float trench = 1.0f - std::abs(sample_toroidal_noise(sample_x * 2.35f, sample_y * 2.35f,
-                                                                       torus, trench_noise));
+            const mesh::Vec3& q = warped[index];
+            const float detail = at(continent_detail_noise, q);
+            const float shelf = at(shelf_noise, q);
+            const float sea_base = at(sea_base_noise, q);
+            const float sea_detail = at(sea_detail_noise, q);
+            const float sea_micro = at(sea_micro_noise, q);
+            const float land_detail = at(land_noise, q);
+            const float foothills = at(foothill_noise, q);
+            const float mountains = 1.0f - std::abs(at(mountain_noise, q));
+            const float ridge = 1.0f - std::abs(at(ridge_noise, q));
+            const float trench = 1.0f - std::abs(at(trench_noise, q));
             const float distance_to_coast = continentality[index] - ocean_edge(index);
             const float coastal_transition =
                 smoothstep(0.010f, 0.110f, std::abs(distance_to_coast));
@@ -1635,29 +1555,25 @@ void lithosphere::seedMaterialMap() {
     }
 
     SimpleRandom material_rng(static_cast<uint32_t>(scenario.seed) ^ 0x6A09E667U);
-    const FractalNoiseConfig warp_x_noise =
-        make_noise_config(material_rng, 4.0f, 0.58f, 0.28f, 1.4f);
-    const FractalNoiseConfig warp_y_noise =
-        make_noise_config(material_rng, 4.0f, 0.58f, 0.28f, 1.4f);
-    const FractalNoiseConfig material_macro_noise =
-        make_noise_config(material_rng, 5.0f, 0.57f, 0.22f, 1.2f);
-    const FractalNoiseConfig material_detail_noise =
-        make_noise_config(material_rng, 6.0f, 0.61f, 0.75f, 2.4f);
+    // The torus engine's fields on the sphere (seeding_noise); the warp 2.4 / 18 of the relief's.
+    const double radius_km = grid_->radius_m() / 1000;
+    const double unit_km = scenario.initial_noise_wavelength_km;
+    const auto field = [&](int octaves, double persistence, double frequency) {
+        return seeding_noise(material_rng.next(), unit_km, radius_km, octaves, persistence, frequency);
+    };
+    const auto warp_x_noise = field(4, 0.58, 0.28 * 1.4);
+    const auto warp_y_noise = field(4, 0.58, 0.28 * 1.4);
+    const auto material_macro_noise = field(5, 0.57, 0.22 * 1.2);
+    const auto material_detail_noise = field(6, 0.61, 0.75 * 2.4 * 1.8);
+    const auto warp_z_noise = field(4, 0.58, 0.28 * 1.4);
+    const double warp_km = scenario.initial_noise_warp_km * 2.4 / 18;
 
-    // E4: replace. The torus noise at each cell's 4N x 2N lat-lon proxy position.
-    const tectonics::grid::LatLonProxy proxy(*grid_);
-    const TorusSize torus{proxy.width(), proxy.height()};
     for (uint32_t index = 0; index < map_area; ++index) {
         {
-            const float x = static_cast<float>(proxy.cellposition(index)[0] - 0.5);
-            const float y = static_cast<float>(proxy.cellposition(index)[1] - 0.5);
-            const float warp_x = x + sample_toroidal_noise(x, y, torus, warp_x_noise) * 2.4f;
-            const float warp_y = y + sample_toroidal_noise(x, y, torus, warp_y_noise) * 2.4f;
-            const float macro =
-                sample_toroidal_noise(warp_x, warp_y, torus, material_macro_noise);
-            const float detail =
-                sample_toroidal_noise(warp_x * 1.8f, warp_y * 1.8f, torus,
-                                      material_detail_noise);
+            const mesh::Vec3 q = tectonics::sphere_noise::warp(grid_->position(index), warp_x_noise, warp_y_noise,
+                                                               warp_z_noise, warp_km, radius_km);
+            const float macro = static_cast<float>(material_macro_noise(q));
+            const float detail = static_cast<float>(material_detail_noise(q));
             const float composite = 0.68f * macro + 0.32f * detail;
 
             uint8_t material_index =
@@ -1747,25 +1663,24 @@ void lithosphere::seedInitialCrustAges() {
         }
     }
 
-    const FractalNoiseConfig continental_macro_noise =
-        make_noise_config(static_cast<uint32_t>(scenario.seed) ^ 0x3C6EF372U, 5.0f, 0.57f, 0.26f, 1.3f);
-    const FractalNoiseConfig continental_detail_noise =
-        make_noise_config(static_cast<uint32_t>(scenario.seed) ^ 0xBB67AE85U, 6.0f, 0.60f, 0.72f, 2.5f);
-    const FractalNoiseConfig ocean_age_noise =
-        make_noise_config(static_cast<uint32_t>(scenario.seed) ^ 0xA54FF53AU, 4.0f, 0.58f, 0.34f, 1.6f);
-    const FractalNoiseConfig ocean_detail_noise =
-        make_noise_config(static_cast<uint32_t>(scenario.seed) ^ 0x510E527FU, 5.0f, 0.61f, 0.92f, 3.1f);
+    // The torus engine's fields on the sphere (seeding_noise), each seeded by its own salt.
+    const double radius_km = grid_->radius_m() / 1000;
+    const double unit_km = scenario.initial_noise_wavelength_km;
+    const auto field = [&](uint32_t salt, int octaves, double persistence, double frequency) {
+        SimpleRandom source(static_cast<uint32_t>(scenario.seed) ^ salt);
+        return seeding_noise(source.next(), unit_km, radius_km, octaves, persistence, frequency);
+    };
+    const auto continental_macro_noise = field(0x3C6EF372U, 5, 0.57, 0.26 * 1.3 * 0.75);
+    const auto continental_detail_noise = field(0xBB67AE85U, 6, 0.60, 0.72 * 2.5 * 1.7);
+    const auto ocean_age_noise = field(0xA54FF53AU, 4, 0.58, 0.34 * 1.6);
+    const auto ocean_detail_noise = field(0x510E527FU, 5, 0.61, 0.92 * 3.1 * 1.8);
 
     uint32_t max_age_steps = 0U;
     std::vector<uint32_t> timestamps(map_area, 0U);
 
-    // E4: replace. The torus noise at each cell's 4N x 2N lat-lon proxy position.
-    const tectonics::grid::LatLonProxy proxy(*grid_);
-    const TorusSize torus{proxy.width(), proxy.height()};
     for (uint32_t index = 0; index < map_area; ++index) {
         {
-            const float x = static_cast<float>(proxy.cellposition(index)[0] - 0.5);
-            const float y = static_cast<float>(proxy.cellposition(index)[1] - 0.5);
+            const mesh::Vec3 q = grid_->position(index);
             if (imap[index] >= num_plates || hmap[index] <= FLT_EPSILON) {
                 continue;
             }
@@ -1774,16 +1689,16 @@ void lithosphere::seedInitialCrustAges() {
             float age_myr = 0.0f;
             if (crust_class == CrustClass::Oceanic) {
                 const int32_t distance = std::max(0, ocean_distance[index]);
-                const float macro = sample_toroidal_noise(x, y, torus, ocean_age_noise);
-                const float detail = sample_toroidal_noise(x * 1.8f, y * 1.8f, torus, ocean_detail_noise);
+                const float macro = static_cast<float>(ocean_age_noise(q));
+                const float detail = static_cast<float>(ocean_detail_noise(q));
                 age_myr = static_cast<float>(distance) * 0.55f;
                 if (distance > 0) {
                     age_myr += 2.0f * macro + 1.5f * detail;
                 }
                 age_myr = std::max(0.0f, std::min(140.0f, age_myr));
             } else {
-                const float macro = 0.5f + 0.5f * sample_toroidal_noise(x * 0.75f, y * 0.75f, torus, continental_macro_noise);
-                const float detail = 0.5f + 0.5f * sample_toroidal_noise(x * 1.7f, y * 1.7f, torus, continental_detail_noise);
+                const float macro = 0.5f + 0.5f * static_cast<float>(continental_macro_noise(q));
+                const float detail = 0.5f + 0.5f * static_cast<float>(continental_detail_noise(q));
                 const float normalized = clamp_unit(0.68f * macro + 0.32f * detail);
                 const float min_age = crust_class == CrustClass::Transitional ? 55.0f : 110.0f;
                 const float span = crust_class == CrustClass::Transitional ? 55.0f : 120.0f;
@@ -2245,7 +2160,7 @@ void lithosphere::updateColumns() {
         displacement=tectonics::deformation::distribute(column_model.metric(),material_owners,continental_fraction,
             rigid,scenario.seed,{scenario.deformation_peak_km,scenario.deformation_variation,scenario.subduction_coupling,
             scenario.margin_processes.process_variation,getTimeMyr(),scenario.margin_processes.process_wavelength_km,
-            scenario.margin_processes.process_period_myr});
+            scenario.margin_processes.process_period_myr,scenario.deformation_variation_wavelength_km});
     }
     if (scenario.topology_processes.progressive_rifting) {
         PhaseTimer timer(phase_timings, Phase::rift_displacement);

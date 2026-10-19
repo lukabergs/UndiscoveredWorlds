@@ -270,3 +270,34 @@ Found while porting its tests; each is fixed in E3:
 - E3 made no imported-world run: that recipe starts at the mountain bases and has no
   tectonics stage, and E3 changed no code it runs (Earth-climate checked instead).
 
+
+## 11. Noise and positions on the sphere (W2-E, E4, 2026-10-19)
+
+The position-placed processes read each cell's unit vector; the lat-lon proxy and
+the 4-D simplex torus noise are deleted (`tectonic_sphere_noise.hpp`).
+
+- The torus seeding noise had no isotropic equivalent: a field's longitude period
+  (the world width) and latitude period (half of it) map onto one noise circle,
+  so its features were twice as fine north-south. The sphere fields take the
+  geometric mean, R / (sqrt 2 x scale x noise scale) km per noise unit
+  (`initial_noise_wavelength_km` 4505 / frequency); the continent macro field is
+  29,600 km, larger than the sphere, as on the torus (one or two blobs per world).
+- The torus coordinate factors (`sample_x * 1.15` and the like) wrapped with the
+  torus' period and so cut a seam at x = 0 in every field read with one; on the
+  sphere they only shorten the wavelength.
+- The relief warp was 18 cells and the material's 2.4 cells at any resolution, so
+  its length in km halved with each doubling of the width; now 2815 km
+  (`initial_noise_warp_km`, the 18 cells at 256 columns) and 2.4 / 18 of it.
+- One octave's deviation, measured over 4e6 samples: the 4-D simplex 0.297, the
+  ocean relief's value noise 0.455, against OpenSimplex2S 0.360 (Perlin 0.268);
+  the sphere fields are scaled to the noise they replace and clamped to [-1, 1].
+- Unrotated Perlin octaves (the mantle flow's choice) share one lattice with an
+  axis on the pole; with it the smoke run (N 64, 100 Myr) had striping ratios of
+  0.34 to 0.76 by band (0-80 degrees) and land 0.299, thickness 37.8 km, continental-land
+  median 365 m; with rotated OpenSimplex2S octaves (kept) 0.51 to 1.56 by band
+  (A4 0.07 over 0-80 degrees, E3's proxy 0.22) and 0.253, 35.5 km, 152 m. One
+  realisation each: the band ratios move by 0.3 to 0.6 between them, so the
+  striping ratio of one 256-column smoke run does not separate the kernels.
+- Seamounts: one per cell of a coarse cube whose cells are about the spacing wide,
+  offset within its middle 60 %, the ellipse in its tangent frame by great-circle
+  distance (the torus tiles in 3 x 3 neighbourhoods).

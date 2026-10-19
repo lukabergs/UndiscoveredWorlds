@@ -76,17 +76,9 @@ public:
     // limit set for the two-point flux holds with the correction once divided by it.
     double correctionfactor() const { return correctionfactor_; }
 
-    // E4: replace. Position of a cell for position-placed variation, in [0, 1)^2: the
-    // 4N x 2N lat-lon proxy's ((longitude + pi) / 2 pi, (pi / 2 - latitude) / pi), and the
-    // proxy's size in km (2 pi R, pi R); grid::LatLonProxy.
-    std::array<double, 2> unitposition(grid::CellId c) const { return proxy_.unitposition(c); }
-    std::array<double, 2> extent_km() const { return proxy_.extent_km(); }
-    const grid::LatLonProxy& proxy() const { return proxy_; }
-
 private:
     void buildcorrection();
     const grid::TectonicGrid* grid_ = nullptr;
-    grid::LatLonProxy proxy_{};
     double reference_area_m2_ = 0, correctionfactor_ = 1;
     std::vector<double> area_, scale_, width_, weight_;
     std::vector<mesh::Vec3> east_, south_; // the stencil axes

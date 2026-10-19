@@ -240,25 +240,6 @@ std::array<double, 2> TectonicGrid::tangentoffset_m(const Vec3& origin, CellId c
     return {mesh::dot(q, frame.east) * mesh_->radius_m(), mesh::dot(q, frame.north) * mesh_->radius_m()};
 }
 
-LatLonProxy::LatLonProxy(const TectonicGrid& grid)
-    : mesh_(grid.mesh()), width_(4U * static_cast<std::uint32_t>(grid.facecells())),
-      height_(2U * static_cast<std::uint32_t>(grid.facecells())),
-      cell_m_(2 * kPi * grid.radius_m() / (4.0 * grid.facecells())) {}
-
-std::array<double, 2> LatLonProxy::extent_km() const {
-    return {width_ * cell_m_ / 1000, height_ * cell_m_ / 1000};
-}
-
-std::array<double, 2> LatLonProxy::unitposition(CellId c) const {
-    const double u = (mesh_->longitude_rad(c) + kPi) / (2 * kPi), v = (kPi / 2 - mesh_->latitude_rad(c)) / kPi;
-    return {std::clamp(u, 0.0, std::nextafter(1.0, 0.0)), std::clamp(v, 0.0, std::nextafter(1.0, 0.0))};
-}
-
-std::array<double, 2> LatLonProxy::cellposition(CellId c) const {
-    const auto unit = unitposition(c);
-    return {unit[0] * width_, unit[1] * height_};
-}
-
 } // namespace tectonics::grid
 
 namespace tectonics::boundary_cube {

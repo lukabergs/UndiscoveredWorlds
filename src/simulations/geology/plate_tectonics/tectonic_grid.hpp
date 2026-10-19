@@ -125,31 +125,6 @@ private:
     std::vector<Edge> edges_;
 };
 
-// E4: replace. The temporary 4N x 2N latitude-longitude proxy of the position-placed
-// processes (ocean relief, process variation, the noise pass, the seeding noise, the
-// deformation peak, margin multipliers): a cell's position is its centre's longitude and
-// latitude read as a point of a cell-centred 4N x 2N torus of cells cell_m() = 2 pi R / 4N
-// wide, so the torus formulas run unchanged on the sphere (with the seam at the date line
-// and the poles' rows squeezed). E4 moves each process onto the sphere and deletes it.
-class LatLonProxy {
-public:
-    LatLonProxy() = default;
-    explicit LatLonProxy(const TectonicGrid& grid);
-    std::uint32_t width() const { return width_; }    // 4N
-    std::uint32_t height() const { return height_; }  // 2N
-    double cell_m() const { return cell_m_; }
-    std::array<double, 2> extent_km() const;          // 2 pi R, pi R
-    // ((longitude + pi) / 2 pi, (pi / 2 - latitude) / pi), each in [0, 1).
-    std::array<double, 2> unitposition(CellId c) const;
-    // The same in proxy cells: unitposition times (width, height).
-    std::array<double, 2> cellposition(CellId c) const;
-
-private:
-    const mesh::CellGrid* mesh_ = nullptr;
-    std::uint32_t width_ = 0, height_ = 0;
-    double cell_m_ = 0;
-};
-
 } // namespace tectonics::grid
 
 // Helpers of the boundary products on the cube (W2-E, E2A), shared by provenance, the

@@ -64,7 +64,7 @@ add_library(uw_tectonics STATIC
     tectonic_api.cpp
     tectonic_recipe.cpp
     simplerandom.cpp
-    simplexnoise.cpp
+    tectonic_sphere_noise.cpp
     tectonic_contract.cpp
     tectonic_dynamics.cpp
     tectonic_boundary_graph.cpp

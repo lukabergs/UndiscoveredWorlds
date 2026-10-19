@@ -1,6 +1,7 @@
 #include "simulations/geology/plate_tectonics/tectonic_noise_pass.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_columns.hpp"
-#include "simulations/geology/plate_tectonics/tectonic_ocean_relief.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_grid.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_sphere_noise.hpp"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -25,13 +26,15 @@ double apply(const columns::Metric& metric,std::vector<columns::Cell>& cells,
         !valid_root_delamination_width(root_max_thickness_m,root_delamination_width_m))
         throw std::runtime_error("Invalid noise pass grid or time");
     if (p.amplitude_m==0 || start==end) return 0;
-    // E4: replace. The torus pattern over the 4N x 2N lat-lon proxy.
-    const grid::LatLonProxy& proxy=metric.proxy();
-    const uint32_t w=proxy.width(),h=proxy.height();
-    const double cell_m=proxy.cell_m();
+    // Two fields of one octave of sphere noise at the wavelength (at least a cell spacing), the
+    // value noise's deviation, read at each cell's centre.
+    const grid::TectonicGrid& grid=metric.grid();
+    const double radius_km=grid.radius_m()/1000,spacing_km=grid.cellspacing_m()/1000;
+    const sphere_noise::Octaves steady_noise(static_cast<uint32_t>(seed),p.wavelength_km,radius_km,1,.5,
+                                             sphere_noise::value_deviation,spacing_km);
+    const sphere_noise::Octaves varying_noise(static_cast<uint32_t>(seed)^0x9e3779b9U,p.wavelength_km,radius_km,1,.5,
+                                              sphere_noise::value_deviation,spacing_km);
     constexpr double tau=6.28318530717958647692;
-    const auto kx=static_cast<uint32_t>(std::clamp(std::round(w*cell_m/(p.wavelength_km*1000)),1.,static_cast<double>(w)));
-    const auto ky=static_cast<uint32_t>(std::clamp(std::round(h*cell_m/(p.wavelength_km*1000)),1.,static_cast<double>(h)));
     const auto ramp=[](double t) { return -std::expm1(-t/30.); };
     const double steady=.6*(ramp(end)-ramp(start));
     const double varying=.4*(ramp(end)*std::sin(tau*end/p.period_myr)
@@ -40,10 +43,8 @@ double apply(const columns::Metric& metric,std::vector<columns::Cell>& cells,
     std::vector<double> coast_weight(cells.size(),1);
     std::vector<bool> land(cells.size());
     for (grid::CellId c=0;c<cells.size();++c) {
-        const auto position=proxy.unitposition(c);
-        const double u=position[0],v=position[1];
-        potential[c]=p.amplitude_m*(steady*ocean_relief::noise(u,v,kx,ky,seed)
-            +varying*ocean_relief::noise(u,v,kx,ky,static_cast<uint32_t>(seed)^0x9e3779b9U));
+        const mesh::Vec3 position=grid.position(c);
+        potential[c]=p.amplitude_m*(steady*steady_noise(position)+varying*varying_noise(position));
         if (p.coast_taper_m>0) {
             const double z=elevation_m(cells[c],thermal_strength,root_kg_m3,root_max_thickness_m,root_delamination_width_m);
             const double t=std::min(1.,std::abs(z)/p.coast_taper_m);

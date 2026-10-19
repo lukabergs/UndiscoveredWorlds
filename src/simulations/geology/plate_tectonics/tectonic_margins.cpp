@@ -72,11 +72,10 @@ Forcing forcing(const columns::Metric& metric,double dt,const std::vector<uint32
     constexpr auto none=std::numeric_limits<uint32_t>::max();
     Forcing result{std::vector<double>(count,-1),std::vector<double>(count),std::vector<uint32_t>(count,none),owners,{},{},{}};
     if (!p.enabled) return result;
-    // E4: replace. The process variation on the 4N x 2N lat-lon proxy.
-    const auto extent=metric.extent_km();
+    // The process variation at each cell's centre on the sphere.
+    const double radius_km=metric.grid().radius_m()/1000;
     const auto factor=[&](size_t i,uint32_t channel) {
-        const auto position=metric.unitposition(static_cast<grid::CellId>(i));
-        return variation::multiplier(position[0],position[1],extent[0],extent[1],time_myr,
+        return variation::multiplier(metric.grid().position(static_cast<grid::CellId>(i)),radius_km,time_myr,
             seed,channel,p.process_variation,p.process_wavelength_km,p.process_period_myr);
     };
     if (p.process_variation>0) {

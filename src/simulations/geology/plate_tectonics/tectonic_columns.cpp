@@ -79,7 +79,7 @@ mesh::Vec3 tangent(const mesh::Vec3& v, const mesh::Vec3& r) { return mesh::norm
 constexpr int cardinal_slot[grid::directioncount] = {7, 3, 1, 5};
 }
 
-Metric::Metric(const grid::TectonicGrid& grid) : grid_(&grid), proxy_(grid) {
+Metric::Metric(const grid::TectonicGrid& grid) : grid_(&grid) {
     const size_t count = grid.cellcount();
     const auto& table = grid.edges();
     area_.resize(count); width_.resize(count); scale_.resize(count);
@@ -339,19 +339,8 @@ void Model::initialize(std::shared_ptr<const grid::TectonicGrid> grid, std::vect
     cells_ = std::move(cells);
     seed_=seed;root_kg_m3_=root_kg_m3;root_max_thickness_m_=root_max_thickness_m;time_myr_=0;
     root_delamination_width_m_=root_delamination_width_m;
-    // E4: replace. The newborn crust's pattern on the 4N x 2N lat-lon proxy, read at each
-    // cell's proxy cell.
-    {
-        const grid::LatLonProxy& proxy = metric_.proxy();
-        const auto raster = ocean_relief::crust(proxy.width(), proxy.height(), proxy.cell_m(), seed, relief);
-        newborn_ocean_crust_.resize(cells_.size());
-        for (grid::CellId c = 0; c < cells_.size(); ++c) {
-            const auto position = proxy.cellposition(c);
-            const auto x = std::min(proxy.width() - 1, static_cast<uint32_t>(position[0]));
-            const auto y = std::min(proxy.height() - 1, static_cast<uint32_t>(position[1]));
-            newborn_ocean_crust_[c] = raster[static_cast<size_t>(y) * proxy.width() + x];
-        }
-    }
+    // The newborn crust's pattern at each cell's centre on the sphere.
+    newborn_ocean_crust_ = ocean_relief::crust(*grid_->mesh(), seed, relief);
     for (size_t i=0; i<cells_.size(); ++i) {
         auto& c=cells_[i];
         const double ratio=preserve_initial?1:newborn_ocean_crust_[i]/ridge_crust_m;

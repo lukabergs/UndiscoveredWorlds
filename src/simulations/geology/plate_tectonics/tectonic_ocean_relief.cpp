@@ -1,5 +1,7 @@
 #include "simulations/geology/plate_tectonics/tectonic_ocean_relief.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_columns.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_sphere_noise.hpp"
+#include "core/mesh/mesh_geometry.hpp"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -24,59 +26,60 @@ void validate(const Parameters& p) {
         !std::isfinite(p.seamount_roughness) || p.seamount_roughness<0 || p.seamount_roughness>1)
         throw std::runtime_error("Invalid ocean relief parameters: require positive scales, nonnegative amplitudes and spacing >= 6 radii");
 }
-double noise(double u, double v, uint32_t nx, uint32_t ny, uint32_t seed) {
-    if (!std::isfinite(u) || !std::isfinite(v) || nx == 0 || ny == 0)
-        throw std::runtime_error("Invalid ocean noise coordinates");
-    const double x=(u-std::floor(u))*nx, y=(v-std::floor(v))*ny;
-    const auto ix=static_cast<uint32_t>(std::floor(x)), iy=static_cast<uint32_t>(std::floor(y));
-    const double tx=smooth(x-ix), ty=smooth(y-iy);
-    const double a=hash(ix%nx,iy%ny,seed)*(1-tx)+hash((ix+1)%nx,iy%ny,seed)*tx;
-    const double b=hash(ix%nx,(iy+1)%ny,seed)*(1-tx)+hash((ix+1)%nx,(iy+1)%ny,seed)*tx;
-    return 2*(a*(1-ty)+b*ty)-1;
-}
-std::vector<double> crust(uint32_t w, uint32_t h, double cell_m, long seed, const Parameters& p) {
+std::vector<double> crust(const mesh::CellGrid& grid, long seed, const Parameters& p) {
     validate(p);
-    if (w<2 || h<2 || !std::isfinite(cell_m) || cell_m<=0)
+    const size_t count=grid.cellcount();
+    if (count==0 || !std::isfinite(grid.radius_m()) || grid.radius_m()<=0)
         throw std::runtime_error("Invalid ocean relief grid");
-    // Omit unresolved octaves; never alias fine noise into isolated pixels.
-    const auto nx=static_cast<uint32_t>(std::clamp(std::round(w*cell_m/(p.wavelength_km*1000)),1.0,w/2.0));
-    const auto ny=static_cast<uint32_t>(std::clamp(std::round(h*cell_m/(p.wavelength_km*1000)),1.0,h/2.0));
-    const double width_km=w*cell_m/1000, height_km=h*cell_m/1000;
-    const auto sx=static_cast<int>(std::max(1.0,std::round(width_km/p.seamount_spacing_km)));
-    const auto sy=static_cast<int>(std::max(1.0,std::round(height_km/p.seamount_spacing_km)));
-    std::vector<double> result(static_cast<size_t>(w)*h);
-    for (uint32_t y=0;y<h;++y) for (uint32_t x=0;x<w;++x) {
-        double value=0,weight=1,total=0;
-        for (uint32_t octave=0;octave<3;++octave) {
-            if ((nx<<octave)>w/2 || (ny<<octave)>h/2) break;
-            value+=weight*noise((x+.5)/w,(y+.5)/h,nx<<octave,ny<<octave,
-                               static_cast<uint32_t>(seed)^0xc2b2ae35U^(octave*0x9e3779b9U));
-            total+=weight; weight*=.5;
-        }
-        double seamount=0;
-        if (p.seamount_crust_m>0) {
-            const double px=(x+.5)*cell_m/1000, py=(y+.5)*cell_m/1000;
-            const int tx=static_cast<int>(px/width_km*sx),ty=static_cast<int>(py/height_km*sy);
-            for (int dy=-1;dy<=1;++dy) for (int dx=-1;dx<=1;++dx) {
-                const auto ix=static_cast<uint32_t>((tx+dx+sx)%sx),iy=static_cast<uint32_t>((ty+dy+sy)%sy);
-                const auto key=static_cast<uint32_t>(seed)^0x27d4eb2fU;
-                const double cx=(tx+dx+.2+.6*hash(ix,iy,key))*width_km/sx;
-                const double cy=(ty+dy+.2+.6*hash(ix,iy,key^0x165667b1U))*height_km/sy;
-                const double angle=6.283185307179586*hash(ix,iy,key^0xd3a2646cU);
-                const double aspect=.75+.5*hash(ix,iy,key^0xfd7046c5U);
-                const double rx=((px-cx)*std::cos(angle)+(py-cy)*std::sin(angle))/(p.seamount_radius_km*aspect);
-                const double ry=(-(px-cx)*std::sin(angle)+(py-cy)*std::cos(angle))/(p.seamount_radius_km/aspect);
+    const double radius_km=grid.radius_m()/1000;
+    const double spacing_km=std::sqrt(grid.totalarea_m2()/static_cast<double>(count))/1000;
+    // Omit unresolved octaves (shorter than two cell spacings); never alias fine noise into
+    // isolated cells.
+    const auto key=static_cast<uint32_t>(seed);
+    const sphere_noise::Octaves relief(key^0xc2b2ae35U,p.wavelength_km,radius_km,3,.5,
+                                       sphere_noise::value_deviation,2*spacing_km);
+    const sphere_noise::Octaves roughness(key^0x94d049bbU,p.wavelength_km,radius_km,1,.5,
+                                          sphere_noise::value_deviation,2*spacing_km);
+    std::vector<double> seamount(count,0.0);
+    if (p.seamount_crust_m>0) {
+        // One seamount per cell of a coarse cube of cells about the spacing wide.
+        const double face_km=std::sqrt(grid.totalarea_m2()/6)/1000;
+        const int n=std::max(1,static_cast<int>(std::lround(face_km/p.seamount_spacing_km)));
+        const auto coarse=mesh::makecubegrid(n,grid.radius_m());
+        const auto salt=key^0x27d4eb2fU;
+        const double reach_m=3*p.seamount_radius_km*1.25*1000;
+        for (mesh::CellId k=0;k<coarse->cellcount();++k) {
+            const double width_km=std::sqrt(coarse->area_m2(k))/1000;
+            const auto cell=mesh::tangentframe(coarse->centre(k),grid.radius_m());
+            const mesh::Vec3 centre=mesh::fromtangent(cell,(.6*hash(k,0,salt)-.3)*width_km,
+                                                      (.6*hash(k,1,salt)-.3)*width_km);
+            const auto frame=mesh::tangentframe(centre,grid.radius_m());
+            const double angle=6.283185307179586*hash(k,2,salt);
+            const double aspect=.75+.5*hash(k,3,salt);
+            const double height=.8+.4*hash(k,4,salt);
+            for (const auto c : mesh::cellswithin(grid,centre,reach_m)) {
+                // The cell centre in the seamount's tangent frame by great-circle distance.
+                const mesh::Vec3 q=grid.centre(c);
+                const double distance_km=mesh::greatcircle_rad(centre,q)*radius_km;
+                const mesh::Vec3 t=q-mesh::dot(q,centre)*centre;
+                const double length=mesh::length(t);
+                const double px=length>0?distance_km*mesh::dot(t,frame.east)/length:0;
+                const double py=length>0?distance_km*mesh::dot(t,frame.north)/length:0;
+                const double rx=(px*std::cos(angle)+py*std::sin(angle))/(p.seamount_radius_km*aspect);
+                const double ry=(-px*std::sin(angle)+py*std::cos(angle))/(p.seamount_radius_km/aspect);
                 const double radius=std::hypot(rx,ry);
-                if (radius<3) seamount+=std::exp(-.5*radius*radius)*(1-smooth(std::clamp(radius-2,0.0,1.0)))
-                    *(.8+.4*hash(ix,iy,key^0xb55a4f09U));
+                if (radius<3) seamount[c]+=std::exp(-.5*radius*radius)*(1-smooth(std::clamp(radius-2,0.0,1.0)))*height;
             }
         }
+    }
+    std::vector<double> result(count);
+    for (mesh::CellId c=0;c<count;++c) {
+        const mesh::Vec3 q=grid.centre(c);
+        const double variation=p.crust_variation_m>0?p.crust_variation_m*relief(q):0;
         // Distort the initial/birth profile, not evolved terrain. The same
         // positive rock layer subsequently advects; no per-frame noise state.
-        seamount*=1+p.seamount_roughness*noise((x+.5)/w,(y+.5)/h,nx,ny,
-                                             static_cast<uint32_t>(seed)^0x94d049bbU);
-        result[static_cast<size_t>(y)*w+x]=columns::ridge_crust_m+p.crust_variation_m*value/total
-            +p.seamount_crust_m*seamount;
+        const double raised=seamount[c]>0?seamount[c]*(1+p.seamount_roughness*roughness(q)):0;
+        result[c]=columns::ridge_crust_m+variation+p.seamount_crust_m*raised;
     }
     return result;
 }

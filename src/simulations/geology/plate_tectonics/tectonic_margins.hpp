@@ -97,8 +97,8 @@ void validate(const Parameters& p);
 using Polarity = std::map<std::pair<uint32_t,uint32_t>,uint32_t>; // Stable plate pair -> descending plate.
 // Over the cell table (W2-E): closing motion of the rigid displacements per update (3-D
 // tangent vectors in metres) along the edges' face normals, the arc walk straight on by the
-// table's ahead, flexure and ridge heat by Dijkstra in metres. E4: replace. The process
-// variation reads the 4N x 2N lat-lon proxy position (columns::Metric::unitposition).
+// table's ahead, flexure and ridge heat by Dijkstra in metres. The process variation is read
+// at each cell's centre on the sphere (variation::multiplier).
 Forcing forcing(const columns::Metric& metric, double dt_myr, const std::vector<uint32_t>& owners,
     const std::vector<columns::Cell>& cells, const std::vector<mesh::Vec3>& rigid_m, const Parameters& p,
     Polarity* polarity = nullptr, long seed = 0, double time_myr = 0);

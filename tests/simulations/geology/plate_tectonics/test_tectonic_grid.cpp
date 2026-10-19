@@ -180,24 +180,6 @@ TEST(TectonicGrid, CentroidOfAnEquatorialRingFallsBackToAMemberCell) {
     EXPECT_EQ(mesh::length(tectonics::boundary_cube::meandirection({}, 0.0, {})), 0.0);
 }
 
-// The temporary lat-lon proxy (E4 removes it): 4N x 2N cells of 2 pi R / 4N, positions in
-// [0, 1) from the longitude and latitude.
-TEST(TectonicGrid, LatLonProxyReadsLongitudeAndLatitude) {
-    const auto grid = TectonicGrid::cube(8, 6371.0);
-    const LatLonProxy proxy(*grid);
-    EXPECT_EQ(proxy.width(), 32u);
-    EXPECT_EQ(proxy.height(), 16u);
-    EXPECT_NEAR(proxy.extent_km()[0], 2 * 3.14159265358979323846 * 6371.0, 1e-9);
-    EXPECT_NEAR(proxy.extent_km()[1], 3.14159265358979323846 * 6371.0, 1e-9);
-    for (CellId c = 0; c < grid->cellcount(); ++c) {
-        const auto u = proxy.unitposition(c);
-        EXPECT_GE(u[0], 0); EXPECT_LT(u[0], 1);
-        EXPECT_GE(u[1], 0); EXPECT_LT(u[1], 1);
-        const mesh::Vec3 p = grid->position(c);
-        EXPECT_NEAR(u[1], .5 - mesh::latitudeof(p) / 3.14159265358979323846, 1e-12);
-    }
-}
-
 TEST(TectonicGrid, LithosphereKeepsPlateStateOnTheCube) {
     tectonics::scenario::Scenario scenario;
     scenario.seed = 1;

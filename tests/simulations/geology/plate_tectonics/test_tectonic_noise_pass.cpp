@@ -1,6 +1,6 @@
-// The experimental noise pass on the cube (W2-E, E3): conservative face transfers over the cell
-// table with the non-orthogonal correction; the potential is the torus pattern read at the
-// 4N x 2N lat-lon proxy (E4 moves it onto the sphere).
+// The experimental noise pass on the cube (W2-E, E3-E4): conservative face transfers over the
+// cell table with the non-orthogonal correction; the potential is sphere noise read at each
+// cell's centre.
 #include "gtest/gtest.h"
 #include "cube_fixture.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_columns.hpp"

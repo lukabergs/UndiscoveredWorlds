@@ -37,6 +37,14 @@ struct Scenario {
     bool boundary_conditioned_terrain = false;
     double initial_boundary_influence = 1; // Local kinematic conditioning without changing the seeded column conversion.
     double initial_margin_width_m = 0; // Smooth continental/oceanic mixture around -2500 m; preserves seeded elevation.
+    // The seeding noise on the sphere (initial relief, material and ages; E4): a field of the
+    // torus engine's frequency f (its scale x noise scale x coordinate factor) has the
+    // wavelength initial_noise_wavelength_km / f, km (R / sqrt 2 at Earth's radius: the torus'
+    // km per noise unit, the geometric mean of its longitude and latitude periods); the
+    // relief's warp moves a position by up to initial_noise_warp_km per component (the torus'
+    // 18 cells at 256 columns), the material's by 2.4 / 18 of it.
+    double initial_noise_wavelength_km = 4505;
+    double initial_noise_warp_km = 2815;
     // Share of the surface seeded as continental crust (0: the legacy seeding, where
     // every column above -2500 m is continental). Above 0 the ocean side between the
     // land and this share is a shelf (0 to -200 m) and a slope crossing -2500 m at its
@@ -87,6 +95,9 @@ struct Scenario {
     uint32_t transport_subdivision = 2;
     double deformation_peak_km = 300.0;
     double deformation_variation = .2;
+    // The deformation peak's spatial variation, km (deformation::Parameters): the torus
+    // pattern's four cycles per world width, pi R / 2 at Earth's radius.
+    double deformation_variation_wavelength_km = 10007;
     double subduction_coupling = .2;
     double coastal_gpe_strength = 0; // Existing root-pressure resistance at ocean/continent contacts.
     double boundary_force_ramp_cm_yr = 0; // Smooth ridge/slab activation near zero normal motion; 0 selects instantaneous activation.

@@ -1,36 +1,64 @@
-// Ocean relief (W2-E, E3): the periodic noise and the crust pattern (a torus raster, read on the
-// cube through the 4N x 2N lat-lon proxy until E4), material relief that moves with the rock.
+// Ocean relief (W2-E, E4): sphere noise and the newborn crust pattern read at each cell's
+// centre on the cube, material relief that moves with the rock.
 #include "gtest/gtest.h"
 #include "cube_fixture.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_columns.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_ocean_relief.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_sphere_noise.hpp"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <string>
 
 namespace {
 using cubefixture::CellId;
 using cubefixture::Vec3;
 }
 
+// On the sphere (E4): the noise is bounded, deterministic, has the value noise's deviation and
+// is continuous at a point; the newborn crust is deterministic, seeded and positive, and as
+// smooth across the cube's face edges (and around its corners) as inside the faces: the mean
+// step per km over the 12 N face-edge pairs is that of the interior pairs.
 TEST(TectonicOceanRelief, SmoothPeriodicDeterministicNoiseAndPositiveCrust) {
-    using namespace tectonics::ocean_relief;
-    for (int i=-20;i<20;++i) {
-        const double u=i*.137,v=i*.073;
-        EXPECT_NEAR(noise(u,v,7,5,1),noise(u+1,v-1,7,5,1),1e-13);
-        EXPECT_LE(std::abs(noise(u,v,7,5,1)),1);
+    using namespace tectonics;
+    const int n=32;
+    const auto grid=cubefixture::cube(n);
+    const double radius_km=grid->radius_m()/1000;
+    const sphere_noise::Octaves noise(1,1500,radius_km,1,.5,sphere_noise::value_deviation);
+    double sum=0,squares=0,area=0;
+    for (CellId c=0;c<grid->cellcount();++c) {
+        const Vec3 p=grid->position(c);
+        const double v=noise(p);
+        EXPECT_DOUBLE_EQ(v,noise(p));
+        EXPECT_LE(std::abs(v),1);
+        EXPECT_NEAR(v,noise(mesh::normalise(Vec3{p.x+1e-9,p.y,p.z})),1e-5);
+        sum+=v*grid->area_m2(c);squares+=v*v*grid->area_m2(c);area+=grid->area_m2(c);
     }
-    EXPECT_NEAR(noise(1e-7,.23,7,5,1),noise(-1e-7,.23,7,5,1),1e-9);
-    const auto a=crust(64,32,50000,1,{6000,400});
-    EXPECT_EQ(a,crust(64,32,50000,1,{6000,400}));
-    EXPECT_NE(a,crust(64,32,50000,2,{6000,400}));
+    const double deviation=std::sqrt(squares/area-(sum/area)*(sum/area));
+    RecordProperty("one_octave_deviation",std::to_string(deviation));
+    EXPECT_GT(deviation,.3);EXPECT_LT(deviation,.6);
+    const auto& cells=*grid->mesh();
+    const ocean_relief::Parameters p{6000,1500};
+    const auto a=ocean_relief::crust(cells,1,p);
+    EXPECT_EQ(a,ocean_relief::crust(cells,1,p));
+    EXPECT_NE(a,ocean_relief::crust(cells,2,p));
     EXPECT_GT(*std::min_element(a.begin(),a.end()),0);
-    for (double v : crust(64,32,50000,1,{})) EXPECT_DOUBLE_EQ(v,7000);
-    EXPECT_THROW(validate({7000,400}),std::runtime_error);
-    EXPECT_THROW(validate({100,-1}),std::runtime_error);
+    double face=0,inside=0;
+    size_t faces=0,insides=0;
+    for (const auto& e : grid->edges()) {
+        const double slope=std::abs(a[e.a]-a[e.b])/e.distance_m;
+        if (e.a/(n*n)!=e.b/(n*n)) { face+=slope;++faces; } else { inside+=slope;++insides; }
+    }
+    EXPECT_EQ(faces,12u*n);
+    const double ratio=(face/faces)/(inside/insides);
+    RecordProperty("face_edge_over_interior_step",std::to_string(ratio));
+    EXPECT_GT(ratio,.6);EXPECT_LT(ratio,1.6);
+    for (double v : ocean_relief::crust(cells,1,{})) EXPECT_DOUBLE_EQ(v,7000);
+    EXPECT_THROW(ocean_relief::validate({7000,400}),std::runtime_error);
+    EXPECT_THROW(ocean_relief::validate({100,-1}),std::runtime_error);
 }
 
-// The model's newborn crust is the proxy pattern at each cell: it varies over the sphere, stays
+// The model's newborn crust is the sphere pattern at each cell: it varies over the sphere, stays
 // put while the rock moves, and a rigid rotation carries the relief with the rock.
 TEST(TectonicOceanRelief, ReliefIsMaterialAndDoesNotRegenerateOrDependOnUpdateCount) {
     using namespace tectonics;
@@ -76,9 +104,9 @@ TEST(TectonicOceanRelief, ReliefIsMaterialAndDoesNotRegenerateOrDependOnUpdateCo
 TEST(TectonicOceanRelief, SparseBasaltSeamountsFormIslandsAndRemainInTheMassBudget) {
     using namespace tectonics;
     const ocean_relief::Parameters relief{0,600,45000,350,3500};
-    const auto rocks=ocean_relief::crust(128,64,100000,1,relief);
-    EXPECT_EQ(rocks,ocean_relief::crust(128,64,100000,1,relief));
     const auto grid = cubefixture::cube(32, cubefixture::radiusfor_km(32, 100000));
+    const auto rocks=ocean_relief::crust(*grid->mesh(),1,relief);
+    EXPECT_EQ(rocks,ocean_relief::crust(*grid->mesh(),1,relief));
     std::vector<columns::Cell> initial(grid->cellcount(),columns::seed(-4000,false,40));
     columns::Model model; model.initialize(grid,initial,2,1,relief);
     size_t islands=0; double mass=0;
@@ -138,10 +166,11 @@ TEST(TectonicOceanRelief, SubmarineTransportIsSeparateConservativeAndDoesNotChan
 TEST(TectonicOceanRelief, IrregularSeamountProfilesArePositiveRepeatableMaterial) {
     using namespace tectonics;
     ocean_relief::Parameters p{0,600,45000,350,3500,.65};
-    const auto irregular=ocean_relief::crust(64,32,150000,1,p);
-    EXPECT_EQ(irregular,ocean_relief::crust(64,32,150000,1,p));
+    const auto grid = cubefixture::cube(16, cubefixture::radiusfor_km(16, 150000));
+    const auto irregular=ocean_relief::crust(*grid->mesh(),1,p);
+    EXPECT_EQ(irregular,ocean_relief::crust(*grid->mesh(),1,p));
     p.seamount_roughness=0;
-    const auto smooth=ocean_relief::crust(64,32,150000,1,p);
+    const auto smooth=ocean_relief::crust(*grid->mesh(),1,p);
     double difference=0;
     for (size_t i=0;i<irregular.size();++i) {
         EXPECT_GE(irregular[i],7000);
@@ -150,7 +179,6 @@ TEST(TectonicOceanRelief, IrregularSeamountProfilesArePositiveRepeatableMaterial
     }
     EXPECT_GT(difference/irregular.size(),100);
     p.seamount_roughness=.65;
-    const auto grid = cubefixture::cube(16, cubefixture::radiusfor_km(16, 150000));
     columns::Model model;
     model.initialize(grid,std::vector<columns::Cell>(grid->cellcount(),columns::seed(-4000,false,40)),4,1,p);
     const auto before=model.cells();

@@ -380,24 +380,47 @@ TEST(TectonicMargins, StrongerBendingIsLocalizedAndDoesNotConsumeStationaryRock)
     EXPECT_NEAR(model.budget().relative_mass_residual,0,1e-12);
 }
 
+// On the sphere (E4): deterministic, periodic in absolute time, bounded, and continuous across
+// the cube's face edges and corners: a pure function of the unit vector whose 3-D gradient is
+// at most amplitude x 2 pi / wavelength x (0.5 sqrt 2 + 0.5 sqrt 5) per km, so the two cells of
+// every edge (those across face edges and around the 24 corner cells included) differ by at
+// most that bound times their distance.
 TEST(TectonicVariation, PeriodicDeterministicAndContinuousInAbsoluteTime) {
-    const auto value=[](double x,double y,double t,uint32_t channel=0) {
-        return tectonics::variation::multiplier(x,y,40000,20000,t,1,channel,.35,1800,80);
+    const int n=16;
+    const auto grid=cubefixture::cube(n);
+    const double radius_km=grid->radius_m()/1000;
+    const auto value=[&](const Vec3& p,double t,uint32_t channel=0) {
+        return tectonics::variation::multiplier(p,radius_km,t,1,channel,.35,1800,80);
     };
     double low=2,high=0;
-    for (int i=0;i<100;++i) {
-        const double x=i*.013,y=i*.021,t=i*.9,a=value(x,y,t);
-        EXPECT_DOUBLE_EQ(a,value(x,y,t));
-        EXPECT_NEAR(a,value(x+1,y,t),1e-13);
-        EXPECT_NEAR(a,value(x,y+1,t),1e-13);
-        EXPECT_NEAR(a,value(x,y,t+80),1e-13);
-        EXPECT_NEAR(a,value(x,y,t+.001),1e-4);
+    for (CellId c=0;c<grid->cellcount();++c) {
+        const Vec3 p=grid->position(c);
+        const double t=(c%100)*.9,a=value(p,t);
+        EXPECT_DOUBLE_EQ(a,value(p,t));
+        EXPECT_NEAR(a,value(p,t+80),1e-12);
+        EXPECT_NEAR(a,value(p,t+.001),1e-4);
         EXPECT_GE(a,.65);EXPECT_LE(a,1.35);
         low=std::min(low,a);high=std::max(high,a);
     }
     EXPECT_GT(high-low,.2);
-    EXPECT_NE(value(.2,.3,40,0),value(.2,.3,40,1));
-    EXPECT_DOUBLE_EQ(tectonics::variation::multiplier(.2,.3,40000,20000,40,1,0,0,1800,80),1);
+    const double bound=.35*2*cubefixture::pi/1800*(.5*std::sqrt(2.)+.5*std::sqrt(5.));
+    size_t faceedges=0;
+    double largest=0;
+    for (const auto& e : grid->edges()) {
+        const double step=std::abs(value(grid->position(e.a),40)-value(grid->position(e.b),40));
+        const double limit=bound*e.distance_m/1000;
+        EXPECT_LE(step,limit*(1+1e-9));
+        largest=std::max(largest,step/limit);
+        faceedges+=e.a/(n*n)!=e.b/(n*n);
+    }
+    EXPECT_EQ(faceedges,12u*n);
+    RecordProperty("largest_step_over_bound",std::to_string(largest));
+    // The same pattern from either side of a cube corner (the unit vector alone decides).
+    const Vec3 corner=mesh::normalise(Vec3{1,1,1});
+    EXPECT_NEAR(value(corner,40),value(mesh::normalise(Vec3{1+1e-12,1,1}),40),1e-9);
+    const Vec3 p=grid->position(5);
+    EXPECT_NE(value(p,40,0),value(p,40,1));
+    EXPECT_DOUBLE_EQ(tectonics::variation::multiplier(p,radius_km,40,1,0,0,1800,80),1);
     EXPECT_THROW(tectonics::variation::validate(.8,1800,80),std::runtime_error);
 }
 
