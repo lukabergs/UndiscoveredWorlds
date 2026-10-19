@@ -12,6 +12,7 @@
 #include <limits>
 #include <sstream>
 #include <stdexcept>
+#include <type_traits>
 #include <vector>
 
 #include "core/mesh/cube_geometry.hpp"
@@ -492,10 +493,13 @@ void writewindowcells(runbundle::Writer& writer, const mesh::CellGrid& grid)
     addarray(writer, "reverse", "|i1", {count, slots}, reverse);
 }
 
-// A field's values remapped to the export box by its rule; a direction field as 0.
+// A field's values remapped to the export box by its rule; a direction field as 0. A cell the
+// kept cells do not cover (no overlap) is not extrapolated: NaN for a float field, 0 for an
+// integer one (the catalogue has no missing value; export_covered marks the cells).
 template<typename T>
 std::vector<unsigned char> exportvalues(const runbundle::FieldEntry& entry, worldmodel::RemapRule rule, const mesh::RemapWeights& weights,
-                                        const mesh::CellGrid& source, const mesh::CellGrid& destination)
+                                        const mesh::CellGrid& source, const mesh::CellGrid& destination,
+                                        const std::vector<std::uint8_t>& covered)
 {
     const T* data = static_cast<const T*>(entry.data);
     const std::vector<T> values(data, data + entry.bytes / sizeof(T));
@@ -507,6 +511,14 @@ std::vector<unsigned char> exportvalues(const runbundle::FieldEntry& entry, worl
     case worldmodel::RemapRule::nearest: out = mesh::remapnearest(source, destination, values); break;
     case worldmodel::RemapRule::direction: out.assign(destination.cellcount(), T{}); break;
     }
+    for (std::size_t d = 0; d < out.size(); d++)
+        if (!covered[d])
+        {
+            if constexpr (std::is_floating_point_v<T>)
+                out[d] = std::numeric_limits<T>::quiet_NaN();
+            else
+                out[d] = T{};
+        }
     std::vector<unsigned char> bytes(out.size() * sizeof(T));
     if (!bytes.empty())
         std::memcpy(bytes.data(), out.data(), bytes.size());
@@ -537,18 +549,22 @@ void writecubewindowbundle(const std::filesystem::path& directory, const landsca
     const std::shared_ptr<const mesh::CellGrid> exportgrid = mesh::latlonwindowgrid(window.worldwidth * scale, kept.radius_m(), box);
     const mesh::RemapWeights weights = mesh::makeremap(kept, *exportgrid);
     const std::size_t columns = static_cast<std::size_t>(box.columns), rows = static_cast<std::size_t>(box.rows);
+    // An export cell is covered when it overlaps a kept cell (its remap row has weight).
+    std::vector<std::uint8_t> covered(exportgrid->cellcount());
+    for (std::size_t d = 0; d < covered.size(); d++)
+        covered[d] = weights.rowstart[d + 1] > weights.rowstart[d] ? 1 : 0;
 
     runbundle::Writer writer(directory);
     const ExportHook hook = [&](const runbundle::FieldEntry& entry, worldmodel::RemapRule rule) {
         std::vector<unsigned char> bytes;
         if (entry.dtype == "<f4")
-            bytes = exportvalues<float>(entry, rule, weights, kept, *exportgrid);
+            bytes = exportvalues<float>(entry, rule, weights, kept, *exportgrid, covered);
         else if (entry.dtype == "|u1")
-            bytes = exportvalues<std::uint8_t>(entry, rule, weights, kept, *exportgrid);
+            bytes = exportvalues<std::uint8_t>(entry, rule, weights, kept, *exportgrid, covered);
         else if (entry.dtype == "<i2")
-            bytes = exportvalues<std::int16_t>(entry, rule, weights, kept, *exportgrid);
+            bytes = exportvalues<std::int16_t>(entry, rule, weights, kept, *exportgrid, covered);
         else if (entry.dtype == "<i4")
-            bytes = exportvalues<std::int32_t>(entry, rule, weights, kept, *exportgrid);
+            bytes = exportvalues<std::int32_t>(entry, rule, weights, kept, *exportgrid, covered);
         else
             throw std::logic_error("writecubewindowbundle: no export for " + entry.id + " of " + entry.dtype);
         runbundle::FieldEntry exported = entry;
@@ -558,6 +574,19 @@ void writecubewindowbundle(const std::filesystem::path& directory, const landsca
         writer.addexport(exported, worldmodel::remaprulename(rule), false);
     };
     const std::vector<std::string> written = addregionalfields(writer, fields, {count}, count, metadata, &hook);
+    // The export's coverage mask (export only: no native field).
+    runbundle::FieldEntry mask;
+    mask.id = "geosphere.export_covered";
+    mask.component = "geosphere";
+    mask.units = "0/1";
+    mask.description = "Export cells that overlap a kept cell of the window: elsewhere float exports are NaN and integer ones 0";
+    mask.layout = "grid";
+    mask.dtype = "|u1";
+    mask.shape = {rows, columns};
+    mask.data = covered.data();
+    mask.bytes = covered.size();
+    mask.writtenby = metadata.writtenby;
+    writer.addexport(mask, "coverage", false);
     writewindowcells(writer, kept);
     runbundle::Metadata manifest = regionalmanifest(fields, metadata, columns, rows, written);
     manifest.grid.kind = "cube-window";

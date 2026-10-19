@@ -71,7 +71,10 @@ void writeregionalbundle(const std::filesystem::path& directory, const landscape
 // reverse); and every grid field's lat-lon export of the window's box (fields.window's kept box
 // at its scale k: finewidth x fineheight cells of the level's lat-lon grid, kW x kH) by the field's
 // remap rule through mesh::makeremap on the window itself, a direction field as 0 (not
-// recomputed). The window block is the lat-lon one's (fields.window on the export grid W = 4 N).
+// recomputed); an export cell that overlaps no kept cell is NaN in a float field and 0 in an
+// integer one (no extrapolation; the catalogue has no missing value), marked by the export-only
+// mask geosphere.export_covered (u1, rule "coverage").
+// The window block is the lat-lon one's (fields.window on the export grid W = 4 N).
 // Throws std::invalid_argument when kept is not a cube window of N_L = basefacecells x scale,
 // fields.window.worldwidth is not 4 basefacecells, a pixel grid is set, or a field's size is not
 // kept.cellcount(); and as runbundle::Writer.

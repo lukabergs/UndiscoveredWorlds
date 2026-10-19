@@ -182,16 +182,39 @@ class Bundle:
     def table_rows(self, identifier):
         return list(csv.DictReader(io.StringIO(self.table_text(identifier))))
 
+    def export_box(self):
+        """(first fine row, first fine column, fine cells per pixel, kH, kW) of a regional or cube-window bundle's
+        lat-lon grid (its fine grid, pixel grid or export of the box on the planet-wide k W x k H grid, from the
+        window block); None for a world bundle."""
+        window = self.manifest.get('window')
+        if not isinstance(window, dict):
+            return None
+        scale = window['scale']
+        return (window['fine_row0'], window['fine_column0'], window.get('pixel_cells', 1),
+                scale * window['world_rows'], scale * window['world_columns'])
+
     def latitudes(self):
-        """Cell-centre latitudes in degrees, north row first."""
-        return grid.latitudes(self.rows)
+        """Cell-centre latitudes in degrees, north row first: the world grid's, or a regional or cube-window
+        bundle's lat-lon box (export_box)."""
+        box = self.export_box()
+        if box is None:
+            return grid.latitudes(self.rows)
+        row0, _, cells, fine_rows, _ = box
+        return 90.0 - (row0 + (np.arange(self.rows) + 0.5) * cells) * 180.0 / fine_rows
 
     def longitudes(self):
-        return grid.longitudes(self.columns)
+        """Cell-centre longitudes in degrees in -180 .. 180, west to east (a box across the date line wraps)."""
+        box = self.export_box()
+        if box is None:
+            return grid.longitudes(self.columns)
+        _, column0, cells, _, fine_columns = box
+        longitude = -180.0 + (column0 + (np.arange(self.columns) + 0.5) * cells) * 360.0 / fine_columns
+        return (longitude + 180.0) % 360.0 - 180.0
 
     def area_weights(self):
-        """Cell area weights (rows x columns), proportional to the cosine of latitude, summing to one."""
-        weights = grid.cosine_latitude(self.rows)[:, None] * np.ones((1, self.columns))
+        """Cell area weights (rows x columns), proportional to the cosine of latitude, summing to one (over the
+        box for a regional or cube-window bundle)."""
+        weights = np.cos(np.deg2rad(self.latitudes()))[:, None] * np.ones((1, self.columns))
         return weights / weights.sum()
 
     def sea_mask(self):

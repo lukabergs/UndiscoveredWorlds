@@ -3,6 +3,7 @@
 // a constant field exact, and a v1 bundle still loads as a lat-lon world.
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -424,12 +425,31 @@ TEST(BundleV2, CubeWindowRoundTrips)
     box.row0 = window.row0 * scale;
     box.rows = window.fineheight();
     const auto exportgrid = mesh::latlonwindowgrid(columns * scale, radius, box);
-    EXPECT_EQ(reader.exports().size(), reader.fields().size() - 1);
-    std::size_t covered = 0;
+    // Every grid field and the coverage mask; no export of the scalar sea level.
+    EXPECT_EQ(reader.exports().size(), reader.fields().size());
+    std::vector<std::uint8_t> mask;
+    for (const runbundle::ManifestEntry& entry : reader.exports())
+        if (entry.id == "geosphere.export_covered")
+        {
+            EXPECT_EQ(entry.rule, "coverage");
+            EXPECT_EQ(entry.dtype, "|u1");
+            mask = reader.fielddata(entry);
+        }
+    ASSERT_EQ(mask.size(), exportgrid->cellcount());
+    std::size_t covered = 0, uncovered = 0;
     for (const runbundle::ManifestEntry& entry : reader.exports())
     {
         EXPECT_EQ(entry.shape, (std::vector<std::size_t>{ static_cast<std::size_t>(box.rows), static_cast<std::size_t>(box.columns) }))
             << entry.id;
+        if (entry.id == "hydrosphere.river_flow_january")
+        {
+            const std::vector<unsigned char> bytes = reader.fielddata(entry);
+            std::vector<std::int32_t> values(bytes.size() / sizeof(std::int32_t));
+            std::memcpy(values.data(), bytes.data(), bytes.size());
+            for (mesh::CellId d = 0; d < exportgrid->cellcount(); d++)
+                if (!mask[d])
+                    EXPECT_EQ(values[d], 0);
+        }
         if (entry.id != "atmosphere.precipitation_july" && entry.id != "geosphere.base_elevation")
             continue;
         EXPECT_EQ(entry.rule, "mean");
@@ -439,18 +459,27 @@ TEST(BundleV2, CubeWindowRoundTrips)
         for (mesh::CellId d = 0; d < exportgrid->cellcount(); d++)
         {
             const mesh::Vec3 p = exportgrid->centre(d);
-            if (kept->locate(p) == mesh::nocell)
+            // A centre inside a kept cell is covered; a cell without overlap is NaN, never extrapolated.
+            if (kept->locate(p) != mesh::nocell)
+                EXPECT_EQ(mask[d], 1);
+            if (!mask[d])
+            {
+                EXPECT_TRUE(std::isnan(values[d])) << entry.id << " cell " << d;
+                uncovered += entry.id == "atmosphere.precipitation_july" ? 1 : 0;
                 continue;
+            }
             if (entry.id == "atmosphere.precipitation_july")
             {
                 EXPECT_EQ(values[d], 7.0f);
                 covered++;
             }
-            else
+            else if (kept->locate(p) != mesh::nocell)
                 EXPECT_NEAR(values[d], 1000.0 * p.z + 200.0 * p.x, 60.0);
         }
     }
     EXPECT_GT(covered, exportgrid->cellcount() / 2);
+    EXPECT_GT(uncovered, 0u);  // the box's corners lie beyond the kept cells
+    EXPECT_EQ(covered + uncovered, exportgrid->cellcount());
     if (keep == nullptr || !*keep)
         std::filesystem::remove_all(directory);
 }

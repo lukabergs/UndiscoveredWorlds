@@ -187,6 +187,32 @@ class BundleV2Tests(unittest.TestCase):
         with self.assertRaises(ValueError):
             Bundle.open(write_cube(self.root / "cube")).cell_ids()
 
+    def test_coordinates_describe_the_box_of_a_window(self):
+        # A cube window: its export box starts at fine row 4 of the 16-row level grid (scale 4, world 8 x 4).
+        window = Bundle.open(write_cube_window(self.root / "window", [1, 2, 3]))
+        np.testing.assert_allclose(window.latitudes(), 90.0 - (4 + np.arange(6) + 0.5) * 180.0 / 16)
+        np.testing.assert_allclose(window.longitudes(), -180.0 + (np.arange(8) + 0.5) * 360.0 / 32)
+        # A lat-lon regional bundle across the date line: fine columns 14 .. 21 of 16 at scale 2.
+        regional = write_latlon(self.root / "regional", latlon_fields(), SCHEMA)
+        manifest = json.loads((regional / "manifest.json").read_text(encoding="utf-8"))
+        manifest["window"] = {"scale": 2, "world_columns": 8, "world_rows": 4, "column0": 7, "columns": 4, "row0": 1,
+                              "rows": 2, "fine_column0": 14, "fine_row0": 2, "halo": 0}
+        (regional / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        bundle = Bundle.open(regional)
+        np.testing.assert_allclose(bundle.latitudes(), 90.0 - (2 + np.arange(ROWS) + 0.5) * 22.5)
+        expected = -180.0 + ((14 + np.arange(COLUMNS)) % 16 + 0.5) * 22.5
+        np.testing.assert_allclose(bundle.longitudes(), expected)
+        self.assertEqual(bundle.longitudes()[2], -180.0 + 0.5 * 22.5)  # past the date line
+        weights = bundle.area_weights()
+        self.assertEqual(weights.shape, (ROWS, COLUMNS))
+        self.assertAlmostEqual(weights.sum(), 1.0)
+        np.testing.assert_allclose(weights[:, 0] / weights[0, 0], np.cos(np.deg2rad(bundle.latitudes())) /
+                                   np.cos(np.deg2rad(bundle.latitudes()[0])))
+        # A world bundle keeps the whole grid.
+        world = Bundle.open(write_latlon(self.root / "world", latlon_fields(), SCHEMA))
+        np.testing.assert_allclose(world.latitudes(), 90.0 - (np.arange(ROWS) + 0.5) * 45.0)
+        self.assertIsNone(world.export_box())
+
     def test_check_grid_accepts_both_kinds(self):
         latlon = Bundle.open(write_latlon(self.root / "latlon", latlon_fields(), SCHEMA))
         cube = Bundle.open(write_cube(self.root / "cube"))
