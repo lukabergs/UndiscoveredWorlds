@@ -14,9 +14,8 @@
 void applysubgridstatisticsstage(planet& world)
 {
     namespace t = tuning::landscape;
-    const int columns = world.width() + 1;
-    const int rows = world.height() + 1;
-    const landscape::SphereMetric metric(columns, rows, static_cast<double>(world.radius()));
+    // The world's own cell grid (a cube or the lat-lon grid), as flowrouting::worldmetric.
+    const landscape::SphereMetric metric(world.sharedgrid());
     const std::size_t size = metric.size();
 
     landscape::SubgridParameters parameters;

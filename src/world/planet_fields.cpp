@@ -208,9 +208,11 @@ struct planetfieldaccess
             return data;
         }
 
+        // The storage's lat-lon shape from the cell grid: 0 x 0 on a cube, whose grids are
+        // stored by cell id (field_encoding.hpp).
         worldmodel::encoding::ReadOperation op;
-        op.columns = static_cast<std::size_t>(world.body_.itswidth) + 1;
-        op.rows = static_cast<std::size_t>(world.body_.itsheight) + 1;
+        op.columns = static_cast<std::size_t>(world.grid().columns());
+        op.rows = static_cast<std::size_t>(world.grid().rows());
         if (!visit(world, id, op))
             throw std::logic_error("World field has no storage: " + worldmodel::qualifiedname(id));
         return std::move(op.data);
@@ -230,8 +232,8 @@ struct planetfieldaccess
         if (loadclimateworldfield(world.climate_, data))
             return true;
         worldmodel::encoding::LoadOperation op;
-        op.columns = static_cast<std::size_t>(world.body_.itswidth) + 1;
-        op.rows = static_cast<std::size_t>(world.body_.itsheight) + 1;
+        op.columns = static_cast<std::size_t>(world.grid().columns());
+        op.rows = static_cast<std::size_t>(world.grid().rows());
         op.data = &data;
         return visit(world, data.id, op);
     }

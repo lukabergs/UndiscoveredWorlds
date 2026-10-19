@@ -544,15 +544,17 @@ void getlandandseatotals(planet& world)
                 seatotal++;
         }
     }
-
-    for (int i = 1; i < width; i++) // Avoid the margins, to avoid false positives.
+    else
     {
-        for (int j = 1; j < height; j++)
+        for (int i = 1; i < width; i++) // Avoid the margins, to avoid false positives.
         {
-            if (!world.basebelowsea(i, j))
-                landtotal++;
-            else
-                seatotal++;
+            for (int j = 1; j < height; j++)
+            {
+                if (!world.basebelowsea(i, j))
+                    landtotal++;
+                else
+                    seatotal++;
+            }
         }
     }
 

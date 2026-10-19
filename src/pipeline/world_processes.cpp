@@ -30,13 +30,13 @@ std::vector<WorldProcessDefinition> buildprocesses()
           { nullptr, nullptr, "configs/tectonics-baseline.json (evolution_duration_myr, delta_time_myr); the run sets them "
                               "with --duration and --delta-time-myr; checkpoints fall on whole steps" } },
         { S::terraforming, "terrain.terraforming", K::editor, false, {}, {}, {}, {}, "", {}, true },
-        { S::inland_seas, "terrain.inland_sea_policy", K::editor, false, {}, {}, {}, {}, "" },
+        { S::inland_seas, "terrain.inland_sea_policy", K::editor, false, {}, {}, {}, {}, "", {}, true },
         { S::archipelagos, "terrain.archipelagos", K::detailer, false, {}, {}, {}, {}, "", {}, true },
         { S::ocean_cleanup, "terrain.ocean_cleanup", K::editor, false, {}, {}, {}, {}, "", {}, true },
         { S::coastline_refinement, "terrain.coastline_refinement", K::detailer, false, {}, {}, {}, {}, "", {}, true },
         { S::ocean_depth_refinement, "terrain.ocean_depth_refinement", K::detailer, false, {}, {}, {}, {}, "", {}, true },
         { S::tectonic_trenches, "terrain.tectonic_trenches", K::detailer, false, {}, {}, {}, {}, "", {}, true },
-        { S::tectonic_volcanoes, "terrain.tectonic_volcanoes", K::detailer, false, {}, {}, {}, {}, "" },
+        { S::tectonic_volcanoes, "terrain.tectonic_volcanoes", K::detailer, false, {}, {}, {}, {}, "", {}, true },
         { S::terrain_texturing, "terrain.texturing", K::diagnoser, false, {}, {}, {}, {}, "", {}, true },
         { S::mountain_bases, "terrain.mountain_bases", K::detailer, false, {}, {}, {}, {}, "", {}, true },
         { S::terrain_smoothing, "terrain.smoothing", K::editor, false, {}, {}, {}, {}, "", {}, true },
@@ -46,7 +46,7 @@ std::vector<WorldProcessDefinition> buildprocesses()
         { S::coastline_adjustment, "terrain.coastline_adjustment", K::editor, false, {}, {}, {}, {}, "", {}, true },
         { S::sea_level, "terrain.sea_level", K::editor, false, {}, {}, {}, {},
           "Places the sea level at world.ocean.land_fraction on the finished coast when "
-          "world.ocean.land_fraction_after_coast; does nothing at land_fraction 0." },
+          "world.ocean.land_fraction_after_coast; does nothing at land_fraction 0.", {}, true },
         { S::island_check, "terrain.island_check", K::editor, false, {}, {}, {}, {}, "", {}, true },
         { S::terrain_roughness, "terrain.roughness", K::detailer, false, {}, {}, {}, {},
           "Pure seeded noise; climate does not read it.", {}, true },
@@ -78,10 +78,10 @@ std::vector<WorldProcessDefinition> buildprocesses()
         { S::climates_and_biomes, "climate.classification", K::diagnoser, false, {}, {}, {}, {}, "Writes biomes as well as climate classes.", {}, true },
         { S::arid_features, "terrain.arid_features", K::detailer, false, {}, {}, {}, {}, "", {}, true },
         { S::deltas_wetlands_and_roughness, "hydrology.deltas_and_wetlands", K::detailer, false, {}, {}, {}, {},
-          "Also recomputes climate classes and biomes and writes the climate diagnostics. In an eroded world it clears the distributaries of hydrology.rivers when deltas are turned off (erosion plan C5b)." },
+          "Also recomputes climate classes and biomes and writes the climate diagnostics. In an eroded world it clears the distributaries of hydrology.rivers when deltas are turned off (erosion plan C5b).", {}, true },
         { S::subgrid_statistics, "terrain.subgrid_statistics", K::diagnoser, false, {}, {}, {}, {},
           "The sub-grid statistics the regional levels reproduce (multiscale plan S3.6): the relief amplitude "
-          "and Perron's valley spacing from the erosion run's stream-power and hillslope laws, on the final terrain." },
+          "and Perron's valley spacing from the erosion run's stream-power and hillslope laws, on the final terrain.", {}, true },
         { S::finalize_layers, "layers.finalize", K::diagnoser, true, {}, {}, {}, {},
           "Physical resource layers, gold placers and optional society. In an eroded world it applies the erosion run's exhumation to the deposits, so it runs once per world." },
     };

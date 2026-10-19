@@ -51,7 +51,8 @@ void checkelement(FieldId id)
 // A world grid is stored in its cell grid's id order (row-major on lat-lon): its
 // bytes are the field's. Shape [row, column] on lat-lon, [cell] otherwise (bundle
 // v2 gives the cube its own shape, docs/architecture/sphere-mesh.md section 7:
-// cubebundleshape below).
+// cubebundleshape below). Every grid field's storage is a worldgrid (the former
+// grid[x][y] path had no field left, T8 W2-F); on a cube columns and rows are 0.
 template<typename T>
 FieldData grid(FieldId id, std::size_t columns, std::size_t rows, const worldgrid<T>& source)
 {
@@ -91,23 +92,6 @@ inline bool cubeworldshape(std::vector<std::size_t>& shape, std::size_t facecell
     shape.resize(count - 2);
     shape.back() = 6 * facecells * facecells;
     return true;
-}
-
-// Other storage indexed grid[x][y] over 0..columns-1, 0..rows-1.
-template<typename Grid>
-FieldData grid(FieldId id, std::size_t columns, std::size_t rows, const Grid& source)
-{
-    using T = std::remove_cv_t<std::remove_reference_t<decltype(source[0][0])>>;
-    checkelement<T>(id);
-    FieldData data;
-    data.id = id;
-    data.shape = { rows, columns };
-    data.bytes.resize(rows * columns * sizeof(T));
-    auto* out = reinterpret_cast<T*>(data.bytes.data());
-    for (std::size_t y = 0; y < rows; y++)
-        for (std::size_t x = 0; x < columns; x++)
-            out[y * columns + x] = source[x][y];
-    return data;
 }
 
 // Seasonal layers stored row-major per layer. Unsized storage keeps its size.
@@ -246,20 +230,6 @@ void loadgrid(const FieldData& data, std::size_t columns, std::size_t rows, worl
     checkloadsize(data, target.size(), sizeof(T));
     if (target.size())
         std::memcpy(target.data(), data.bytes.data(), target.size() * sizeof(T));
-}
-
-template<typename Grid>
-void loadgrid(const FieldData& data, std::size_t columns, std::size_t rows, Grid& target)
-{
-    using T = std::remove_reference_t<decltype(target[0][0])>;
-    checkelement<T>(data.id);
-    if (data.shape != std::vector<std::size_t>{ rows, columns })
-        throw std::runtime_error("Field shape does not match the world grid: " + qualifiedname(data.id));
-    checkloadsize(data, rows * columns, sizeof(T));
-    const auto* in = reinterpret_cast<const T*>(data.bytes.data());
-    for (std::size_t y = 0; y < rows; y++)
-        for (std::size_t x = 0; x < columns; x++)
-            target[x][y] = in[y * columns + x];
 }
 
 template<typename Layers>

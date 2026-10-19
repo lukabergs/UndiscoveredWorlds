@@ -151,4 +151,12 @@ if(TARGET world_pipeline)
     target_link_libraries(climate_adapter_tests PRIVATE uw_headless GTest::gtest GTest::gtest_main)
     target_include_directories(climate_adapter_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     gtest_discover_tests(climate_adapter_tests)
+
+    # The last non-engine processes flagged cube-ready, and the field storage on a cube (T8 W2-F).
+    add_executable(cube_flags_tests
+        pipeline/cube_flags_tests.cpp
+    )
+    target_link_libraries(cube_flags_tests PRIVATE uw_headless GTest::gtest GTest::gtest_main)
+    target_include_directories(cube_flags_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    gtest_discover_tests(cube_flags_tests)
 endif()

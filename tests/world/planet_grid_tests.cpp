@@ -117,14 +117,14 @@ TEST(PlanetGrid, LatLonXYEqualsByCell)
 TEST(PlanetGrid, CubeWorldRefusesANonReadyProcess)
 {
     const std::unique_ptr<planet> world = cubeplanet(8);
-    const WorldProcessDefinition& process = getworldprocess(GenerationStageId::inland_seas);
+    const WorldProcessDefinition& process = getworldprocess(GenerationStageId::plate_tectonics);
     ASSERT_FALSE(process.cubeready);
 
     GenerationScratch scratch;
     WorldStageParameters parameters;
     GenerationExecutionContext context;
     std::string error;
-    EXPECT_FALSE(executegenerationstage(GenerationStageId::inland_seas, *world, scratch, parameters, context, &error));
+    EXPECT_FALSE(executegenerationstage(GenerationStageId::plate_tectonics, *world, scratch, parameters, context, &error));
     EXPECT_NE(error.find(process.id), std::string::npos) << error;
     EXPECT_NE(error.find("cube"), std::string::npos) << error;
 }
