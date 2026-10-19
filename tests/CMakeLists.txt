@@ -120,6 +120,14 @@ if(TARGET world_pipeline)
     target_include_directories(society_cube_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     gtest_discover_tests(society_cube_tests)
 
+    # The resource layers on a cube planet (sphere-mesh.md section 12, W2-R).
+    add_executable(resources_cube_tests
+        simulations/resources/resources_cube_tests.cpp
+    )
+    target_link_libraries(resources_cube_tests PRIVATE uw_headless GTest::gtest GTest::gtest_main)
+    target_include_directories(resources_cube_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    gtest_discover_tests(resources_cube_tests)
+
     # The climate adapter on a cube world (sphere-mesh.md section 10).
     add_executable(climate_adapter_tests
         pipeline/climate_adapter_tests.cpp

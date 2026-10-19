@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include "core/mesh/cell_grid.hpp"
+
 // Discrete mineral deposits with formation provenance. Deposits are classified
 // by the process that formed them; commodities are attributes of a deposit.
 // Quantities are geological endowment assumptions (ore tonnage and grade), not
@@ -68,6 +70,10 @@ struct SourceShare
 struct SurfaceState
 {
     bool evaluated = false;
+    // The world cell (docs/architecture/sphere-mesh.md section 4) and its lat-lon (export)
+    // pixel: the cell's column and row on a lat-lon world, the deposit's pixel of the
+    // 4 N x 2 N export on a cube.
+    mesh::CellId cell = mesh::nocell;
     int worldX = -1;
     int worldY = -1;
     bool submerged = false;
@@ -145,7 +151,8 @@ Exposure exposureclass(double topDepthM);
 std::string describedeposit(const Deposit& deposit, const std::vector<Deposit>* deposits = nullptr);
 
 // One row per deposit: enum codes, positions as world fractions, provenance,
-// quantities and depths. Placer sources are omitted.
-void writedepositscsv(std::ostream& out, const std::vector<Deposit>& deposits);
+// quantities and depths. Placer sources are omitted. cells adds the world cell of
+// each deposit (a cube bundle; sphere-mesh.md section 4).
+void writedepositscsv(std::ostream& out, const std::vector<Deposit>& deposits, bool cells = false);
 std::string mineralbudgetjson(const MineralBudget& budget);
 }

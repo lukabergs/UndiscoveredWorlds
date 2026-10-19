@@ -14,15 +14,24 @@ namespace mineralsystems
 {
 struct DrainageNetwork
 {
+    // A width x height grid, row-major (a lat-lon world), or any cell grid (a cube) when
+    // centreU and centreV are given: per cell the centre's fractions u eastward from
+    // longitude -180 and v southward from the north pole, as Deposit::u and v. A placer
+    // lies at a uniform point of its row-major cell, or at its cell's centre.
     int width = 0;
     int height = 0;
+    std::vector<double> centreU;
+    std::vector<double> centreV;
     std::vector<std::int32_t> receiver;   // Downstream cell, or -1.
     std::vector<std::uint8_t> sea;        // Outlet: gold is exported.
     std::vector<std::uint8_t> sink;       // Lake or closed depression.
     std::vector<float> stepLengthKm;      // Distance to the receiver.
     std::vector<float> transportLengthKm; // e-folding travel distance of gold.
 
-    std::size_t cellCount() const { return static_cast<std::size_t>(width) * static_cast<std::size_t>(height); }
+    std::size_t cellCount() const
+    {
+        return centreU.empty() ? static_cast<std::size_t>(width) * static_cast<std::size_t>(height) : centreU.size();
+    }
 };
 
 struct PlacerSource

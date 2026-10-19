@@ -1,34 +1,23 @@
 #include "simulations/resources/mineral_resources.hpp"
 #include "simulations/resources/physical_layers_internal.hpp"
 #include "simulations/resources/placer_transport.hpp"
-#include <functional>
 
 namespace physical_layers
 {
 using namespace detail;
+using namespace cellqueries;
 
 namespace
 {
-int maxscoreinradius(const planet& world, int x, int y, int radius, const std::function<int(int, int)>& getter)
+template <typename Getter>
+int maxscoreinradius(const planet& world, CellId c, int radius, Getter&& getter)
 {
-    const int width = world.width();
-    const int height = world.height();
     int best = 0;
-
-    for (int dy = -radius; dy <= radius; dy++)
+    anyinbox(world, c, radius, [&](CellId n)
     {
-        const int ny = y + dy;
-
-        if (ny < 0 || ny > height)
-            continue;
-
-        for (int dx = -radius; dx <= radius; dx++)
-        {
-            const int nx = wrap(x + dx, width);
-            best = std::max(best, getter(nx, ny));
-        }
-    }
-
+        best = std::max(best, static_cast<int>(getter(n)));
+        return false;
+    });
     return best;
 }
 
@@ -166,186 +155,159 @@ float crustorebias(CrustClass crustclass)
     }
 }
 
-float boundaryproximityfactor(const planet& world, int x, int y, float maxdistance)
+float boundaryproximityfactor(const planet& world, CellId c, float maxdistance)
 {
     if (maxdistance <= 0.0f)
         return 0.0f;
 
-    return 1.0f - clampunit(static_cast<float>(world.tectonicboundarydistance(x, y)) / maxdistance);
+    return 1.0f - clampunit(static_cast<float>(world.tectonicboundarydistance(c)) / maxdistance);
 }
 
 void generate_volcanic_reserves(planet& world)
 {
-    const int width = world.width();
-    const int height = world.height();
-
-    parallelforrows(0, height, [&](int startrow, int endrow)
+    parallelforcells(world, [&](CellId first, CellId last)
     {
-        for (int y = startrow; y <= endrow; y++)
+        for (CellId c = first; c <= last; c++)
         {
-            for (int x = 0; x <= width; x++)
+            const GeologicRegime regime = world.geologicregime(c);
+            const BoundaryType boundarytype = world.tectonicboundarytype(c);
+            const DeformingRegionType regiontype = world.tectonicdeformingregiontype(c);
+            const CrustClass crustclass = world.tectoniccrustclass(c);
+            const float regimemult = regimevolcanicbias(regime);
+            const float divergencenorm = static_cast<float>(world.tectonicdivergence(c)) / 100.0f;
+            const float convergencenorm = static_cast<float>(world.tectonicconvergence(c)) / 100.0f;
+            const float uplift = clampunit(world.tectonicuplifttendency(c));
+            const float subsidence = clampunit(world.tectonicsubsidencetendency(c));
+            const float strain = clampunit(world.tectonicaccumulatedstrain(c));
+            const float deformation = clampunit(world.tectonicdeformationrate(c));
+            const float boundaryhistory = clampunit(world.tectonicboundaryhistory(c));
+            const float boundaryproximity = boundaryproximityfactor(world, c, 10.0f);
+            const float boundaryfocus = boundaryvolcanicbias(boundarytype) * boundaryproximity * (0.45f + 0.55f * boundaryhistory);
+            const float regionbias = deformingvolcanicbias(regiontype);
+            const float crustbias = crustvolcanicbias(crustclass);
+            const float ridgebias = (world.oceanridges(c) != 0 || world.oceanrifts(c) != 0) ? 1.0f : 0.0f;
+            const float volcanobias = (world.volcanofloat(c) != 0 || world.strato(c)) ? 1.0f : 0.0f;
+            const float nearbyvolcano = maxscoreinradius(world, c, 2, [&](CellId n)
             {
-                const GeologicRegime regime = world.geologicregime(x, y);
-                const BoundaryType boundarytype = world.tectonicboundarytype(x, y);
-                const DeformingRegionType regiontype = world.tectonicdeformingregiontype(x, y);
-                const CrustClass crustclass = world.tectoniccrustclass(x, y);
-                const float regimemult = regimevolcanicbias(regime);
-                const float divergencenorm = static_cast<float>(world.tectonicdivergence(x, y)) / 100.0f;
-                const float convergencenorm = static_cast<float>(world.tectonicconvergence(x, y)) / 100.0f;
-                const float uplift = clampunit(world.tectonicuplifttendency(x, y));
-                const float subsidence = clampunit(world.tectonicsubsidencetendency(x, y));
-                const float strain = clampunit(world.tectonicaccumulatedstrain(x, y));
-                const float deformation = clampunit(world.tectonicdeformationrate(x, y));
-                const float boundaryhistory = clampunit(world.tectonicboundaryhistory(x, y));
-                const float boundaryproximity = boundaryproximityfactor(world, x, y, 10.0f);
-                const float boundaryfocus = boundaryvolcanicbias(boundarytype) * boundaryproximity * (0.45f + 0.55f * boundaryhistory);
-                const float regionbias = deformingvolcanicbias(regiontype);
-                const float crustbias = crustvolcanicbias(crustclass);
-                const float ridgebias = (world.oceanridges(x, y) != 0 || world.oceanrifts(x, y) != 0) ? 1.0f : 0.0f;
-                const float volcanobias = (world.volcanofloat(x, y) != 0 || world.strato(x, y)) ? 1.0f : 0.0f;
-                const float nearbyvolcano = maxscoreinradius(world, x, y, 2, [&](int nx, int ny)
-                {
-                    return world.volcanofloat(nx, ny) != 0 || world.strato(nx, ny) ? 100 : 0;
-                }) / 100.0f;
+                return world.volcanofloat(n) != 0 || world.strato(n) ? 100 : 0;
+            }) / 100.0f;
 
-                float score = 100.0f * (0.20f * regimemult + 0.18f * boundaryfocus + 0.12f * divergencenorm
-                    + 0.08f * convergencenorm + 0.10f * uplift + 0.08f * strain + 0.06f * deformation
-                    + 0.06f * regionbias + 0.06f * crustbias + 0.16f * volcanobias + 0.10f * nearbyvolcano);
-                score += 12.0f * ridgebias;
+            float score = 100.0f * (0.20f * regimemult + 0.18f * boundaryfocus + 0.12f * divergencenorm
+                + 0.08f * convergencenorm + 0.10f * uplift + 0.08f * strain + 0.06f * deformation
+                + 0.06f * regionbias + 0.06f * crustbias + 0.16f * volcanobias + 0.10f * nearbyvolcano);
+            score += 12.0f * ridgebias;
 
-                if (world.sea(x, y) != 0 && ridgebias == 0.0f && boundaryfocus < 0.35f && regimemult < 0.6f)
-                    score *= 0.45f;
+            if (world.sea(c) != 0 && ridgebias == 0.0f && boundaryfocus < 0.35f && regimemult < 0.6f)
+                score *= 0.45f;
 
-                if (subsidence > uplift && boundarytype == BoundaryType::passive_margin)
-                    score *= 0.7f;
+            if (subsidence > uplift && boundarytype == BoundaryType::passive_margin)
+                score *= 0.7f;
 
-                world.setvolcanicreserve(x, y, clampscore(score));
-            }
+            world.setvolcanicreserve(c, clampscore(score));
         }
-    }, 16);
+    });
 }
 
 void generate_metal_ore_reserves(planet& world)
 {
-    const int width = world.width();
-    const int height = world.height();
-
-    parallelforrows(0, height, [&](int startrow, int endrow)
+    parallelforcells(world, [&](CellId first, CellId last)
     {
-        for (int y = startrow; y <= endrow; y++)
+        for (CellId c = first; c <= last; c++)
         {
-            for (int x = 0; x <= width; x++)
+            const GeologicRegime regime = world.geologicregime(c);
+            const BoundaryType boundarytype = world.tectonicboundarytype(c);
+            const DeformingRegionType regiontype = world.tectonicdeformingregiontype(c);
+            const CrustClass crustclass = world.tectoniccrustclass(c);
+            const float regimebias = regimeorebias(regime);
+            const float convergencenorm = static_cast<float>(world.tectonicconvergence(c)) / 100.0f;
+            const float shearnorm = static_cast<float>(world.tectonicshear(c)) / 100.0f;
+            const float uplift = clampunit(world.tectonicuplifttendency(c));
+            const float strain = clampunit(world.tectonicaccumulatedstrain(c));
+            const float deformation = clampunit(world.tectonicdeformationrate(c));
+            const float boundaryhistory = clampunit(world.tectonicboundaryhistory(c));
+            const float boundaryproximity = boundaryproximityfactor(world, c, 12.0f);
+            const float boundaryfocus = boundaryorebias(boundarytype) * boundaryproximity * (0.40f + 0.60f * boundaryhistory);
+            const float regionbias = deformingorebias(regiontype);
+            const float crustbias = crustorebias(crustclass);
+            const float volcanismnear = static_cast<float>(maxscoreinradius(world, c, 2, [&](CellId n)
             {
-                const GeologicRegime regime = world.geologicregime(x, y);
-                const BoundaryType boundarytype = world.tectonicboundarytype(x, y);
-                const DeformingRegionType regiontype = world.tectonicdeformingregiontype(x, y);
-                const CrustClass crustclass = world.tectoniccrustclass(x, y);
-                const float regimebias = regimeorebias(regime);
-                const float convergencenorm = static_cast<float>(world.tectonicconvergence(x, y)) / 100.0f;
-                const float shearnorm = static_cast<float>(world.tectonicshear(x, y)) / 100.0f;
-                const float uplift = clampunit(world.tectonicuplifttendency(x, y));
-                const float strain = clampunit(world.tectonicaccumulatedstrain(x, y));
-                const float deformation = clampunit(world.tectonicdeformationrate(x, y));
-                const float boundaryhistory = clampunit(world.tectonicboundaryhistory(x, y));
-                const float boundaryproximity = boundaryproximityfactor(world, x, y, 12.0f);
-                const float boundaryfocus = boundaryorebias(boundarytype) * boundaryproximity * (0.40f + 0.60f * boundaryhistory);
-                const float regionbias = deformingorebias(regiontype);
-                const float crustbias = crustorebias(crustclass);
-                const float volcanismnear = static_cast<float>(maxscoreinradius(world, x, y, 2, [&](int nx, int ny)
-                {
-                    return world.volcanicreserve(nx, ny);
-                })) / 100.0f;
-                const float mountainbias = clampunit(static_cast<float>(world.mountainheightfloat(x, y)) / 5000.0f);
+                return world.volcanicreserve(n);
+            })) / 100.0f;
+            const float mountainbias = clampunit(static_cast<float>(world.mountainheightfloat(c)) / 5000.0f);
 
-                float score = 100.0f * (0.18f * regimebias + 0.18f * boundaryfocus + 0.15f * convergencenorm
-                    + 0.12f * shearnorm + 0.12f * strain + 0.08f * uplift + 0.05f * deformation
-                    + 0.05f * regionbias + 0.05f * crustbias + 0.10f * mountainbias + 0.10f * volcanismnear);
+            float score = 100.0f * (0.18f * regimebias + 0.18f * boundaryfocus + 0.15f * convergencenorm
+                + 0.12f * shearnorm + 0.12f * strain + 0.08f * uplift + 0.05f * deformation
+                + 0.05f * regionbias + 0.05f * crustbias + 0.10f * mountainbias + 0.10f * volcanismnear);
 
-                if (boundarytype == BoundaryType::transform)
-                    score += 8.0f * boundaryhistory;
+            if (boundarytype == BoundaryType::transform)
+                score += 8.0f * boundaryhistory;
 
-                if (regiontype == DeformingRegionType::diffuse_collision)
-                    score += 12.0f * (0.5f + 0.5f * boundaryhistory);
+            if (regiontype == DeformingRegionType::diffuse_collision)
+                score += 12.0f * (0.5f + 0.5f * boundaryhistory);
 
-                if (world.sea(x, y) != 0 && world.coast(x, y) == 0 && boundaryfocus < 0.4f)
-                    score *= 0.30f;
+            if (world.sea(c) != 0 && !iscoast(world, c) && boundaryfocus < 0.4f)
+                score *= 0.30f;
 
-                world.setmetalorereserve(x, y, clampscore(score));
-            }
+            world.setmetalorereserve(c, clampscore(score));
         }
-    }, 16);
+    });
 }
 
 void generate_placer_reserves(planet& world)
 {
-    const int width = world.width();
-    const int height = world.height();
     const int maximumflow = std::max(1, world.maxriverflow());
-    const size_t columns = size_t(width) + 1;
-    const size_t count = columns * (size_t(height) + 1);
+    const std::size_t count = world.cellcount();
     std::vector<uint8_t> source(count, 0);
-    for (int y = 0; y <= height; ++y)
+    for (CellId c = 0; c < count; ++c)
     {
-        for (int x = 0; x <= width; ++x)
-        {
-            if (world.sea(x, y) != 0 && !isdeltacell(world, x, y)) continue;
-            source[size_t(y) * columns + size_t(x)] = static_cast<uint8_t>(clampscore(
-                float(world.metalorereserve(x, y)) * float(world.erosionpotential(x, y)) / 100.0f));
-        }
+        if (world.sea(c) != 0 && !isdeltacell(world, c)) continue;
+        source[c] = static_cast<uint8_t>(clampscore(
+            float(world.metalorereserve(c)) * float(world.erosionpotential(c)) / 100.0f));
     }
     const auto routedore = route_ore_potential(drainagereceivers(world), source);
 
-    parallelforrows(0, height, [&](int startrow, int endrow)
+    parallelforcells(world, [&](CellId first, CellId last)
     {
-        for (int y = startrow; y <= endrow; y++)
+        for (CellId c = first; c <= last; c++)
         {
-            for (int x = 0; x <= width; x++)
-            {
-                const float depositionnorm = static_cast<float>(world.depositionpotential(x, y)) / 100.0f;
-                const float flownorm = std::log1p(static_cast<float>(averageriverflow(world, x, y))) / std::log1p(static_cast<float>(maximumflow));
-                const int upstreamore = routedore[size_t(y) * columns + size_t(x)];
-                const float upstreamorenorm = static_cast<float>(upstreamore) / 100.0f;
+            const float depositionnorm = static_cast<float>(world.depositionpotential(c)) / 100.0f;
+            const float flownorm = std::log1p(static_cast<float>(averageriverflow(world, c))) / std::log1p(static_cast<float>(maximumflow));
+            const int upstreamore = routedore[c];
+            const float upstreamorenorm = static_cast<float>(upstreamore) / 100.0f;
 
-                float score = 100.0f * upstreamorenorm * (0.35f + 0.32f * depositionnorm
-                    + 0.20f * flownorm + 0.13f * (isdeltacell(world, x, y) ? 1.0f : 0.0f));
+            float score = 100.0f * upstreamorenorm * (0.35f + 0.32f * depositionnorm
+                + 0.20f * flownorm + 0.13f * (isdeltacell(world, c) ? 1.0f : 0.0f));
 
-                if (world.sea(x, y) != 0 && isdeltacell(world, x, y) == false)
-                    score *= 0.3f;
+            if (world.sea(c) != 0 && isdeltacell(world, c) == false)
+                score *= 0.3f;
 
-                world.setplacerreserve(x, y, clampscore(score));
-            }
+            world.setplacerreserve(c, clampscore(score));
         }
-    }, 16);
+    });
 }
 
 void generate_evaporite_reserves(planet& world)
 {
-    const int width = world.width();
-    const int height = world.height();
-
-    parallelforrows(0, height, [&](int startrow, int endrow)
+    parallelforcells(world, [&](CellId first, CellId last)
     {
-        for (int y = startrow; y <= endrow; y++)
+        for (CellId c = first; c <= last; c++)
         {
-            for (int x = 0; x <= width; x++)
+            if (world.sea(c) != 0)
             {
-                if (world.sea(x, y) != 0)
-                {
-                    world.setevaporitereserve(x, y, 0);
-                    continue;
-                }
-
-                const float aridity = 1.0f - clampunit(static_cast<float>(annualrainfall(world, x, y)) / 350.0f);
-                const float endorheic = world.basinclass(x, y) == BasinClass::endorheic ? 1.0f : 0.0f;
-                const float saltbias = issaltfeature(world, x, y) ? 1.0f : 0.0f;
-                const float terminalwater = (islakecell(world, x, y) || issaltfeature(world, x, y)) ? 1.0f : 0.0f;
-
-                float score = 100.0f * (0.45f * endorheic + 0.25f * aridity + 0.20f * saltbias + 0.10f * terminalwater);
-
-                world.setevaporitereserve(x, y, clampscore(score));
+                world.setevaporitereserve(c, 0);
+                continue;
             }
+
+            const float aridity = 1.0f - clampunit(static_cast<float>(annualrainfall(world, c)) / 350.0f);
+            const float endorheic = world.basinclass(c) == BasinClass::endorheic ? 1.0f : 0.0f;
+            const float saltbias = issaltfeature(world, c) ? 1.0f : 0.0f;
+            const float terminalwater = (islakecell(world, c) || issaltfeature(world, c)) ? 1.0f : 0.0f;
+
+            float score = 100.0f * (0.45f * endorheic + 0.25f * aridity + 0.20f * saltbias + 0.10f * terminalwater);
+
+            world.setevaporitereserve(c, clampscore(score));
         }
-    }, 16);
+    });
 }
 }
 

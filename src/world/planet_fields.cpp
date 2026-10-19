@@ -263,7 +263,9 @@ struct planetfieldaccess
                     << r.averageShearMotion << ',' << static_cast<int>(r.type) << ',' << r.ageMyr << '\n';
             break;
         case TableId::mineral_deposits:
-            mineralsystems::writedepositscsv(out, world.geosphere_.mineraldepositlist);
+            // u, v: the world fractions; a cube bundle adds the cell id (as the settlements).
+            mineralsystems::writedepositscsv(out, world.geosphere_.mineraldepositlist,
+                world.grid().kind() == mesh::GridKind::cube);
             break;
         case TableId::mineral_budget:
             extension = ".json";

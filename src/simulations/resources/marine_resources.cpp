@@ -4,80 +4,76 @@
 namespace physical_layers
 {
 using namespace detail;
+using namespace cellqueries;
 
 namespace
 {
-bool isshelfproxy(const planet& world, const worldgrid<bool>& shelves, int x, int y)
+bool isshelfproxy(const planet& world, const worldgrid<bool>& shelves, CellId c)
 {
-    if (world.sea(x, y) == 0)
+    if (world.sea(c) == 0)
         return false;
 
-    if (x < shelves.columns() && y < shelves.rows() && shelves[x][y])
+    if (c < shelves.size() && shelves[c])
         return true;
 
-    if (world.nomfloat(x, y) < world.sealevel() - 220)
+    if (world.nomfloat(c) < world.sealevel() - 220)
         return false;
 
-    if (world.coast(x, y))
+    if (iscoast(world, c))
         return true;
 
-    return hasfeatureinradius(world, x, y, 2, [&](int nx, int ny) { return world.outline(nx, ny); });
+    return hasfeatureinradius(world, c, 2, [&](CellId n) { return isoutline(world, n); });
 }
 
-float averagesst(const planet& world, int x, int y)
+float averagesst(const planet& world, CellId c)
 {
     float total = 0.0f;
 
     for (int season = 0; season < CLIMATESEASONCOUNT; season++)
-        total += world.seasonalsstfloat(season, x, y);
+        total += world.seasonalsstfloat(season, c);
 
     return total / static_cast<float>(CLIMATESEASONCOUNT);
 }
 
-float averagecurrentspeed(const planet& world, int x, int y)
+float averagecurrentspeed(const planet& world, CellId c)
 {
     float total = 0.0f;
 
     for (int season = 0; season < CLIMATESEASONCOUNT; season++)
     {
-        const float u = static_cast<float>(world.seasonalcurrentu(season, x, y));
-        const float v = static_cast<float>(world.seasonalcurrentv(season, x, y));
+        const float u = static_cast<float>(world.seasonalcurrentu(season, c));
+        const float v = static_cast<float>(world.seasonalcurrentv(season, c));
         total += std::sqrt(u * u + v * v);
     }
 
     return total / static_cast<float>(CLIMATESEASONCOUNT);
 }
 
-float averagemaritimeinfluence(const planet& world, int x, int y)
+float averagemaritimeinfluence(const planet& world, CellId c)
 {
     float total = 0.0f;
 
     for (int season = 0; season < CLIMATESEASONCOUNT; season++)
-        total += static_cast<float>(world.seasonalmaritimeinfluence(season, x, y));
+        total += static_cast<float>(world.seasonalmaritimeinfluence(season, c));
 
     return total / static_cast<float>(CLIMATESEASONCOUNT);
 }
 
-float sstcontrast(const planet& world, int x, int y, float centresst)
+// Mean SST difference to the sea cells among the eight neighbours (slots 1..8).
+float sstcontrast(const planet& world, CellId c, float centresst)
 {
-    const int width = world.width();
-    const int height = world.height();
+    const mesh::CellGrid& grid = world.grid();
     float totalcontrast = 0.0f;
     int samples = 0;
 
-    for (const auto& offset : drainageoffsets)
+    for (int slot = 1; slot <= mesh::slotcount; slot++)
     {
-        const int ny = y + offset[1];
+        const std::int32_t n = grid.neighbour(c, slot);
 
-        if (ny < 0 || ny > height)
+        if (n < 0 || world.sea(static_cast<CellId>(n)) == 0)
             continue;
 
-        const int nx = wrap(x + offset[0], width);
-
-        if (world.sea(nx, ny) == 0)
-            continue;
-
-        totalcontrast += std::abs(centresst - averagesst(world, nx, ny));
+        totalcontrast += std::abs(centresst - averagesst(world, static_cast<CellId>(n)));
         samples++;
     }
 
@@ -89,22 +85,16 @@ float sstcontrast(const planet& world, int x, int y, float centresst)
 
 float mean_ocean_sst(const planet& world)
 {
-    const int width = world.width();
-    const int height = world.height();
-
     double ssttotal = 0.0;
     int sstcells = 0;
 
-    for (int y = 0; y <= height; y++)
+    for (CellId c = 0; c < world.cellcount(); c++)
     {
-        for (int x = 0; x <= width; x++)
-        {
-            if (world.sea(x, y) == 0)
-                continue;
+        if (world.sea(c) == 0)
+            continue;
 
-            ssttotal += averagesst(world, x, y);
-            sstcells++;
-        }
+        ssttotal += averagesst(world, c);
+        sstcells++;
     }
 
     return sstcells > 0 ? static_cast<float>(ssttotal / static_cast<double>(sstcells)) : 0.0f;
@@ -112,73 +102,59 @@ float mean_ocean_sst(const planet& world)
 
 void generate_ocean_fisheries(planet& world, const worldgrid<bool>& shelves)
 {
-    const int width = world.width();
-    const int height = world.height();
     const float meanoceansst = mean_ocean_sst(world);
 
-    parallelforrows(0, height, [&](int startrow, int endrow)
+    parallelforcells(world, [&](CellId first, CellId last)
     {
-        for (int y = startrow; y <= endrow; y++)
+        for (CellId c = first; c <= last; c++)
         {
-            for (int x = 0; x <= width; x++)
+            if (world.sea(c) == 0)
             {
-                if (world.sea(x, y) == 0)
-                {
-                    world.setfisheryreserve(x, y, 0);
-                    continue;
-                }
-
-                const float shelfbias = isshelfproxy(world, shelves, x, y) ? 1.0f : 0.0f;
-                const float cellsst = averagesst(world, x, y);
-                const float coldwater = clampunit((meanoceansst - cellsst + 6.0f) / 18.0f);
-                const float currentstrength = clampunit(averagecurrentspeed(world, x, y) / 160.0f);
-                const float contrast = clampunit(sstcontrast(world, x, y, cellsst) / 18.0f);
-                const float maritime = clampunit(averagemaritimeinfluence(world, x, y) / 220.0f);
-                const float coastal = world.coast(x, y) ? 1.0f : (hasfeatureinradius(world, x, y, 2, [&](int nx, int ny) { return world.outline(nx, ny); }) ? 0.6f : 0.0f);
-                const float icepenalty = world.seaice(x, y) == 2 ? 0.4f : (world.seaice(x, y) == 1 ? 0.75f : 1.0f);
-
-                float score = 100.0f * (0.38f * shelfbias + 0.18f * coldwater + 0.16f * contrast + 0.14f * currentstrength + 0.08f * maritime + 0.06f * coastal);
-                score *= icepenalty;
-
-                world.setfisheryreserve(x, y, clampscore(score));
+                world.setfisheryreserve(c, 0);
+                continue;
             }
+
+            const float shelfbias = isshelfproxy(world, shelves, c) ? 1.0f : 0.0f;
+            const float cellsst = averagesst(world, c);
+            const float coldwater = clampunit((meanoceansst - cellsst + 6.0f) / 18.0f);
+            const float currentstrength = clampunit(averagecurrentspeed(world, c) / 160.0f);
+            const float contrast = clampunit(sstcontrast(world, c, cellsst) / 18.0f);
+            const float maritime = clampunit(averagemaritimeinfluence(world, c) / 220.0f);
+            const float coastal = iscoast(world, c) ? 1.0f : (hasfeatureinradius(world, c, 2, [&](CellId n) { return isoutline(world, n); }) ? 0.6f : 0.0f);
+            const float icepenalty = world.seaice(c) == 2 ? 0.4f : (world.seaice(c) == 1 ? 0.75f : 1.0f);
+
+            float score = 100.0f * (0.38f * shelfbias + 0.18f * coldwater + 0.16f * contrast + 0.14f * currentstrength + 0.08f * maritime + 0.06f * coastal);
+            score *= icepenalty;
+
+            world.setfisheryreserve(c, clampscore(score));
         }
-    }, 16);
+    });
 }
 
 void generate_coastal_fisheries(planet& world)
 {
-    const int width = world.width();
-    const int height = world.height();
+    const mesh::CellGrid& grid = world.grid();
 
-    parallelforrows(0, height, [&](int startrow, int endrow)
+    parallelforcells(world, [&](CellId first, CellId last)
     {
-        for (int y = startrow; y <= endrow; y++)
+        for (CellId c = first; c <= last; c++)
         {
-            for (int x = 0; x <= width; x++)
+            if (!isoutline(world, c))
+                continue;
+
+            int nearbyfishery = 0;
+
+            for (int slot = 1; slot <= mesh::slotcount; slot++)
             {
-                if (world.outline(x, y) == 0)
-                    continue;
+                const std::int32_t n = grid.neighbour(c, slot);
 
-                int nearbyfishery = 0;
-
-                for (const auto& offset : drainageoffsets)
-                {
-                    const int ny = y + offset[1];
-
-                    if (ny < 0 || ny > height)
-                        continue;
-
-                    const int nx = wrap(x + offset[0], width);
-
-                    if (world.sea(nx, ny) != 0)
-                        nearbyfishery = std::max(nearbyfishery, world.fisheryreserve(nx, ny));
-                }
-
-                world.setfisheryreserve(x, y, clampscore(static_cast<float>(nearbyfishery) * 0.7f));
+                if (n >= 0 && world.sea(static_cast<CellId>(n)) != 0)
+                    nearbyfishery = std::max(nearbyfishery, world.fisheryreserve(static_cast<CellId>(n)));
             }
+
+            world.setfisheryreserve(c, clampscore(static_cast<float>(nearbyfishery) * 0.7f));
         }
-    }, 16);
+    });
 }
 }
 

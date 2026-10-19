@@ -12,6 +12,7 @@
 namespace physical_layers
 {
 using namespace detail;
+using namespace cellqueries;
 
 namespace
 {
@@ -29,38 +30,57 @@ int worldcoordinate(double fraction, int cells)
     return std::clamp(static_cast<int>(std::floor(fraction * cells)), 0, cells - 1);
 }
 
-float localrelief(const planet& world, int x, int y)
+// The lat-lon (export) columns of the world: the grid's on lat-lon, 4 N on a cube.
+int exportcolumns(const mesh::CellGrid& grid)
 {
-    float lowest = world.mapfloat(x, y);
+    return grid.kind() == mesh::GridKind::cube ? 4 * grid.facecells() : grid.columns();
+}
+
+// The world cell of a deposit's fractions (u eastward from longitude -180, v southward
+// from the north pole) and its export pixel: on lat-lon the pixel's cell, on a cube the
+// cell containing the point.
+CellId depositcell(const mesh::CellGrid& grid, double u, double v, int& x, int& y)
+{
+    const int columns = exportcolumns(grid);
+    x = worldcoordinate(u, columns);
+    y = worldcoordinate(v, columns / 2);
+    if (grid.kind() == mesh::GridKind::latlon)
+        return grid.cellof(x, y);
+    const double latitude = kPi * (0.5 - v);
+    const double longitude = kPi * (2.0 * u - 1.0);
+    return grid.locate(mesh::unitvector(latitude, longitude));
+}
+
+// The relief of the 3 x 3 box around a cell.
+float localrelief(const planet& world, CellId c)
+{
+    float lowest = world.mapfloat(c);
     float highest = lowest;
-    for (int dy = -1; dy <= 1; ++dy)
+    anyinbox(world, c, 1, [&](CellId n)
     {
-        const int ny = y + dy;
-        if (ny < 0 || ny > world.height())
-            continue;
-        for (int dx = -1; dx <= 1; ++dx)
-        {
-            const float elevation = world.mapfloat(wrap(x + dx, world.width()), ny);
-            lowest = std::min(lowest, elevation);
-            highest = std::max(highest, elevation);
-        }
-    }
+        const float elevation = world.mapfloat(n);
+        lowest = std::min(lowest, elevation);
+        highest = std::max(highest, elevation);
+        return false;
+    });
     return highest - lowest;
 }
 
 void evaluatesurface(const planet& world, mineralsystems::Deposit& deposit)
 {
     mineralsystems::SurfaceState& surface = deposit.surface;
-    const int x = worldcoordinate(deposit.u, world.width() + 1);
-    const int y = worldcoordinate(deposit.v, world.height() + 1);
+    int x = 0;
+    int y = 0;
+    const CellId c = depositcell(world.grid(), deposit.u, deposit.v, x, y);
     surface.evaluated = true;
+    surface.cell = c;
     surface.worldX = x;
     surface.worldY = y;
-    surface.submerged = world.sea(x, y) != 0;
-    surface.elevationM = static_cast<float>(world.mapfloat(x, y) - world.sealevel());
-    surface.localReliefM = localrelief(world, x, y);
-    surface.annualRainfallMm = 12.0f * world.averainfloat(x, y);
-    surface.iceCovered = !surface.submerged && world.maxtempfloat(x, y) < 0;
+    surface.submerged = world.sea(c) != 0;
+    surface.elevationM = static_cast<float>(world.mapfloat(c) - world.sealevel());
+    surface.localReliefM = localrelief(world, c);
+    surface.annualRainfallMm = 12.0f * world.averainfloat(c);
+    surface.iceCovered = !surface.submerged && world.maxtempfloat(c) < 0;
 }
 
 // The erosion run's placer residence weights (erosion plan B4, review): over a run
@@ -110,45 +130,62 @@ void exhumeaftererosion(mineralsystems::Deposit& deposit, double lowering_m, dou
     }
 }
 
-// Present drainage on the final world; distances treat rows as latitudes.
+// Present drainage on the final world, by cell id. On lat-lon the step lengths treat rows
+// as latitudes; on a cube they are the neighbour table's great-circle distances.
 mineralsystems::DrainageNetwork drainagenetwork(const planet& world)
 {
+    const mesh::CellGrid& grid = world.grid();
+    const bool cube = grid.kind() == mesh::GridKind::cube;
     mineralsystems::DrainageNetwork network;
-    network.width = world.width() + 1;
-    network.height = world.height() + 1;
-    network.receiver = drainagereceivers(world);
-    const size_t count = network.cellCount();
+    std::vector<std::int8_t> slots;
+    network.receiver = drainagereceivers(world, &slots);
+    const size_t count = grid.cellcount();
+    if (cube)
+    {
+        network.centreU.resize(count);
+        network.centreV.resize(count);
+        for (CellId c = 0; c < count; ++c)
+        {
+            network.centreU[c] = std::clamp((grid.longitude_rad(c) + kPi) / (2.0 * kPi), 0.0, 1.0);
+            network.centreV[c] = std::clamp(0.5 - grid.latitude_rad(c) / kPi, 0.0, 1.0);
+        }
+    }
+    else
+    {
+        network.width = grid.columns();
+        network.height = grid.rows();
+    }
     network.sea.assign(count, 0);
     network.sink.assign(count, 0);
     network.stepLengthKm.assign(count, 0.0f);
     network.transportLengthKm.assign(count, 0.0f);
 
-    const double cellkm = kCircumferenceKm / network.width;
-    for (int y = 0; y < network.height; ++y)
+    const double cellkm = kCircumferenceKm / exportcolumns(grid);
+    for (CellId c = 0; c < count; ++c)
     {
-        const double latitude = kPi * (0.5 - (y + 0.5) / network.height);
-        const double eastwest = cellkm * std::cos(latitude);
-        for (int x = 0; x < network.width; ++x)
+        const bool delta = isdeltacell(world, c);
+        network.sea[c] = world.sea(c) != 0 && !delta ? 1 : 0;
+        network.sink[c] = islakecell(world, c) ? 1 : 0;
+        double step = cellkm;
+        const int32_t next = network.receiver[c];
+        if (next >= 0 && cube)
+            step = grid.distance_m(c, slots[c]) / 1000.0;
+        else if (next >= 0)
         {
-            const size_t index = size_t(y) * size_t(network.width) + size_t(x);
-            const bool delta = isdeltacell(world, x, y);
-            network.sea[index] = world.sea(x, y) != 0 && !delta ? 1 : 0;
-            network.sink[index] = islakecell(world, x, y) ? 1 : 0;
-            double step = cellkm;
-            const int32_t next = network.receiver[index];
-            if (next >= 0)
-            {
-                int dx = static_cast<int>(next % network.width) - x;
-                if (dx > network.width / 2) dx -= network.width;
-                if (dx < -network.width / 2) dx += network.width;
-                const int dy = static_cast<int>(next / network.width) - y;
-                step = std::hypot(dx * eastwest, dy * cellkm);
-            }
-            network.stepLengthKm[index] = static_cast<float>(step);
-            const double deposition = world.depositionpotential(x, y) / 100.0;
-            network.transportLengthKm[index] = static_cast<float>(kChannelTransportKm
-                * (1.0 - kDepositionTrapping * deposition) * (delta ? kDeltaTransportFactor : 1.0));
+            const int x = grid.column(c);
+            const int y = grid.row(c);
+            const double latitude = kPi * (0.5 - (y + 0.5) / network.height);
+            const double eastwest = cellkm * std::cos(latitude);
+            int dx = static_cast<int>(next % network.width) - x;
+            if (dx > network.width / 2) dx -= network.width;
+            if (dx < -network.width / 2) dx += network.width;
+            const int dy = static_cast<int>(next / network.width) - y;
+            step = std::hypot(dx * eastwest, dy * cellkm);
         }
+        network.stepLengthKm[c] = static_cast<float>(step);
+        const double deposition = world.depositionpotential(c) / 100.0;
+        network.transportLengthKm[c] = static_cast<float>(kChannelTransportKm
+            * (1.0 - kDepositionTrapping * deposition) * (delta ? kDeltaTransportFactor : 1.0));
     }
     return network;
 }
@@ -179,16 +216,12 @@ void generate_gold_deposits(planet& world)
     {
         evaluatesurface(world, deposit);
         lastid = std::max(lastid, deposit.id);
+        const CellId c = deposit.surface.cell;
         if (denudation != nullptr)
-        {
-            const int x = deposit.surface.worldX;
-            const int y = deposit.surface.worldY;
-            exhumeaftererosion(deposit, static_cast<double>((*denudation)[x][y]) - static_cast<double>((*aggradation)[x][y]),
+            exhumeaftererosion(deposit, static_cast<double>((*denudation)[c]) - static_cast<double>((*aggradation)[c]),
                 erodedtimeMyr, weights, budget);
-        }
         if (deposit.recentLiberatedGoldT > 0.0)
-            sources.push_back({ deposit.id, deposit.surface.worldY * (world.width() + 1) + deposit.surface.worldX,
-                deposit.recentLiberatedGoldT });
+            sources.push_back({ deposit.id, static_cast<std::int32_t>(c), deposit.recentLiberatedGoldT });
     }
 
     const DrainageNetwork network = drainagenetwork(world);

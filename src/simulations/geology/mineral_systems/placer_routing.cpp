@@ -103,10 +103,20 @@ std::vector<Deposit> makeplacerdeposits(const PlacerRouting& routing, const Drai
         deposit.id = id++;
         deposit.system = DepositSystem::placer_gold;
         deposit.origin = DepositOrigin::redistributed;
-        const int x = static_cast<int>(cell % static_cast<std::size_t>(network.width));
-        const int y = static_cast<int>(cell / static_cast<std::size_t>(network.width));
-        deposit.u = (x + random.uniform()) / network.width;
-        deposit.v = (y + random.uniform()) / network.height;
+        const double offsetu = random.uniform();
+        const double offsetv = random.uniform();
+        if (network.centreU.empty())
+        {
+            const int x = static_cast<int>(cell % static_cast<std::size_t>(network.width));
+            const int y = static_cast<int>(cell / static_cast<std::size_t>(network.width));
+            deposit.u = (x + offsetu) / network.width;
+            deposit.v = (y + offsetv) / network.height;
+        }
+        else
+        {
+            deposit.u = network.centreU[cell];
+            deposit.v = network.centreV[cell];
+        }
         const double grade = std::max(1.0e-6, random.lognormal(parameters.gravelGradeGt.median, parameters.gravelGradeGt.sigmaLn));
         deposit.goldGradeGt = grade;
         deposit.oreMt = gold / grade;

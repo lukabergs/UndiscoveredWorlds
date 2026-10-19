@@ -185,12 +185,13 @@ std::string describedeposit(const Deposit& deposit, const std::vector<Deposit>* 
     }
     return text;
 }
-void writedepositscsv(std::ostream& out, const std::vector<Deposit>& deposits)
+void writedepositscsv(std::ostream& out, const std::vector<Deposit>& deposits, bool cells)
 {
     const std::streamsize precision = out.precision(10);
     out << "id,system,origin,fate,fate_myr,u,v,formed_myr,regime,boundary_type,host_crust,boundary_segment,"
            "province,boundary_km,boundary_age_myr,intensity,ore_mt,gold_g_t,copper_pct,gold_t,remaining_gold_t,"
-           "formation_depth_m,extent_m,exhumation_m,top_depth_m,eroded_fraction,recent_liberated_t\n";
+           "formation_depth_m,extent_m,exhumation_m,top_depth_m,eroded_fraction,recent_liberated_t"
+        << (cells ? ",cell\n" : "\n");
     for (const Deposit& d : deposits)
     {
         const FormationRecord& f = d.formation;
@@ -201,7 +202,10 @@ void writedepositscsv(std::ostream& out, const std::vector<Deposit>& deposits)
             << f.boundaryDistanceKm << ',' << f.boundaryAgeMyr << ',' << f.settingIntensity << ',' << d.oreMt << ','
             << d.goldGradeGt << ',' << d.copperGradePct << ',' << d.containedGoldT() << ',' << d.remainingGoldT() << ','
             << d.formationDepthM << ',' << d.verticalExtentM << ',' << d.exhumationM << ',' << d.topDepthM() << ','
-            << d.erodedFraction << ',' << d.recentLiberatedGoldT << '\n';
+            << d.erodedFraction << ',' << d.recentLiberatedGoldT;
+        if (cells)
+            out << ',' << d.surface.cell;
+        out << '\n';
     }
     out.precision(precision);
 }
