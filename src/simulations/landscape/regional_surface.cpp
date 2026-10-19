@@ -351,6 +351,15 @@ void clamptomask(const RegionalGlobalInputs& inputs, const RegionalWindow& windo
 // on land, min(...) at sea), so no sign changes and the rest is left to the next pass.
 constexpr double signedlimit = 0.9;
 
+// A fine value moved by a correction under that limit.
+float signedmove(float value, double correction, double sealevel)
+{
+    const double h = static_cast<double>(value) - sealevel;
+    const double moved = h > 0.0 ? std::max(h + correction, (1.0 - signedlimit) * h)
+                                 : std::min(h + correction, (1.0 - signedlimit) * h);
+    return static_cast<float>(sealevel + moved);
+}
+
 void correctsignedblockmeans(const RegionalGlobalInputs& inputs, const RegionalWindow& window, std::vector<float>& fine)
 {
     const int width = inputs.width, height = inputs.height;
@@ -397,10 +406,7 @@ void correctsignedblockmeans(const RegionalGlobalInputs& inputs, const RegionalW
             const double gx = globalunits(window.absolutefinecolumn(x), k);
             const double correction = bicubic(field, width, height, gx, gy);
             float& value = fine[at(x, y, finewidth)];
-            const double h = static_cast<double>(value) - sealevel;
-            const double moved = h > 0.0 ? std::max(h + correction, (1.0 - signedlimit) * h)
-                                         : std::min(h + correction, (1.0 - signedlimit) * h);
-            value = static_cast<float>(sealevel + moved);
+            value = signedmove(value, correction, sealevel);
         }
     }
 }
@@ -915,10 +921,10 @@ StartSurface regionalstartsurface(const RegionalGlobalInputs& inputs, const Regi
         // twice the fine one, with an amplitude that grows with the local global relief and
         // tapers to zero within coastband_m of the sea level; then the block means.
         const double sealevel = static_cast<double>(inputs.sealevel);
-        result.base_m = upsample(inputs.elevation_m, width, height, window);
+        result.base_m = upsample(inputs.elevation_m, *inputs.grid, *regionalwindowgrid(window, inputs.radius_m));
         result.lapsebase_m = result.base_m;
         const std::vector<float>& base = result.base_m;
-        const std::vector<float> relief = upsample(noiserelief(inputs, parameters), width, height, window);
+        const std::vector<float> relief = upsample(noiserelief(inputs, parameters), *inputs.grid, *regionalwindowgrid(window, inputs.radius_m));
         FractalNoise noise;
         noise.seed = deterministiccombine(inputs.seed, noisesalt);
         noise.radius_km = inputs.radius_m / 1000.0;
@@ -1015,6 +1021,26 @@ StartSurface regionalstartsurface(const RegionalGlobalInputs& inputs, const Regi
     return result;
 }
 
+void correctsignedblockmeans(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window, std::vector<float>& fine)
+{
+    if (inputs.grid == nullptr)
+        throw std::invalid_argument("correctsignedblockmeans: the inputs need their level-0 grid");
+    const mesh::CellGrid& levelzero = *inputs.grid;
+    if (levelzero.kind() != mesh::GridKind::cube || window.kind() != mesh::GridKind::cube || levelzero.facecells() < 1 ||
+        window.facecells() % levelzero.facecells() != 0 || fine.size() != window.cellcount() ||
+        inputs.elevation_m.size() != levelzero.cellcount())
+        throw std::invalid_argument("correctsignedblockmeans: a cube level 0 and a cube window refining it");
+    const WindowBlocks blocks = windowblocks(window, window.facecells() / levelzero.facecells());
+    std::vector<double> residual(blocks.count());
+    for (std::size_t b = 0; b < blocks.count(); b++)
+        residual[b] = static_cast<double>(static_cast<float>(
+            static_cast<double>(inputs.elevation_m[levelzero.localofkey(blocks.parents[b])]) - blockmean(blocks, b, fine)));
+    const std::vector<double> correction = gatherblocks(blocks, residual, window);
+    const double sealevel = static_cast<double>(inputs.sealevel);
+    for (std::size_t cell = 0; cell < fine.size(); cell++)
+        fine[cell] = signedmove(fine[cell], correction[cell], sealevel);
+}
+
 double levelnoiseshare(int scale, int parentscale, double persistence)
 {
     if (parentscale < 1 || scale < parentscale)
@@ -1058,7 +1084,7 @@ void addlevelnoise(const RegionalGlobalInputs& inputs, const RegionalWindow& win
     const FractalNoiseField field(noise);
     if (field.resolved() == 0)
         return;
-    const std::vector<float> relief = upsample(noiserelief(inputs, parameters), width, height, window);
+    const std::vector<float> relief = upsample(noiserelief(inputs, parameters), *inputs.grid, *regionalwindowgrid(window, inputs.radius_m));
     for (int y = 0; y < domainheight; y++)
     {
         const double latitude = window.finelatitude_rad(y);

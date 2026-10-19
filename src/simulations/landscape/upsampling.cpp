@@ -212,4 +212,25 @@ void correctblockmeans(const std::vector<float>& field, int width, int height, c
         }
     }
 }
+
+void correctblockmeans(const std::vector<float>& field, const mesh::CellGrid& levelzero, const mesh::CellGrid& window,
+                       int passes, std::vector<float>& fine)
+{
+    if (levelzero.kind() != mesh::GridKind::cube || window.kind() != mesh::GridKind::cube || levelzero.issubgrid() ||
+        levelzero.facecells() < 1 || window.facecells() % levelzero.facecells() != 0 || field.size() != levelzero.cellcount())
+        throw std::invalid_argument("correctblockmeans: a cube level 0, its field and a cube window refining it");
+    if (passes < 0 || fine.size() != window.cellcount())
+        throw std::invalid_argument("correctblockmeans: passes must not be negative and fine must cover the window");
+    const WindowBlocks blocks = windowblocks(window, window.facecells() / levelzero.facecells());
+    std::vector<double> residual(blocks.count());
+    for (int pass = 0; pass < passes; pass++)
+    {
+        for (std::size_t b = 0; b < blocks.count(); b++)
+            residual[b] = static_cast<double>(static_cast<float>(
+                blockmean(blocks, b, fine) - static_cast<double>(field[levelzero.localofkey(blocks.parents[b])])));
+        const std::vector<double> correction = gatherblocks(blocks, residual, window);
+        for (std::size_t cell = 0; cell < fine.size(); cell++)
+            fine[cell] = static_cast<float>(static_cast<double>(fine[cell]) - correction[cell]);
+    }
+}
 }

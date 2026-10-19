@@ -248,6 +248,23 @@ Prolongation prolong(const LevelWindow& parent, const std::vector<float>& parent
 void correctparentmeans(const LevelWindow& parent, const std::vector<float>& parentfield, const LevelWindow& level,
                         int passes, std::vector<float>& fine);
 
+// The same two on cube windows (T8 W2-W2b, sphere-mesh.md section 8; lat-lon windows take the
+// forms above). `parent` is the parent level's kept cells as a cube window grid (N_L / factor cells
+// per face edge) with parentfield one value per cell of it; `level` the level's window grid
+// (N_L cells per face edge), whole parents (level_blocks.hpp).
+// prolong: every cell of `level` takes G of the parent field at its centre (mesh::cubicstencil of
+// the parent level, true-position ghosts); with `limit` clamped in double to [min, max] of the
+// stencil's central 2 x 2 nodes (mesh::cubicstencilnode 1..2, ghosts at their true positions);
+// `kept` (one flag per level cell, or null for every cell) selects the cells the clamp report
+// counts. Throws std::invalid_argument when a stencil node lies outside `parent`.
+// correctparentmeans: per pass the residual of every block (its children's mean minus the parent
+// value), stored as float, gathered by gatherblocks (a node beyond the domain's parents taking the
+// nearest domain parent's residual by rings, ties to the smallest key) and subtracted.
+Prolongation prolong(const mesh::CellGrid& parent, const std::vector<float>& parentfield, const mesh::CellGrid& level,
+                     int factor, bool limit, const std::vector<std::uint8_t>* kept = nullptr);
+void correctparentmeans(const mesh::CellGrid& parent, const std::vector<float>& parentfield, const mesh::CellGrid& level,
+                        int factor, int passes, std::vector<float>& fine);
+
 // The target of a refinement: the global window's kept box and halo in global cells
 // (window.scale is not read) and the finest level computed, at least 1; level l's halo is
 // levelhalo(window.halo, factor, l) parent cells (refinement_grid.hpp: window.halo at level 1,

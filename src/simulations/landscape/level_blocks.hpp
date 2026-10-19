@@ -11,7 +11,9 @@
 // so a block's sum in that order is today's bit for bit. Planet-free.
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include "core/mesh/cell_grid.hpp"
@@ -46,6 +48,34 @@ WindowBlocks windowblocks(const mesh::CellGrid& window, int factor);
 
 // The mean of a block's children (summed in double in the children's order, over factor^2).
 double blockmean(const WindowBlocks& blocks, std::size_t block, const std::vector<float>& field);
+
+// R for a stencil node outside a domain on the cube (sphere-mesh.md section 8, decided 2026-10-19):
+// a level key that is not one of the domain's keys takes the domain key at the smallest ring
+// distance (8-connected hops on the level's closed-form neighbours, mesh::cubekeyneighbour), ties
+// to the smallest key; a domain key is itself. Results are cached per key.
+class NearestDomainKey
+{
+public:
+    NearestDomainKey(std::int64_t facecells, std::vector<mesh::LevelKey> domain);
+    bool contains(mesh::LevelKey key) const;
+    // The index of a key's nearest domain key in the domain's ascending order.
+    std::size_t operator()(mesh::LevelKey key) const;
+    const std::vector<mesh::LevelKey>& keys() const { return domain_; }
+
+private:
+    std::int64_t facecells_ = 0;
+    std::vector<mesh::LevelKey> domain_;
+    mutable std::vector<std::pair<mesh::LevelKey, std::size_t>> cache_;  // sorted by key
+};
+
+// G of per-block values (values[b] for blocks.parents[b]) at every cell of a cube window, in its
+// local order: the 4 x 4 Catmull-Rom stencil of the parent level (window.facecells() / factor cells
+// per face edge; mesh::cubicstencil, true-position ghosts) at the cell's centre, a node outside the
+// blocks' parents taking its nearest parent's value (NearestDomainKey), applied relative to the first
+// node. The cube's form of the lat-lon block and parent-mean corrections' gather (whose nodes beyond
+// the domain clamp to the nearest domain row and column). Throws std::invalid_argument on a lat-lon
+// window or a size mismatch.
+std::vector<double> gatherblocks(const WindowBlocks& blocks, const std::vector<double>& values, const mesh::CellGrid& window);
 
 // The lat-lon key grid of a level window's domain (mesh::latlonwindowgrid of the level's
 // levelwidth() columns over the domain box, local id the domain's row-major index): the blocks and

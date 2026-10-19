@@ -11,6 +11,7 @@
 #include <string>
 #include <utility>
 
+#include "core/mesh/window_grid.hpp"
 #include "simulations/landscape/level_blocks.hpp"
 #include "simulations/landscape/regional_surface.hpp"
 #include "simulations/landscape/regional_valleys.hpp"
@@ -108,28 +109,42 @@ ParentPatch parentpatch(const LevelWindow& parent, const std::vector<float>& par
     return patch;
 }
 
-// The level's projected field averaged over every global cell of its kept box, against
-// the global elevation: the largest absolute difference.
+// On grids (either kind): the kept cells' blocks over level 0 (`scale` level cells per level-0 cell
+// edge; level_blocks.hpp), each block's mean read from the field on the domain grid, against the
+// level-0 elevation at the block's key (an id of inputs.grid).
+double globalmeanerror(const mesh::CellGrid& kept, const mesh::CellGrid& domain, int scale, const std::vector<float>& field,
+                       const RegionalGlobalInputs& inputs)
+{
+    const WindowBlocks blocks = windowblocks(kept, scale);
+    std::vector<float> keptfield(kept.cellcount());
+    for (mesh::CellId c = 0; c < kept.cellcount(); c++)
+    {
+        const mesh::CellId cell = domain.localofkey(kept.globalkey(c));
+        if (cell == mesh::nocell)
+            throw std::logic_error("globalmeanerror: a kept cell lies outside the domain");
+        keptfield[c] = field[cell];
+    }
+    double largest = 0.0;
+    for (std::size_t b = 0; b < blocks.count(); b++)
+    {
+        const mesh::CellId global = inputs.grid != nullptr ? inputs.grid->localofkey(blocks.parents[b])
+                                                           : static_cast<mesh::CellId>(blocks.parents[b]);
+        largest = std::max(largest, std::fabs(blockmean(blocks, b, keptfield) - static_cast<double>(inputs.elevation_m[global])));
+    }
+    return largest;
+}
+
+// The level's projected field averaged over every global cell of its kept box (whole global cells at
+// every level), against the global elevation: the largest absolute difference.
 double globalmeanerror(const LevelWindow& window, const std::vector<float>& field, const RegionalGlobalInputs& inputs)
 {
-    const std::int64_t scale = window.scale();
-    const int s = static_cast<int>(scale);
-    const int x0 = window.keptcolumnoffset(), y0 = window.keptrowoffset();
-    const double cells = static_cast<double>(s) * static_cast<double>(s);
-    double largest = 0.0;
-    for (int r = 0; r < window.rows / s; r++)
-        for (int c = 0; c < window.columns / s; c++)
-        {
-            double sum = 0.0;
-            for (int y = y0 + r * s; y < y0 + (r + 1) * s; y++)
-                for (int x = x0 + c * s; x < x0 + (c + 1) * s; x++)
-                    sum += static_cast<double>(field[window.index(x, y)]);
-            const int column = static_cast<int>(wraplevel(window.column0 / scale + c, inputs.width));
-            const int row = static_cast<int>(window.row0 / scale + r);
-            const double global = static_cast<double>(inputs.elevation_m[at(column, row, inputs.width)]);
-            largest = std::max(largest, std::fabs(sum / cells - global));
-        }
-    return largest;
+    mesh::LatLonWindowBox box;
+    box.column0 = window.column0;
+    box.columns = window.columns;
+    box.row0 = static_cast<int>(window.row0);
+    box.rows = window.rows;
+    const std::shared_ptr<const mesh::CellGrid> kept = mesh::latlonwindowgrid(static_cast<int>(window.levelwidth()), 1.0, box);
+    return globalmeanerror(*kept, *levelkeygrid(window), static_cast<int>(window.scale()), field, inputs);
 }
 
 }
@@ -270,6 +285,89 @@ void correctparentmeans(const LevelWindow& parent, const std::vector<float>& par
                                           catmullrom(interpolated[0], interpolated[1], interpolated[2], interpolated[3], ty));
             }
         }
+    }
+}
+
+namespace
+{
+void checkcubepair(const mesh::CellGrid& parent, std::size_t parentsize, const mesh::CellGrid& level, int factor,
+                   const char* name)
+{
+    if (parent.kind() != mesh::GridKind::cube || level.kind() != mesh::GridKind::cube || factor < 2 ||
+        parent.facecells() * factor != level.facecells() || parentsize != parent.cellcount())
+        throw std::invalid_argument(std::string(name) + ": cube windows of a level and its parent, the field the parent's");
+}
+}
+
+Prolongation prolong(const mesh::CellGrid& parent, const std::vector<float>& parentfield, const mesh::CellGrid& level,
+                     int factor, bool limit, const std::vector<std::uint8_t>* kept)
+{
+    checkcubepair(parent, parentfield.size(), level, factor, "prolong");
+    if (kept != nullptr && kept->size() != level.cellcount())
+        throw std::invalid_argument("prolong: the kept flags must hold one value per level cell");
+    const std::int64_t n = parent.facecells();
+    const auto value = [&](mesh::LevelKey key) {
+        const mesh::CellId cell = parent.localofkey(key);
+        if (cell == mesh::nocell)
+            throw std::invalid_argument("prolong: a stencil node lies outside the parent's kept cells");
+        return parentfield[cell];
+    };
+    Prolongation result;
+    result.values.resize(level.cellcount());
+    for (mesh::CellId c = 0; c < level.cellcount(); c++)
+    {
+        const mesh::Vec3 p = level.centre(c);
+        const double interpolated = mesh::applystencil(mesh::cubicstencil(n, p), value);
+        float& cell = result.values[c];
+        cell = static_cast<float>(interpolated);
+        if (!limit)
+            continue;
+        // The central 2 x 2 nodes (sphere-mesh.md section 8, decided 2026-10-19).
+        double lowest = 0.0, highest = 0.0;
+        for (int row = 1; row <= 2; row++)
+            for (int column = 1; column <= 2; column++)
+            {
+                const double node = mesh::applystencil(mesh::cubicstencilnode(n, p, column, row), value);
+                const bool first = row == 1 && column == 1;
+                lowest = first ? node : std::min(lowest, node);
+                highest = first ? node : std::max(highest, node);
+            }
+        const float clamped = static_cast<float>(std::clamp(interpolated, lowest, highest));
+        if (clamped == cell)
+            continue;
+        const double move = std::fabs(static_cast<double>(clamped) - static_cast<double>(cell));
+        cell = clamped;
+        if (kept == nullptr || (*kept)[c] != 0)
+        {
+            result.clamped++;
+            result.maxclamp_m = std::max(result.maxclamp_m, move);
+        }
+    }
+    return result;
+}
+
+void correctparentmeans(const mesh::CellGrid& parent, const std::vector<float>& parentfield, const mesh::CellGrid& level,
+                        int factor, int passes, std::vector<float>& fine)
+{
+    checkcubepair(parent, parentfield.size(), level, factor, "correctparentmeans");
+    if (passes < 0 || fine.size() != level.cellcount())
+        throw std::invalid_argument("correctparentmeans: passes must not be negative and fine must cover the window");
+    const WindowBlocks blocks = windowblocks(level, factor);
+    std::vector<double> parentvalue(blocks.count()), residual(blocks.count());
+    for (std::size_t b = 0; b < blocks.count(); b++)
+    {
+        const mesh::CellId cell = parent.localofkey(blocks.parents[b]);
+        if (cell == mesh::nocell)
+            throw std::invalid_argument("correctparentmeans: a domain parent lies outside the parent's kept cells");
+        parentvalue[b] = static_cast<double>(parentfield[cell]);
+    }
+    for (int pass = 0; pass < passes; pass++)
+    {
+        for (std::size_t b = 0; b < blocks.count(); b++)
+            residual[b] = static_cast<double>(static_cast<float>(blockmean(blocks, b, fine) - parentvalue[b]));
+        const std::vector<double> correction = gatherblocks(blocks, residual, level);
+        for (std::size_t cell = 0; cell < fine.size(); cell++)
+            fine[cell] = static_cast<float>(static_cast<double>(fine[cell]) - correction[cell]);
     }
 }
 

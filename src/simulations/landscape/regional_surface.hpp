@@ -225,4 +225,13 @@ void noiselevel(const LevelContext& context, LevelState& state);
 // sea within coast.pocketreach global cells beyond regionalsea's reach (the halo budget of
 // refinement_levels.hpp does not count them; the overlap tests hold).
 void coastlevel(const LevelContext& context, LevelState& state);
+
+// The land-share rule's signed block-mean correction on a cube window (T8 W2-W2b, sphere-mesh.md
+// section 8), one pass: the residual of every block over level 0 (the global base elevation minus
+// the block's mean, level_blocks.hpp) gathered at every window cell by gatherblocks (G, a node
+// beyond the domain taking the nearest domain cell's residual by rings, ties to the smallest key),
+// each cell moved by it at most until 90 % of its height above the sea level is gone (no sign
+// change), as the lat-lon pass inside landsharesurface. inputs.grid is the cube level 0. Throws
+// std::invalid_argument for grids that are not a cube level 0 and a window refining it.
+void correctsignedblockmeans(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window, std::vector<float>& fine);
 }

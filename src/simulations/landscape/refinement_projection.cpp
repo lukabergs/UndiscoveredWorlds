@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "core/mesh/cube_geometry.hpp"
 #include "simulations/landscape/level_blocks.hpp"
 #include "simulations/landscape/refinement_levels.hpp"
 #include "simulations/landscape/regional_pass.hpp"
@@ -162,9 +163,8 @@ float roomup(double value, float ceiling)
 }
 
 // The bounds' sizes and values, as projectlevel and smoothparentmeans require them.
-void checkbounds(const LevelWindow& level, const ProjectionBounds& bounds, const char* name)
+void checkbounds(std::size_t size, const ProjectionBounds& bounds, const char* name)
 {
-    const std::size_t size = level.domainsize();
     if (bounds.rate.size() != size || bounds.up_m.size() != size || bounds.down_m.size() != size ||
         (!bounds.bed.empty() && bounds.bed.size() != size))
         throw std::invalid_argument(std::string(name) + ": the bounds must have the level's domain size");
@@ -288,7 +288,7 @@ ProjectionReport projectlevel(const LevelWindow& level, std::vector<float>& fiel
 {
     checkpair(level, field.size(), parent, parentfield.size(), "projectlevel");
     const std::size_t size = level.domainsize();
-    checkbounds(level, bounds, "projectlevel");
+    checkbounds(level.domainsize(), bounds, "projectlevel");
 
     const int f = level.factor;
     const int count = f * f;
@@ -466,7 +466,7 @@ SmoothingReport smoothparentmeans(const LevelWindow& level, std::vector<float>& 
                                   double relaxation, int basis)
 {
     checkpair(level, field.size(), parent, parentfield.size(), "smoothparentmeans");
-    checkbounds(level, bounds, "smoothparentmeans");
+    checkbounds(level.domainsize(), bounds, "smoothparentmeans");
     if (passes < 0 || !std::isfinite(relaxation) || !(relaxation > 0.0))
         throw std::invalid_argument("smoothparentmeans: passes must not be negative and the relaxation positive and finite");
     if (basis != 0 && basis != 1)
@@ -577,6 +577,108 @@ SmoothingReport smoothparentmeans(const LevelWindow& level, std::vector<float>& 
     for (int y = y0; y < y0 + level.rows; y++)
         for (int x = x0; x < x0 + level.columns; x++)
             report.maxmove_m = std::max(report.maxmove_m, std::fabs(total[level.index(x, y)]));
+    return report;
+}
+
+SmoothingReport smoothparentmeans(const mesh::CellGrid& level, std::vector<float>& field, const ProjectionBounds& bounds,
+                                  const mesh::CellGrid& parent, const std::vector<float>& parentfield, int factor,
+                                  int passes, double relaxation, int basis, const std::vector<std::uint8_t>& kept)
+{
+    if (level.kind() != mesh::GridKind::cube || parent.kind() != mesh::GridKind::cube || factor < 2 ||
+        parent.facecells() * factor != level.facecells() || field.size() != level.cellcount() ||
+        parentfield.size() != parent.cellcount() || kept.size() != level.cellcount())
+        throw std::invalid_argument("smoothparentmeans: cube windows of a level and its parent with their fields and kept flags");
+    checkbounds(level.cellcount(), bounds, "smoothparentmeans");
+    if (passes < 0 || !std::isfinite(relaxation) || !(relaxation > 0.0))
+        throw std::invalid_argument("smoothparentmeans: passes must not be negative and the relaxation positive and finite");
+    if (basis != 0)
+        throw std::invalid_argument("smoothparentmeans: the cube has the Catmull-Rom basis (0) only");
+    const WindowBlocks blocks = windowblocks(level, factor);
+    const std::size_t count = blocks.count();
+    std::vector<double> parentvalue(count);
+    std::vector<std::uint8_t> keptparent(count);
+    for (std::size_t b = 0; b < count; b++)
+    {
+        const mesh::CellId cell = parent.localofkey(blocks.parents[b]);
+        if (cell == mesh::nocell)
+            throw std::invalid_argument("smoothparentmeans: a domain parent lies outside the parent's kept cells");
+        parentvalue[b] = static_cast<double>(parentfield[cell]);
+        keptparent[b] = kept[blocks.childrenof(b)[0]];
+    }
+    // The kept parents' lambda and its steps to the kept parents in slots 3 and 5.
+    const std::int64_t parentcells = parent.facecells();
+    const auto statistics = [&](double& largest, double& largeststep) {
+        std::vector<double> lambda(count);
+        for (std::size_t b = 0; b < count; b++)
+            lambda[b] = parentvalue[b] - blockmean(blocks, b, field);
+        largest = 0.0;
+        largeststep = 0.0;
+        for (std::size_t b = 0; b < count; b++)
+        {
+            if (keptparent[b] == 0)
+                continue;
+            largest = std::max(largest, std::fabs(lambda[b]));
+            for (const int slot : { 3, 5 })
+            {
+                const mesh::LevelKey other = mesh::cubekeyneighbour(parentcells, blocks.parents[b], slot);
+                const auto found = std::find(blocks.parents.begin(), blocks.parents.end(), other);
+                if (other == mesh::nokey || found == blocks.parents.end())
+                    continue;
+                const std::size_t neighbour = static_cast<std::size_t>(found - blocks.parents.begin());
+                if (keptparent[neighbour] != 0)
+                    largeststep = std::max(largeststep, std::fabs(lambda[b] - lambda[neighbour]));
+            }
+        }
+    };
+    SmoothingReport report;
+    report.passes = passes;
+    statistics(report.maxlambdabefore_m, report.maxlambdastepbefore_m);
+    if (passes == 0)
+    {
+        report.maxlambdaafter_m = report.maxlambdabefore_m;
+        report.maxlambdastepafter_m = report.maxlambdastepbefore_m;
+        return report;
+    }
+    const double children = static_cast<double>(factor) * factor;
+    const std::size_t size = level.cellcount();
+    std::vector<double> origin(size), total(size, 0.0), mu(count);
+    for (std::size_t cell = 0; cell < size; cell++)
+        origin[cell] = static_cast<double>(field[cell]);
+    for (int pass = 0; pass < passes; pass++)
+    {
+        for (std::size_t b = 0; b < count; b++)
+        {
+            const double lambdac = parentvalue[b] - blockmean(blocks, b, field);
+            double rates = 0.0;
+            if (lambdac != 0.0)
+                for (std::size_t n = 0; n < blocks.perparent(); n++)
+                {
+                    const std::size_t cell = blocks.childrenof(b)[n];
+                    const double room = lambdac > 0.0 ? static_cast<double>(bounds.up_m[cell]) - total[cell]
+                                                      : static_cast<double>(bounds.down_m[cell]) + total[cell];
+                    if (bounds.rate[cell] > 0.0f && room > 0.0)
+                        rates += static_cast<double>(bounds.rate[cell]);
+                }
+            mu[b] = rates > 0.0 ? lambdac * children / rates : 0.0;
+        }
+        const std::vector<double> lambdafield = gatherblocks(blocks, mu, level);
+        for (std::size_t cell = 0; cell < size; cell++)
+        {
+            const double rate = static_cast<double>(bounds.rate[cell]);
+            if (!(rate > 0.0))
+                continue;
+            const double moved = std::clamp(total[cell] + relaxation * rate * lambdafield[cell],
+                                            -static_cast<double>(bounds.down_m[cell]), static_cast<double>(bounds.up_m[cell]));
+            if (moved == total[cell])
+                continue;
+            total[cell] = moved;
+            field[cell] = static_cast<float>(origin[cell] + moved);
+        }
+    }
+    statistics(report.maxlambdaafter_m, report.maxlambdastepafter_m);
+    for (std::size_t cell = 0; cell < size; cell++)
+        if (kept[cell] != 0)
+            report.maxmove_m = std::max(report.maxmove_m, std::fabs(total[cell]));
     return report;
 }
 

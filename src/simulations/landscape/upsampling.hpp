@@ -70,4 +70,14 @@ std::vector<float> upsample(const std::vector<float>& field, int width, int heig
 // computed from its block, which lies inside the domain by construction.
 void correctblockmeans(const std::vector<float>& field, int width, int height, const RegionalWindow& window, int passes,
                        std::vector<float>& fine);
+
+// The same on a cube window (T8 W2-W2b, sphere-mesh.md section 8): the residual of every block of
+// the window over level 0 (k = window.facecells() / levelzero.facecells() fine cells per level-0
+// cell edge; level_blocks.hpp), stored as a float as above, gathered at every window cell by
+// gatherblocks (G of level 0, a node beyond the domain taking the residual of the domain cell at the
+// smallest ring distance, ties to the smallest key) and subtracted, `passes` times. Lat-lon windows
+// take the form above (today's clamp). Throws std::invalid_argument for grids that are not a cube
+// level 0 and a window refining it, or fine not one value per window cell.
+void correctblockmeans(const std::vector<float>& field, const mesh::CellGrid& levelzero, const mesh::CellGrid& window,
+                       int passes, std::vector<float>& fine);
 }

@@ -168,6 +168,20 @@ SmoothingReport smoothparentmeans(const LevelWindow& level, std::vector<float>& 
                                   const LevelWindow& parent, const std::vector<float>& parentfield, int passes,
                                   double relaxation, int basis = 0);
 
+// The same on cube windows (T8 W2-W2b, sphere-mesh.md section 8; lat-lon windows take the form
+// above): `level` the level's window grid, whole parents (level_blocks.hpp), `parent` the parent's
+// kept cells as a cube window grid (level.facecells() / factor cells per face edge) with
+// parentfield one value per cell, `kept` one flag per level cell (the kept cells; a parent is kept
+// with its first child). mu per block as above; Lambda at every cell is gatherblocks of mu (G of
+// the parent level, a node beyond the domain's parents taking the nearest one's mu by rings, ties
+// to the smallest key), so only the Catmull-Rom basis (0) exists here. The report's lambda steps
+// are over kept parents adjacent in the parent level's slots 3 and 5 (east and south in the cell's
+// frame). Throws std::invalid_argument as above, for basis 1, or when a domain parent lies outside
+// `parent`.
+SmoothingReport smoothparentmeans(const mesh::CellGrid& level, std::vector<float>& field, const ProjectionBounds& bounds,
+                                  const mesh::CellGrid& parent, const std::vector<float>& parentfield, int factor,
+                                  int passes, double relaxation, int basis, const std::vector<std::uint8_t>& kept);
+
 // The largest |mean_C(c)(field) - v_c| over the parent cells of the level window's kept
 // box, the mean unweighted and accumulated in double in the order above, v_c read as in
 // projectlevel; 0 to float rounding after projectlevel (the S2.2 test: below 1e-3 m on

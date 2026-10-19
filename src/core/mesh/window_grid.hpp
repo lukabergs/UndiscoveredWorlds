@@ -67,6 +67,12 @@ enum class GhostRule
 KeyStencil cubicstencil(std::int64_t facecells, int face, double a, double b, GhostRule rule = GhostRule::trueposition);
 // The same on p's own face (cubeposition).
 KeyStencil cubicstencil(std::int64_t facecells, const Vec3& p, GhostRule rule = GhostRule::trueposition);
+// One node of that stencil before its Catmull-Rom weight, as a stencil of its own: column and row
+// 0..3 of the 4 x 4 nodes (1 and 2 the central 2 x 2 around p), the cell itself on p's face or a
+// ghost's 1-D Catmull-Rom at its true position beyond an edge (weights summing to 1); empty for an
+// offset outside 0..3. Prolong's limit reads the central 2 x 2 (sphere-mesh.md section 8).
+KeyStencil cubicstencilnode(std::int64_t facecells, const Vec3& p, int column, int row,
+                            GhostRule rule = GhostRule::trueposition);
 
 // S: one straight step from a key in a slot: the neighbour and the slot that
 // continues straight from it (the opposite of its reverse slot); nokey and 0

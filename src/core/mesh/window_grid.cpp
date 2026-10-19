@@ -221,6 +221,19 @@ KeyStencil cubicstencil(std::int64_t facecells, const Vec3& p, GhostRule rule)
     return cubicstencil(facecells, position.face, position.a, position.b, rule);
 }
 
+KeyStencil cubicstencilnode(std::int64_t facecells, const Vec3& p, int column, int row, GhostRule rule)
+{
+    if (column < 0 || column > 3 || row < 0 || row > 3)
+        return {};
+    const std::int64_t n = facecells;
+    const FacePosition position = cubeposition(p);
+    const double u = columnindex(n, position.a), v = rowindex(n, position.b);
+    const std::int64_t i0 = static_cast<std::int64_t>(std::floor(u)) - 1, j0 = static_cast<std::int64_t>(std::floor(v)) - 1;
+    Terms terms;
+    addnode(terms, n, position.face, i0 + column, j0 + row, 1.0, rule, 0);
+    return merged(terms);
+}
+
 WalkStep cubewalkstep(std::int64_t facecells, LevelKey key, int slot)
 {
     const LevelKey next = cubekeyneighbour(facecells, key, slot);
