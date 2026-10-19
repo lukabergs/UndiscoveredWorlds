@@ -18,6 +18,7 @@
 #include "simulations/hydrology/flow_routing.hpp"
 #include "simulations/hydrology/lake_levels.hpp"
 #include "simulations/hydrology/rivers.hpp"
+#include "simulations/hydrology/tides.hpp"
 #include "world/planet.hpp"
 
 namespace
@@ -142,6 +143,40 @@ TEST(HydrologyCube, RiverCrossesFaceEdge)
     std::cout << "rivers crossing a face edge: " << crossings << "\n";
     EXPECT_GT(crossings, 0);
     EXPECT_EQ(inflows, crossings);
+}
+
+// Tides on the cube: every sea cell next to land gets a range of at least twice the lunar
+// strength, and casts across the southern ocean measure their fetch in km.
+TEST(HydrologyCube, TidesReachEveryCoast)
+{
+    const std::unique_ptr<planet> world = slopingcubeworld(false);
+    world->setlunar(1.0f);
+    createtidalmap(*world);
+    const planet& view = *world;
+    const mesh::CellGrid& grid = view.grid();
+    int coastal = 0, missing = 0, highest = 0;
+    for (mesh::CellId c = 0; c < view.cellcount(); c++)
+    {
+        if (view.sea(c) != 1)
+            continue;
+        bool coast = false;
+        for (int slot = 1; slot <= mesh::slotcount; slot++)
+        {
+            const std::int32_t neighbour = grid.neighbour(c, slot);
+            if (neighbour >= 0 && view.sea(static_cast<mesh::CellId>(neighbour)) == 0)
+                coast = true;
+        }
+        if (!coast)
+            continue;
+        coastal++;
+        if (view.tide(c) < 2)
+            missing++;
+        highest = std::max(highest, view.tide(c));
+    }
+    std::cout << "coastal sea cells " << coastal << ", highest tide " << highest << "\n";
+    EXPECT_GT(coastal, 0);
+    EXPECT_EQ(missing, 0);
+    EXPECT_GT(highest, 2);
 }
 
 TEST(HydrologyCube, BasinsTileTheLand)

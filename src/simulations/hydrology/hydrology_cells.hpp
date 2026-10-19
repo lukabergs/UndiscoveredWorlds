@@ -85,13 +85,11 @@ inline bool openwater(const planet& world, mesh::CellId c)
 }
 
 // planet::outline on the cell grid: a land cell (planet::sea) with open water
-// (openwater) across one of its four edges. On a lat-lon grid the two polar rows
-// are not outline, as planet::outline has it.
+// (openwater) across one of its four edges. Unlike planet::outline, the lat-lon
+// polar rows are not left out (their missing slot is skipped).
 inline bool outline(const planet& world, mesh::CellId c)
 {
     const mesh::CellGrid& grid = world.grid();
-    if (grid.kind() == mesh::GridKind::latlon && (grid.row(c) < 1 || grid.row(c) > grid.rows() - 2))
-        return false;
     if (world.sea(c))
         return false;
     for (const int slot : { 7, 1, 3, 5 })

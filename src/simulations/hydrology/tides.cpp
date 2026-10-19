@@ -1,259 +1,68 @@
 #include <algorithm>
 #include <cmath>
-#include <mutex>
+#include <cstdint>
 #include <vector>
 
 #include "core/classes.hpp"
 #include "world/planet.hpp"
-#include "world/functions.hpp"
+#include "simulations/hydrology/hydrology_cells.hpp"
 #include "simulations/hydrology/tides.hpp"
+#include "simulations/terrain/terrain_elevation.hpp"
 
 using namespace std;
 
+// On the world's cell grid: casts follow the neighbour table and measure their fetch in km.
+
 namespace
 {
-int gettidalrange(planet& world, int startx, int starty);
+// The legacy cast was 1000 cells at most, and each open-water cell of it added 0.01 to the
+// range: lengths of legacy pixels (terrain::legacycellkm, a cell of the 2048-column world).
+constexpr double castlimitpixels = 1000.0;
+constexpr double rangeperpixel = 0.01;
 
-// This function finds the tidal range of a given point.
-
-int gettidalrange(planet& world, int startx, int starty)
+// The open-water fetch in km of one cast from c: along a slot, straight on through each cell
+// (the slot opposite the one by which the cast entered, in that cell's own frame), adding the
+// centre distances of the cells below the sea level until land, a missing neighbour or the
+// cast's limit.
+double castfetch_km(const planet& world, mesh::CellId c, int slot, double limit_km)
 {
-    int width = world.width();
-    int height = world.height();
-    int sealevel = world.sealevel();
+    const mesh::CellGrid& grid = world.grid();
+    double fetch = 0.0;
+    mesh::CellId current = c;
+    int direction = slot;
 
-    float mult1 = 0.01f;
-
-    // We cast in each of the eight directions from the starting point until we hit land.
-    // The longer each cast, the more tidal range it generates.
-
-    int north = 0;
-    int northeast = 0;
-    int east = 0;
-    int southeast = 0;
-    int south = 0;
-    int southwest = 0;
-    int west = 0;
-    int northwest = 0;
-
-    bool hitland;
-    int x, y;
-
-    // North
-
-    hitland = 0;
-    x = startx;
-    y = starty;
-
-    for (int n = 1; n <= 1000; n++)
+    while (fetch < limit_km)
     {
-        y--;
+        const std::int32_t neighbour = grid.neighbour(current, direction);
 
-        if (y < 0)
-            hitland = 1;
-        else
-        {
-            if (!world.basebelowsea(x, y))
-                hitland = 1;
-            else
-                north++;
-        }
+        if (neighbour < 0)
+            break;
 
-        if (hitland == 1)
-            n = 1000;
+        const mesh::CellId next = static_cast<mesh::CellId>(neighbour);
+
+        if (!world.basebelowsea(next))
+            break;
+
+        fetch += grid.distance_m(current, direction) / 1000.0;
+        direction = (grid.reverse(current, direction) + 3) % 8 + 1;
+        current = next;
     }
 
-    // South
+    return std::min(fetch, limit_km);
+}
 
-    hitland = 0;
-    x = startx;
-    y = starty;
+// This function finds the tidal range of a given point: casts in each of the eight directions
+// until they hit land; the longer each cast, the more tidal range it generates.
 
-    for (int n = 1; n <= 1000; n++)
-    {
-        y++;
+int gettidalrange(planet& world, mesh::CellId c)
+{
+    const double pixel_km = terrain::legacycellkm(world);
+    double total = 0.0;
 
-        if (y > height)
-            hitland = 1;
-        else
-        {
-            if (!world.basebelowsea(x, y))
-                hitland = 1;
-            else
-                south++;
-        }
+    for (int slot = 1; slot <= mesh::slotcount; slot++)
+        total += castfetch_km(world, c, slot, castlimitpixels * pixel_km) / pixel_km;
 
-        if (hitland == 1)
-            n = 1000;
-    }
-
-    // East
-
-    hitland = 0;
-    x = startx;
-    y = starty;
-
-    for (int n = 1; n <= 1000; n++)
-    {
-        x++;
-
-        if (x > width)
-            x = 0;
-        else
-        {
-            if (!world.basebelowsea(x, y))
-                hitland = 1;
-            else
-                east++;
-        }
-
-        if (hitland == 1)
-            n = 1000;
-    }
-
-    // West
-
-    hitland = 0;
-    x = startx;
-    y = starty;
-
-    for (int n = 1; n <= 1000; n++)
-    {
-        x--;
-
-        if (x < 0)
-            x = width;
-        else
-        {
-            if (!world.basebelowsea(x, y))
-                hitland = 1;
-            else
-                west++;
-        }
-
-        if (hitland == 1)
-            n = 1000;
-    }
-
-    // Northeast
-
-    hitland = 0;
-    x = startx;
-    y = starty;
-
-    for (int n = 1; n <= 1000; n++)
-    {
-        x++;
-
-        if (x > width)
-            x = 0;
-
-        y--;
-
-        if (y < 0)
-            hitland = 1;
-        else
-        {
-            if (!world.basebelowsea(x, y))
-                hitland = 1;
-            else
-                northeast++;
-        }
-
-        if (hitland == 1)
-            n = 1000;
-    }
-
-    // Southeast
-
-    hitland = 0;
-    x = startx;
-    y = starty;
-
-    for (int n = 1; n <= 1000; n++)
-    {
-        x++;
-
-        if (x > width)
-            x = 0;
-
-        y++;
-
-        if (y > height)
-            hitland = 1;
-        else
-        {
-            if (!world.basebelowsea(x, y))
-                hitland = 1;
-            else
-                southeast++;
-        }
-
-        if (hitland == 1)
-            n = 1000;
-    }
-
-    // Southwest
-
-    hitland = 0;
-    x = startx;
-    y = starty;
-
-    for (int n = 1; n <= 1000; n++)
-    {
-        x--;
-
-        if (x < 0)
-            x = width;
-
-        y++;
-
-        if (y > height)
-            hitland = 1;
-        else
-        {
-            if (!world.basebelowsea(x, y))
-                hitland = 1;
-            else
-                southwest++;
-        }
-
-        if (hitland == 1)
-            n = 1000;
-    }
-
-    // Northwest
-
-    hitland = 0;
-    x = startx;
-    y = starty;
-
-    for (int n = 1; n <= 1000; n++)
-    {
-        x--;
-
-        if (x < 0)
-            x = width;
-
-        y--;
-
-        if (y < 0)
-            hitland = 1;
-        else
-        {
-            if (!world.basebelowsea(x, y))
-                hitland = 1;
-            else
-                northwest++;
-        }
-
-        if (hitland == 1)
-            n = 1000;
-    }
-
-    float total = (float)(north + south + east + west + southeast + southwest + northeast + northwest);
-
-    total = total * mult1;
+    total = total * rangeperpixel;
 
     total = total * world.lunar(); // Lunar pull multiplies tides.
 
@@ -263,75 +72,46 @@ int gettidalrange(planet& world, int startx, int starty)
 }
 }
 
-// This function calculates the tides.
+// This function calculates the tides: each sea cell next to land gets its range, and its
+// neighbours without one take it too.
 
 void createtidalmap(planet& world)
 {
-    int width = world.width();
-    int height = world.height();
+    const mesh::CellGrid& grid = world.grid();
     int lunar = (int)world.lunar();
 
-    for (int i = 0; i <= width; i++)
+    for (mesh::CellId c = 0; c < world.cellcount(); c++)
+        world.settide(c, -1);
+
+    for (const mesh::CellId c : hydrologycells::visitorder(grid))
     {
-        for (int j = 0; j <= height; j++)
-            world.settide(i, j, -1);
-    }
-    
-    for (int i = 0; i <= width; i++)
-    {
-        for (int j = 0; j <= height; j++)
+        if (world.sea(c) == 1)
         {
-            if (world.sea(i, j) == 1)
+            bool landfound = 0;
+
+            for (const mesh::CellId cell : hydrologycells::square(grid, c))
             {
-                bool landfound = 0;
-
-                for (int k = i - 1; k <= i + 1; k++)
+                if (world.sea(cell) == 0)
                 {
-                    int kk = k;
+                    landfound = 1;
+                    break;
+                }
+            }
 
-                    if (kk<0 || kk>width)
-                        kk = wrap(kk, width);
+            if (landfound == 1)
+            {
+                int tide = gettidalrange(world, c);
 
-                    for (int l = j - 1; l <= j + 1; l++)
-                    {
-                        if (l >= 0 && l <= height)
-                        {
-                            if (world.sea(kk, l) == 0)
-                            {
-                                landfound = 1;
-                                k = i + 1;
-                                l = j + 1;
-                            }
-                        }
-                    }
+                for (const mesh::CellId cell : hydrologycells::square(grid, c))
+                {
+                    if (world.tide(cell) == -1)
+                        world.settide(cell, tide);
                 }
 
-                if (landfound == 1)
-                {
-                    int tide = gettidalrange(world, i, j);
+                if (tide < lunar * 2)
+                    tide = lunar * 2;
 
-                    for (int k = i - 1; k <= i + 1; k++)
-                    {
-                        int kk = k;
-
-                        if (kk<0 || kk>width)
-                            kk = wrap(kk, width);
-
-                        for (int l = j - 1; l <= j + 2; l++)
-                        {
-                            if (l >= 0 && l <= height)
-                            {
-                                if (world.tide(kk, l) == -1)
-                                    world.settide(kk, l, tide);
-                            }
-                        }
-                    }
-
-                    if (tide < lunar * 2)
-                        tide = lunar * 2;
-
-                    world.settide(i, j, tide);
-                }
+                world.settide(c, tide);
             }
         }
     }

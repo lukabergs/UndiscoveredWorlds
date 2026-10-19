@@ -1,109 +1,77 @@
 #include <algorithm>
 #include <cmath>
-#include <mutex>
+#include <cstdint>
 #include <vector>
 
 #include "core/classes.hpp"
+#include "core/deterministic_random.hpp"
+#include "core/mesh/mesh_geometry.hpp"
 #include "world/planet.hpp"
 #include "world/functions.hpp"
+#include "simulations/hydrology/flow_queries.hpp"
+#include "simulations/hydrology/hydrology_cells.hpp"
 #include "simulations/hydrology/wetlands.hpp"
+#include "simulations/terrain/terrain_elevation.hpp"
 
 using namespace std;
 
+// On the world's cell grid: neighbourhoods from the neighbour table, the patches placed in km
+// through the cell's tangent frame, the drainage noise on the sphere.
+
 namespace
 {
-void pastewetland(planet& world, int centrex, int centrey, int shapenumber, boolshapetemplate smalllake[]);
+// Salt of the wetlands' drainage noise (terrain::spherefractal).
+constexpr std::uint64_t drainagesalt = 0x7303;
 
-// This actually pastes a patch of wetlands onto the map.
-
-void pastewetland(planet& world, int centrex, int centrey, int shapenumber, boolshapetemplate smalllake[])
+// The cells within two steps of the neighbour table (the 5 x 5 box of the lat-lon grid).
+vector<mesh::CellId> twosteps(const mesh::CellGrid& grid, mesh::CellId c)
 {
-    int width = world.width();
-    int height = world.height();
+    vector<mesh::CellId> cells = hydrologycells::square(grid, c);
+    const size_t first = cells.size();
+    for (size_t index = 0; index < first; index++)
+        for (const mesh::CellId cell : hydrologycells::square(grid, cells[index]))
+            cells.push_back(cell);
+    sort(cells.begin(), cells.end());
+    cells.erase(unique(cells.begin(), cells.end()), cells.end());
+    return cells;
+}
 
-    if (centrey == 0 || centrey == height)
-        return;
+// This actually pastes a patch of wetlands onto the map: the template's pixels are legacy
+// pixels (terrain::legacycellkm, a cell of the 2048-column world) laid out east and north of
+// the centre cell in its tangent frame, top row north.
+
+void pastewetland(planet& world, mesh::CellId centre, int shapenumber, boolshapetemplate smalllake[])
+{
+    const mesh::CellGrid& grid = world.grid();
+    const double pixel_km = terrain::legacycellkm(world);
 
     int imheight = smalllake[shapenumber].ysize() - 1;
     int imwidth = smalllake[shapenumber].xsize() - 1;
 
-    int x = centrex - imwidth / 2; // Coordinates of the top left corner.
-    int y = centrey - imheight / 2;
+    // The legacy left-right and top-bottom reversals: drawn as before, they changed only the
+    // order in which the pixels were pasted, not the patch.
+    random(0, 1);
+    random(0, 1);
 
-    if (x<0 || x>width)
-        x = wrap(x, width);
+    const mesh::TangentFrame frame = mesh::tangentframe(grid.centre(centre), grid.radius_m());
 
-    int leftx = centrex;
-    int lefty = centrey;
-    int rightx = centrex;
-    int righty = centrey; // These are the coordinates of the furthermost pixels of the swamp.
-    bool wrapped = 0; // If this is 1, the swamp wraps over the edge of the map.
-
-    int leftr = random(0, 1); // If it's 1 then we reverse it left-right
-    int downr = random(0, 1); // If it's 1 then we reverse it top-bottom
-
-    int istart = 0, desti = imwidth + 1, istep = 1;
-    int jstart = 0, destj = imheight + 1, jstep = 1;
-
-    if (leftr == 1)
+    for (int i = 0; i <= imwidth; i++)
     {
-        istart = imwidth;
-        desti = -1;
-        istep = -1;
-    }
-
-    if (downr == 1)
-    {
-        jstart = imwidth;
-        destj = -1;
-        jstep = -1;
-    }
-
-    for (int i = istart; i != desti; i = i + istep)
-    {
-        for (int j = jstart; j != destj; j = j + jstep)
+        for (int j = 0; j <= imheight; j++)
         {
             if (smalllake[shapenumber].point(i, j) == 1)
             {
-                int xx = x + i;
-                int yy = y + j;
+                const double east_km = static_cast<double>(i - imwidth / 2) * pixel_km;
+                const double north_km = -static_cast<double>(j - imheight / 2) * pixel_km;
+                const mesh::CellId c = grid.locate(mesh::fromtangent(frame, east_km, north_km));
 
-                if (yy >= 0 && yy <= height)
-                {
-                    if (xx<0 || xx>width)
-                    {
-                        xx = wrap(xx, width);
-                        wrapped = 1;
-                    }
+                if (c == mesh::nocell)
+                    continue;
 
-                    if (world.sea(xx, yy) == 0 && world.mountainheightfloat(xx, yy) == 0) // Don't try to put wetlands on top of sea or mountains...
-                    {
-                        world.setspecial(xx, yy, 130);
-
-                        if (xx < leftx)
-                            leftx = xx;
-
-                        if (xx > rightx)
-                            rightx = xx;
-
-                        if (yy < lefty)
-                            lefty = yy;
-
-                        if (yy > righty)
-                            righty = yy;
-
-                    }
-                }
+                if (world.sea(c) == 0 && world.mountainheightfloat(c) == 0) // Don't try to put wetlands on top of sea or mountains...
+                    world.setspecial(c, 130);
             }
         }
-    }
-
-    if (wrapped == 1)
-    {
-        leftx = 0;
-        lefty = 0;
-        rightx = width;
-        righty = height;
     }
 }
 }
@@ -112,96 +80,76 @@ void pastewetland(planet& world, int centrex, int centrey, int shapenumber, bool
 
 void createwetlands(planet& world, boolshapetemplate smalllake[])
 {
-    int width = world.width();
-    int height = world.height();
+    const mesh::CellGrid& grid = world.grid();
+    const vector<mesh::CellId> order = hydrologycells::visitorder(grid);
     int maxelev = world.maxelevation();
 
     int minflow = 100; // Average flow must be at least this to have wetlands.
     int maxflatness = 5; // Must be no less flat than this.
     float factor = (float)maxelev / 5.0f;
 
-    // First, create a fractal to be the drainage map.
-
-    int grain = 8; // This is the level of detail on this map.
-    float valuemod = 0.2f;
-
-    int v = random(3, 6);
-    float valuemod2 = (float)v;
     int shapenumber;
 
-    vector<vector<int>> drainage(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
+    // First, the drainage map: the legacy grain-8 fractal (valuemod 0.2 to 3-6) on the sphere,
+    // as terrain::terrainfractal stands for it.
 
-    createfractal(drainage, width, height, grain, valuemod, valuemod2, 1, maxelev, 0, 0);
+    const vector<float> drainage = terrain::spherefractal(world, deterministiccontextseed(world.seed(), drainagesalt),
+                                                          terrain::terrainfractal(), static_cast<float>(maxelev));
 
     // Now go through the map and place wetlands.
 
-    for (int i = 0; i <= width; i++)
+    for (const mesh::CellId c : order)
     {
-        for (int j = 0; j <= height; j++)
+        if (world.sea(c) == 0 && world.special(c) == 0 && world.lakesurfacefloat(c) == 0 && world.climate(c) != 31 && world.climate(c) != 5)
         {
-            if (world.sea(i, j) == 0 && world.special(i, j) == 0 && world.lakesurfacefloat(i, j) == 0 && world.climate(i, j) != 31 && world.climate(i, j) != 5)
+            if (world.deltadir(c) != 0)
             {
-                if (world.deltadir(i, j) != 0)
+                shapenumber = random(0, 5);
+                pastewetland(world, c, shapenumber, smalllake);
+            }
+            else
+            {
+                if (world.riveraveflow(c) >= minflow)
                 {
-                    shapenumber = random(0, 5);
-                    pastewetland(world, i, j, shapenumber, smalllake);
-                }
-                else
-                {
-                    if (world.riveraveflow(i, j) >= minflow)
+                    int flatness = getflatness(world, c);
+
+                    if (flatness <= maxflatness)
                     {
-                        int flatness = getflatness(world, i, j);
+                        float drain = (float)(int)drainage[c];
 
-                        if (flatness <= maxflatness)
+                        drain = drain / factor;
+
+                        int d = (int)drain; // This should be from 1 to 5.
+                        d = d * 2;
+
+                        int prob = flatness + d; // The flatter the land, the more likely wetlands are.
+
+                        int flow = world.riveraveflow(c) / 1000;
+
+                        prob = prob - flow; // The bigger the flow here, the more likely wetlands are.
+
+                        for (const mesh::CellId cell : hydrologycells::square(grid, c)) // The more lakes/sea there are around here, the more likely wetlands are.
                         {
-                            float drain = (float)drainage[i][j];
+                            if (world.lakesurfacefloat(cell) != 0)
+                                prob = prob - 3;
 
-                            drain = drain / factor;
+                            if (world.sea(cell) == 1)
+                                prob = prob - 4;
+                        }
 
-                            int d = (int)drain; // This should be from 1 to 5.
-                            d = d * 2;
+                        prob = prob + static_cast<int>(
+                            40.0f - world.averainfloat(c) / 10.0f);
 
-                            int prob = flatness + d; // The flatter the land, the more likely wetlands are.
+                        if (world.climate(c) == 30 && world.maxtempfloat(c) >= 5) // Much likelier in tundra with warmish summers
+                            prob = prob / 4;
 
-                            int flow = world.riveraveflow(i, j) / 1000;
+                        if (prob < 1)
+                            prob = 1;
 
-                            prob = prob - flow; // The bigger the flow here, the more likely wetlands are.
-
-                            for (int k = i - 1; k <= i + 1; k++) // The more lakes/sea there are around here, the more likely wetlands are.
-                            {
-                                int kk = k;
-
-                                if (kk<0 || kk>width)
-                                    kk = wrap(kk, width);
-
-                                for (int l = j - 1; l <= j + 1; l++)
-                                {
-                                    if (l >= 0 && l <= height)
-                                    {
-                                        if (world.lakesurfacefloat(kk, l) != 0)
-                                            prob = prob - 3;
-
-                                        if (world.sea(kk, l) == 1)
-                                            prob = prob - 4;
-                                    }
-                                }
-                            }
-
-                            //prob=prob+(7-(world.averainfloat(i,j)/60));
-                            prob = prob + static_cast<int>(
-                                40.0f - world.averainfloat(i, j) / 10.0f);
-
-                            if (world.climate(i, j) == 30 && world.maxtempfloat(i, j) >= 5) // Much likelier in tundra with warmish summers
-                                prob = prob / 4;
-
-                            if (prob < 1)
-                                prob = 1;
-
-                            if (random(1, prob) == 1) // Put some wetlands here.
-                            {
-                                shapenumber = random(0, 5);
-                                pastewetland(world, i, j, shapenumber, smalllake);
-                            }
+                        if (random(1, prob) == 1) // Put some wetlands here.
+                        {
+                            shapenumber = random(0, 5);
+                            pastewetland(world, c, shapenumber, smalllake);
                         }
                     }
                 }
@@ -211,177 +159,78 @@ void createwetlands(planet& world, boolshapetemplate smalllake[])
 
     int deltaswampchance = 6; // The BIGGER this is, the more probable wetlands will be around delta branches.
 
-    for (int i = 0; i <= width; i++) // Add wetlands to the actual delta branches
+    for (const mesh::CellId c : order) // Add wetlands to the actual delta branches
     {
-        for (int j = 0; j <= height; j++)
-        {
-            if (world.deltadir(i, j) > 0 && world.sea(i, j) == 0 && random(1, deltaswampchance) != 1)
-                world.setspecial(i, j, 130);
-
-        }
+        if (world.deltadir(c) > 0 && world.sea(c) == 0 && random(1, deltaswampchance) != 1)
+            world.setspecial(c, 130);
     }
 
-    // Now fill in extra wetlands if necessary to reach the sea or other wetlands.
+    // Now fill in extra wetlands if necessary to reach the sea or other wetlands: a cell between
+    // a wetland and a wetland or the sea across it (the opposite slots of its own frame).
 
-    for (int i = 0; i <= width; i++)
+    const auto specialat = [&](std::int32_t cell) { return cell < 0 ? 0 : world.special(static_cast<mesh::CellId>(cell)); };
+    const auto seaat = [&](std::int32_t cell) { return cell >= 0 && world.sea(static_cast<mesh::CellId>(cell)) == 1; };
+
+    for (const mesh::CellId c : order)
     {
-        for (int j = 0; j <= height; j++)
+        if (world.sea(c) == 0 && world.special(c) == 0 && world.climate(c) != 31)
         {
-            if (world.sea(i, j) == 0 && world.special(i, j) == 0 && world.climate(i, j) != 31)
+            // The legacy order: north-south, south-north, west-east, east-west, then the diagonals.
+            for (const int slot : { 1, 5, 7, 3, 8, 2, 6, 4 })
             {
-                int westx = i - 1;
-                if (westx < 0)
-                    westx = width;
+                const std::int32_t here = grid.neighbour(c, slot);
+                const std::int32_t across = grid.neighbour(c, (slot + 3) % 8 + 1);
 
-                int eastx = i + 1;
-                if (eastx > width)
-                    eastx = 0;
-
-                int northy = j - 1;
-                int southy = j + 1;
-
-                if (world.special(i, northy) == 130)
+                if (specialat(here) == 130)
                 {
-                    if (world.special(i, southy) == 130)
-                        world.setspecial(i, j, 130);
+                    if (specialat(across) == 130)
+                        world.setspecial(c, 130);
 
-                    if (world.sea(i, southy) == 1)
-                        world.setspecial(i, j, 130);
-                }
-
-                if (world.special(i, southy) == 130)
-                {
-                    if (world.special(i, northy) == 130)
-                        world.setspecial(i, j, 130);
-
-                    if (world.sea(i, northy) == 1)
-                        world.setspecial(i, j, 130);
-                }
-
-                if (world.special(westx, j) == 130)
-                {
-                    if (world.special(eastx, j) == 130)
-                        world.setspecial(i, j, 130);
-
-                    if (world.sea(eastx, j) == 1)
-                        world.setspecial(i, j, 130);
-                }
-
-                if (world.special(eastx, j) == 130)
-                {
-                    if (world.special(westx, j) == 130)
-                        world.setspecial(i, j, 130);
-
-                    if (world.sea(westx, j) == 1)
-                        world.setspecial(i, j, 130);
-                }
-
-                if (world.special(westx, northy) == 130)
-                {
-                    if (world.special(eastx, southy) == 130)
-                        world.setspecial(i, j, 130);
-
-                    if (world.sea(eastx, southy) == 1)
-                        world.setspecial(i, j, 130);
-                }
-
-                if (world.special(eastx, northy) == 130)
-                {
-                    if (world.special(westx, southy) == 130)
-                        world.setspecial(i, j, 130);
-
-                    if (world.sea(westx, southy) == 1)
-                        world.setspecial(i, j, 130);
-                }
-
-                if (world.special(westx, southy) == 130)
-                {
-                    if (world.special(eastx, northy) == 130)
-                        world.setspecial(i, j, 130);
-
-                    if (world.sea(eastx, northy) == 1)
-                        world.setspecial(i, j, 130);
-                }
-
-                if (world.special(eastx, southy) == 130)
-                {
-                    if (world.special(westx, northy) == 130)
-                        world.setspecial(i, j, 130);
-
-                    if (world.sea(westx, northy) == 1)
-                        world.setspecial(i, j, 130);
+                    if (seaat(across))
+                        world.setspecial(c, 130);
                 }
             }
         }
     }
 
-    for (int i = 0; i <= width; i++) // For some reason it keeps putting wetlands all over the sea, so we remove them.
+    for (const mesh::CellId c : order) // For some reason it keeps putting wetlands all over the sea, so we remove them.
     {
-        for (int j = 0; j <= height; j++)
-        {
-            if (world.sea(i, j) == 1)
-                world.setspecial(i, j, 0);
-
-        }
+        if (world.sea(c) == 1)
+            world.setspecial(c, 0);
     }
 
     // Now make the wetlands salty/brackish if necessary.
 
-    for (int i = 0; i <= width; i++)
+    for (const mesh::CellId c : order)
     {
-        for (int j = 0; j <= height; j++)
+        if (world.special(c) == 130)
         {
-            if (world.special(i, j) == 130)
+            int salt = 0;
+
+            for (const mesh::CellId cell : hydrologycells::square(grid, c))
             {
-                int salt = 0;
+                if (world.sea(cell) == 1)
+                    salt = 1;
 
-                for (int k = i - 1; k <= i + 1; k++)
+                if (world.special(cell) == 100 || world.special(cell) == 110)
+                    salt = 1;
+            }
+
+            if (salt == 1)
+                world.setspecial(c, 132);
+            else
+            {
+                for (const mesh::CellId cell : twosteps(grid, c))
                 {
-                    int kk = k;
+                    if (world.sea(cell) == 1)
+                        salt = 1;
 
-                    if (kk<0 || kk>width)
-                        kk = wrap(kk, width);
-
-                    for (int l = j - 1; l <= j + 1; l++)
-                    {
-                        if (l >= 0 && l <= height)
-                        {
-                            if (world.sea(kk, l) == 1)
-                                salt = 1;
-
-                            if (world.special(kk, l) == 100 || world.special(kk, l) == 110)
-                                salt = 1;
-                        }
-                    }
+                    if (world.special(cell) == 100 || world.special(cell) == 110)
+                        salt = 1;
                 }
 
                 if (salt == 1)
-                    world.setspecial(i, j, 132);
-                else
-                {
-                    for (int k = i - 2; k <= i + 2; k++)
-                    {
-                        int kk = k;
-
-                        if (kk<0 || kk>width)
-                            kk = wrap(kk, width);
-
-                        for (int l = j - 2; l <= j + 2; l++)
-                        {
-                            if (l >= 0 && l <= height)
-                            {
-                                if (world.sea(kk, l) == 1)
-                                    salt = 1;
-
-                                if (world.special(kk, l) == 100 || world.special(kk, l) == 110)
-                                    salt = 1;
-                            }
-                        }
-                    }
-
-                    if (salt == 1)
-                        world.setspecial(i, j, 131);
-                }
+                    world.setspecial(c, 131);
             }
         }
     }
@@ -391,43 +240,27 @@ void createwetlands(planet& world, boolshapetemplate smalllake[])
 
 void removeexcesswetlands(planet& world)
 {
-    int width = world.width();
-    int height = world.height();
+    const mesh::CellGrid& grid = world.grid();
 
-    for (int i = 0; i <= width; i++)
+    for (const mesh::CellId c : hydrologycells::visitorder(grid))
     {
-        for (int j = 0; j <= height; j++)
+        if (world.special(c) == 130)
         {
-            if (world.special(i, j) == 130)
+            bool nearlake = 0;
+
+            for (const mesh::CellId cell : hydrologycells::square(grid, c))
             {
-                bool nearlake = 0;
-
-                for (int k = i - 1; k <= i + 1; k++)
+                if (world.truelake(cell) == 1)
                 {
-                    int kk = k;
-
-                    if (kk<0 || kk>width)
-                        kk = wrap(kk, width);
-
-                    for (int l = j - 1; l <= j + 1; l++)
-                    {
-                        if (l >= 0 && l <= height)
-                        {
-                            if (world.truelake(kk, l) == 1)
-                            {
-                                nearlake = 1;
-                                k = i + 1;
-                                l = j + 1;
-                            }
-                        }
-                    }
+                    nearlake = 1;
+                    break;
                 }
+            }
 
-                if (nearlake == 1)
-                {
-                    world.setlakesurface(i, j, 0);
-                    world.setspecial(i, j, 0);
-                }
+            if (nearlake == 1)
+            {
+                world.setlakesurface(c, 0);
+                world.setspecial(c, 0);
             }
         }
     }
