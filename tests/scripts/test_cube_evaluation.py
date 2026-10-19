@@ -214,6 +214,16 @@ class CubeMeasureTests(unittest.TestCase):
         record = cube_seams.seams(Bundle.open(self.seam), "geosphere.base_elevation")
         self.assertGreater(record["ratio_median"], 1.3, record)
 
+    def test_seam_gate_ranks_against_rotated_cubes(self):
+        seam = cube_seams.seams(Bundle.open(self.seam), "geosphere.base_elevation", rotations=100)
+        self.assertGreater(seam["null"]["ratio_median"]["rank"], 0.95, seam["null"])
+        self.assertTrue(seam["seam"])
+        smooth = cube_seams.seams(Bundle.open(self.smooth), "geosphere.base_elevation", rotations=100)
+        self.assertLess(smooth["null"]["ratio_median"]["rank"], 0.95, smooth["null"])
+        self.assertFalse(smooth["seam"], smooth["null"])
+        again = cube_seams.seams(Bundle.open(self.smooth), "geosphere.base_elevation", rotations=100)
+        self.assertEqual(again["null"], smooth["null"])
+
     def test_seams_cli_writes_json(self):
         out = self.root / "seams.json"
         script = SCRIPTS / "evaluation" / "cube_seams.py"
