@@ -1,8 +1,12 @@
 #include "gtest/gtest.h"
 #include "simulations/geology/plate_tectonics/tectonic_deformation.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_columns.hpp"
+#include "core/mesh/cube_geometry.hpp"
+#include "core/mesh/mesh_geometry.hpp"
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <vector>
 
 TEST(TectonicDeformation, DistanceCurveHasAnInlandStrainPeakAndCompactSupport) {
     using tectonics::deformation::taper;
@@ -100,4 +104,49 @@ TEST(TectonicColumns, PersistentSubcellsRetainFourCellTerrainWithoutNoiseOrExtra
     }
     RecordProperty("native_signal_retained",retained[0]); RecordProperty("subcell_signal_retained",retained[1]);
     EXPECT_LT(std::abs(retained[0]),.01); EXPECT_GT(retained[1],.40);
+}
+
+// Distributed deformation on the cube (W2-E, E2B): an ocean plate on face 0 closes on a
+// continent beyond its east edge; the upper plate's share of the motion keeps its direction
+// on the far side of the face edge (each cell's own frame).
+TEST(TectonicDeformationCube, ContactCorrectionsKeepTheirDirectionAcrossAFaceEdge) {
+    using tectonics::grid::CellId;
+    constexpr int n = 32;
+    constexpr double earth_km = 6371.0;
+    const auto grid = tectonics::grid::TectonicGrid::cube(n, earth_km);
+    const auto& mesh = *grid->mesh();
+    const tectonics::columns::Metric metric(grid.get(), 0, 0, 0);
+    const size_t count = grid->cellcount();
+    std::vector<uint32_t> owners(count, 1);
+    std::vector<double> continent(count, 1);
+    std::vector<tectonics::transport::Displacement> rigid(count);
+    const mesh::Vec3 right = mesh::cubeface(0).right;
+    const auto along = [&](CellId c) { const mesh::Vec3 r = mesh.centre(c); return mesh::normalise(right - mesh::dot(right, r) * r); };
+    for (CellId c = 0; c < count; ++c) {
+        int face = 0, column = 0, row = 0;
+        mesh::cubeindices(n, c, face, column, row);
+        if (face != 0 || column >= n - 1) continue;
+        owners[c] = 0; continent[c] = 0;
+        rigid[c] = metric.local(c, 30000.0 * along(c));
+    }
+    tectonics::deformation::Parameters p;
+    p.peak_distance_km = 500;
+    p.distance_variation = 0;
+    const auto result = tectonics::deformation::distribute(0, 0, 0, owners, continent, rigid, 1, p, grid.get());
+    int east_face = 0, east_column = 0, east_row = 0;
+    mesh::cubeindices(n, grid->neighbour(mesh::cubeid(n, 0, n - 1, n / 2), tectonics::grid::east), east_face, east_column, east_row);
+    int crossed = 0;
+    for (CellId c = 0; c < count; ++c) {
+        ASSERT_TRUE(std::isfinite(result[c].x) && std::isfinite(result[c].y));
+        if (owners[c] != 1) continue;
+        const mesh::Vec3 change = metric.vector(c, {result[c].x - rigid[c].x, result[c].y - rigid[c].y});
+        if (mesh::length(change) == 0) continue;
+        int face = 0, column = 0, row = 0;
+        mesh::cubeindices(n, c, face, column, row);
+        if (face != east_face || std::abs(row - n / 2) > n / 4) continue;
+        // Beyond the edge, the push points along the ocean plate's motion (into the continent).
+        EXPECT_GT(mesh::dot(change, along(c)), .9 * mesh::length(change));
+        ++crossed;
+    }
+    EXPECT_GT(crossed, 0);
 }

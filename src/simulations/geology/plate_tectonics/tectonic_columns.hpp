@@ -1,17 +1,93 @@
 #ifndef TECTONIC_COLUMNS_HPP
 #define TECTONIC_COLUMNS_HPP
 
+#include <array>
 #include <cmath>
 #include <cstdint>
+#include <memory>
 #include <vector>
+#include "simulations/geology/plate_tectonics/tectonic_grid.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_transport.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_ocean_relief.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_margins.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_noise_pass.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_plumes.hpp"
 
-namespace tectonics::grid { class TectonicGrid; }
 namespace tectonics::columns {
+using Displacement = transport::Displacement;
+
+// The engine's cell table as the column processes read it (W2-E, E2B): true cell areas,
+// finite-volume face weights (shared length / centre distance), the eight-neighbour stencils
+// and the displacement adapter. On the planar scaffold every weight and area ratio is
+// exactly 1, every area cell_m², every distance cell_m, so the processes reproduce the
+// torus bit for bit; E3 deletes the planar branch.
+class Metric {
+public:
+    struct Neighbour { grid::CellId cell = grid::nocell; double distance_m = 0; };
+    Metric() = default;
+    // A null grid builds the planar scaffold of width x height cells of cell_m (unit tests);
+    // a planar grid must have that size; on the cube the three are ignored.
+    Metric(const grid::TectonicGrid* grid, uint32_t width, uint32_t height, double cell_m);
+
+    const grid::TectonicGrid& grid() const { return *grid_; }
+    bool planar() const { return planar_; }
+    size_t cellcount() const { return grid_ ? grid_->cellcount() : 0; }
+    double area_m2(grid::CellId c) const { return planar_ ? cell_area_m2_ : area_[c]; }
+    // The finite-volume reference area: planar cell_m²; on the cube the least area / weight
+    // over every cell and face, so an explicit coefficient per reference area bounds the
+    // coefficient of every face in its source cell's thickness.
+    double reference_area_m2() const { return reference_area_m2_; }
+    double scale(grid::CellId c) const { return planar_ ? 1.0 : scale_[c]; } // reference area / area
+    // The edge between c and its neighbour in direction k (an index of grid().edges()).
+    size_t edge(grid::CellId c, uint8_t k) const;
+    double weight(size_t e) const { return planar_ ? 1.0 : weight_[e]; }   // length / distance
+    double distance_m(size_t e) const { return planar_ ? cell_m_ : grid_->edges()[e].distance_m; }
+    double width_m(grid::CellId c) const { return planar_ ? cell_m_ : width_[c]; } // planar cell_m, cube sqrt(area)
+    // A per-area quantity times the cell's area (planar: the torus' x cell_m cell_m).
+    double mass(double per_area, grid::CellId c) const {
+        return planar_ ? per_area * cell_m_ * cell_m_ : per_area * area_[c];
+    }
+    // A per-reference-area quantity times the reference area.
+    double referencemass(double per_area) const {
+        return planar_ ? per_area * cell_m_ * cell_m_ : per_area * reference_area_m2_;
+    }
+    // The eight neighbours in the planar stencils' (dy, dx) order: NW, N, NE, W, E, SW, S, SE
+    // (mesh slots 8, 1, 2, 7, 3, 6, 5, 4); nocell for the diagonal at a cube corner.
+    std::array<Neighbour, 8> eight(grid::CellId c) const;
+
+    // The displacement adapter (identity in E3): a cell's displacement per update as a 3-D
+    // tangent vector in displacement units. Planar: (x, y, 0) in cells along +x and +y
+    // (unit cell_m). Cube: metres (unit 1) on the cell's frame, x along the unit tangent
+    // toward the east neighbour (the face's u), y orthogonal to it toward the south one.
+    double displacementunit_m() const { return planar_ ? cell_m_ : 1.0; }
+    // An edge's centre distance in displacement units (planar 1).
+    double displacementdistance(size_t e) const { return planar_ ? 1.0 : grid_->edges()[e].distance_m; }
+    mesh::Vec3 vector(grid::CellId c, const Displacement& d) const;
+    Displacement local(grid::CellId c, const mesh::Vec3& v) const;
+    // A displacement of `from` on the frame of `to` (planar: unchanged).
+    Displacement inframe(grid::CellId to, grid::CellId from, const Displacement& d) const;
+    // The closing motion across edge e, displacement units: (d_a - d_b) along the normal from
+    // a to b (planar: the axis component's difference).
+    double closing(size_t e, const Displacement& a, const Displacement& b) const;
+
+    // Position of a cell for position-placed variation, in [0, 1)²: planar the cell centre's
+    // fraction of the torus; cube a lat-lon proxy ((longitude + pi) / 2 pi, (pi / 2 -
+    // latitude) / pi) until E4. extent_km: the proxy's size (planar width and height in km,
+    // cube 2 pi R and pi R).
+    std::array<double, 2> unitposition(grid::CellId c) const;
+    std::array<double, 2> extent_km() const;
+
+private:
+    std::shared_ptr<const grid::TectonicGrid> owned_;
+    const grid::TectonicGrid* grid_ = nullptr;
+    bool planar_ = true;
+    uint32_t width_cells_ = 0, height_cells_ = 0;
+    double cell_m_ = 0, cell_area_m2_ = 0, reference_area_m2_ = 0;
+    std::vector<double> area_, scale_, width_, weight_;
+    std::vector<uint32_t> edges_;          // 4 per cell (cube)
+    std::vector<mesh::Vec3> east_, south_; // the displacement frame (cube)
+};
+
 inline constexpr double mantle_density = 3300;
 inline constexpr double continental_density = 2800;
 inline constexpr double oceanic_density = 2900;
@@ -40,7 +116,6 @@ struct Cell {
     double thermal_rejuvenation_volume = 0; // Ocean volume * reduction in thermal age (Myr).
     double flexure_m = 0; // Transient downward response to subduction load, not lost rock.
 };
-using Displacement = transport::Displacement;
 struct Budget {
     bool enabled = false;
     double initial_mass_kg = 0, mass_kg = 0;
@@ -112,6 +187,30 @@ double age_myr(const Cell& c);
 Cell seed(double elevation_m, bool continental, double age_myr, double root_kg_m3 = 0,
           double root_max_thickness_m = 0, double root_delamination_width_m = 0);
 
+// The column law a model evaluates: elevation_m with its arguments.
+struct Isostasy {
+    double thermal_strength = 1, root_kg_m3 = 0, root_max_thickness_m = 0, root_delamination_width_m = 0;
+    double elevation(const Cell& c) const {
+        return elevation_m(c, thermal_strength, root_kg_m3, root_max_thickness_m, root_delamination_width_m);
+    }
+};
+// The column processes on the cell table, in the order Model::advance runs them (exposed
+// so the cube is tested before E3 runs the whole update there). Each conserves the mass it
+// moves in true areas and books it in the budget.
+// Lower-crust root flow (n = 3 creep), sub-stepped below the explicit limit of the smallest
+// reference face; dt_myr already scaled by margins::Parameters::root_mobility.
+void spread_roots(const Metric& metric, std::vector<Cell>& cells, double dt_myr, const Isostasy& isostasy,
+                  bool sediment_feedback, Budget& budget);
+// Orogenic collapse (margins::Parameters::orogenic_collapse_*), sub-stepped below 0.1 per face.
+void collapse_orogens(const Metric& metric, std::vector<Cell>& cells, double dt_myr,
+                      const margins::Parameters& parameters, Budget& budget);
+// The surface diffusion's explicit number per reference face, transport_diffusivity x
+// erosion_strength x dt / reference area (Model::advance rejects above 0.2).
+double surface_diffusion_number(const Metric& metric, double erosion_strength, double dt_myr);
+// Conservative downhill transport of the elevation field (one value per cell) at that number.
+void diffuse_surface(const Metric& metric, std::vector<Cell>& cells, const std::vector<double>& elevation,
+                     double diffusion_number, double submarine_erosion_ratio, Budget& budget);
+
 class Model {
 public:
     void initialize(uint32_t width, uint32_t height, double cell_m, std::vector<Cell> cells,
@@ -163,8 +262,6 @@ public:
     const std::vector<Strain>& strain() const { return strain_; }
     const Budget& budget() const { return budget_; }
 private:
-    void spreadRoots(std::vector<Cell>& cells, double dt_myr, double thermal_strength, bool sediment_feedback);
-    void collapseOrogens(std::vector<Cell>& cells, double dt_myr, const margins::Parameters& margins);
     // carried: non-negative fields on the subcells, remapped in place with the material.
     std::vector<Cell> transportColumns(const std::vector<Displacement>& velocity, double dt_myr,
                                        std::vector<std::vector<double>>& carried);
@@ -174,7 +271,7 @@ private:
     void routeRiversImplicit(std::vector<Cell>& cells, double dt_myr, double thermal_strength,
                              const margins::Parameters& parameters, const margins::Forcing* forcing);
     uint32_t width_ = 0, height_ = 0;
-    const grid::TectonicGrid* grid_ = nullptr; // the engine's cell table (W2-E), null in unit tests
+    Metric metric_; // the engine's cell table (W2-E); a planar scaffold of its own in unit tests
     double cell_m_ = 0;
     long seed_ = 0;
     double root_kg_m3_ = 0; // Lithospheric root load in every elevation of the model.

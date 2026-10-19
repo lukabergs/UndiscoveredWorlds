@@ -1,5 +1,6 @@
 #include "simulations/geology/plate_tectonics/tectonic_plumes.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_grid.hpp"
+#include "core/mesh/mesh_geometry.hpp"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -44,6 +45,31 @@ void spread(std::vector<double>& field, uint32_t w, uint32_t h, double cell_m, c
     }
     for (const auto& [cell, weight] : weights) field[cell] += volume_m3*weight/total/(cell_m*cell_m);
 }
+// The sphere: Gaussian weights by great-circle distance over the cells within reach of the
+// plume, the volume shared by weight x true area, so the basalt thickness is the Gaussian
+// and the volume is conserved exactly.
+void spreadsphere(std::vector<double>& field, const grid::TectonicGrid& grid, const Plume& plume,
+                  double sigma_km, double volume_m3) {
+    if (volume_m3 <= 0) return;
+    const mesh::CellGrid& mesh = *grid.mesh();
+    const double sigma_m = sigma_km*1000;
+    const double spacing_m = std::sqrt(grid.totalarea_m2()/static_cast<double>(grid.cellcount()));
+    std::vector<std::pair<grid::CellId, double>> weights;
+    double total = 0;
+    for (const auto c : mesh::cellswithin(mesh, plume.position, 3*sigma_m + 2*spacing_m)) {
+        const double distance = mesh::greatcircle_m(plume.position, mesh.centre(c), mesh.radius_m());
+        const double weight = std::exp(-.5*distance*distance/(sigma_m*sigma_m));
+        if (weight < 1e-9) continue;
+        weights.push_back({c, weight});
+        total += weight*grid.area_m2(c);
+    }
+    if (total <= 0) { // narrower than a cell: all of it into the plume's cell
+        const grid::CellId c = mesh.locate(plume.position);
+        field[c] += volume_m3/grid.area_m2(c);
+        return;
+    }
+    for (const auto& [cell, weight] : weights) field[cell] += volume_m3*weight/total;
+}
 }
 
 void validate(const Parameters& p) {
@@ -76,24 +102,58 @@ std::vector<Plume> place(double width_km, double height_km, long seed, const Par
     return plumes;
 }
 
+std::vector<Plume> placesphere(double radius_km, long seed, const Parameters& p) {
+    std::vector<Plume> plumes;
+    const auto key = static_cast<uint32_t>(seed);
+    for (uint32_t k = 0; plumes.size() < p.count && k < 256*std::max(1U, p.count); ++k) {
+        // hash() reaches 1 inclusive; uniformpoint takes [0, 1) (1 is the same point as 0 in longitude).
+        const double u = std::min(hash(k, 0, key), std::nextafter(1.0, 0.0));
+        Plume candidate{0, 0, hash(k, 2, key)*p.birth_window_myr, mesh::uniformpoint(u, hash(k, 1, key))};
+        bool spaced = true;
+        for (const auto& other : plumes)
+            if (mesh::greatcircle_rad(candidate.position, other.position)*radius_km < p.min_spacing_km) { spaced = false; break; }
+        if (spaced) plumes.push_back(candidate);
+    }
+    return plumes;
+}
+
 Source source(uint32_t w, uint32_t h, double cell_m, long seed, double t0, double t1, const Parameters& p,
               const grid::TectonicGrid* grid) {
-    grid::requireplanar(grid, "plumes");
     validate(p);
-    if (w == 0 || h == 0 || !(cell_m > 0) || !std::isfinite(t0) || !(t1 > t0))
+    const bool planar = !grid || grid->kind() == grid::TectonicGrid::Kind::planar;
+    if ((planar && (w == 0 || h == 0 || !(cell_m > 0))) || !std::isfinite(t0) || !(t1 > t0))
         throw std::runtime_error("Invalid mantle plume source grid or interval");
     Source result;
-    result.basalt_m.assign(static_cast<size_t>(w)*h, 0.0);
-    result.influence.assign(static_cast<size_t>(w)*h, 0.0);
+    const size_t count = planar ? static_cast<size_t>(w)*h : grid->cellcount();
+    result.basalt_m.assign(count, 0.0);
+    result.influence.assign(count, 0.0);
     result.swell_age_myr = p.swell_age_myr;
+    const auto head_volume = [&](const Plume& plume) {
+        // Smoothstep head: the cumulative difference integrates to the head volume.
+        return p.head_volume_km3*1e9*(smooth((t1 - plume.birth_myr)/p.head_duration_myr)
+                                    - smooth((t0 - plume.birth_myr)/p.head_duration_myr));
+    };
+    if (!planar) {
+        const mesh::CellGrid& mesh = *grid->mesh();
+        const double radius_km = mesh.radius_m()/1000;
+        for (const auto& plume : placesphere(radius_km, seed, p)) {
+            const double active = std::max(0.0, t1 - std::max(t0, plume.birth_myr));
+            spreadsphere(result.basalt_m, *grid, plume, p.tail_radius_km, p.tail_flux_km3_yr*km3_per_myr_to_m3*active);
+            spreadsphere(result.basalt_m, *grid, plume, p.head_radius_km, head_volume(plume));
+            if (t1 <= plume.birth_myr) continue;
+            for (grid::CellId c = 0; c < count; ++c) {
+                const double distance_km = mesh::greatcircle_rad(plume.position, mesh.centre(c))*radius_km;
+                auto& influence = result.influence[c];
+                influence = std::max(influence, std::exp(-.5*distance_km*distance_km/(p.swell_radius_km*p.swell_radius_km)));
+            }
+        }
+        return result;
+    }
     const double cell_km = cell_m/1000, width_km = w*cell_km, height_km = h*cell_km;
     for (const auto& plume : place(width_km, height_km, seed, p)) {
         const double active = std::max(0.0, t1 - std::max(t0, plume.birth_myr));
         spread(result.basalt_m, w, h, cell_m, plume, p.tail_radius_km, p.tail_flux_km3_yr*km3_per_myr_to_m3*active);
-        // Smoothstep head: the cumulative difference integrates to the head volume.
-        const double head = p.head_volume_km3*1e9*(smooth((t1 - plume.birth_myr)/p.head_duration_myr)
-                                                 - smooth((t0 - plume.birth_myr)/p.head_duration_myr));
-        spread(result.basalt_m, w, h, cell_m, plume, p.head_radius_km, head);
+        spread(result.basalt_m, w, h, cell_m, plume, p.head_radius_km, head_volume(plume));
         if (t1 <= plume.birth_myr) continue;
         for (uint32_t y = 0; y < h; ++y) for (uint32_t x = 0; x < w; ++x) {
             const double ex = std::remainder((x+.5)*cell_km - plume.x_km, width_km);

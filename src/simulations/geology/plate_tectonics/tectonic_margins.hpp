@@ -96,6 +96,10 @@ struct Forcing {
 };
 void validate(const Parameters& p);
 using Polarity = std::map<std::pair<uint32_t,uint32_t>,uint32_t>; // Stable plate pair -> descending plate.
+// Over the cell table (W2-E): closing motion along the edge normals of the displacement
+// adapter (columns::Metric), the arc walk straight on by the table's ahead, flexure and
+// ridge heat by Dijkstra in metres. On the cube width, height and cell_m are ignored and the
+// process variation reads a lat-lon proxy position (columns::Metric::unitposition).
 Forcing forcing(uint32_t w, uint32_t h, double cell_m, double dt_myr,
     const std::vector<uint32_t>& owners, const std::vector<columns::Cell>& cells,
     const std::vector<transport::Displacement>& rigid, const Parameters& p, Polarity* polarity = nullptr,

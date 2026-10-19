@@ -14,11 +14,11 @@ std::vector<columns::Cell> terrain(uint32_t w,uint32_t h,double cell_m,double dt
         const std::vector<uint32_t>& owners,const std::vector<transport::Displacement>& velocity,
         double thermal_strength, double margin_width_m, double boundary_influence, double root_kg_m3,
         double root_max_thickness_m, double root_delamination_width_m, const grid::TectonicGrid* grid) {
-    grid::requireplanar(grid, "initialization");
     using namespace columns;
-    const size_t count=static_cast<size_t>(w)*h;
-    if (w<2 || h<2 || elevations.size()!=count || ages.size()!=count || owners.size()!=count ||
-        velocity.size()!=count || !std::isfinite(cell_m) || cell_m<=0 || !std::isfinite(dt) || dt<=0 ||
+    const bool planar=!grid || grid->kind()==grid::TectonicGrid::Kind::planar;
+    const size_t count=planar?static_cast<size_t>(w)*h:grid->cellcount();
+    if ((planar && (w<2 || h<2 || !std::isfinite(cell_m) || cell_m<=0)) || elevations.size()!=count ||
+        ages.size()!=count || owners.size()!=count || velocity.size()!=count || !std::isfinite(dt) || dt<=0 ||
         !std::isfinite(thermal_strength) || thermal_strength<0 ||
         !std::isfinite(margin_width_m) || margin_width_m<0 || margin_width_m>4000 ||
         !std::isfinite(boundary_influence) || boundary_influence<0 || boundary_influence>1 ||
@@ -26,47 +26,67 @@ std::vector<columns::Cell> terrain(uint32_t w,uint32_t h,double cell_m,double dt
         !valid_root_max_thickness(root_max_thickness_m) ||
         !valid_root_delamination_width(root_max_thickness_m,root_delamination_width_m))
         throw std::runtime_error("Invalid initial terrain grid");
-    const auto index=[&](int x,int y) { return static_cast<uint32_t>((y%static_cast<int>(h)+h)%h)*w
-        +static_cast<uint32_t>((x%static_cast<int>(w)+w)%w); };
     for (size_t i=0;i<count;++i) if (!std::isfinite(elevations[i]) || !std::isfinite(ages[i]) || ages[i]<0 ||
         !std::isfinite(velocity[i].x) || !std::isfinite(velocity[i].y))
         throw std::runtime_error("Invalid initial terrain cell");
+    // The cell table (W2-E): openings on its edges through the displacement adapter, the
+    // spreading distance by Dijkstra in metres.
+    const Metric metric(grid,w,h,cell_m);
+    const auto& table=metric.grid().edges();
     constexpr uint32_t none=std::numeric_limits<uint32_t>::max();
     std::vector<double> distance(count,std::numeric_limits<double>::infinity()),rate(count);
     std::vector<uint32_t> source(count,none);
     using Entry=std::tuple<double,uint32_t,uint32_t>;
     std::priority_queue<Entry,std::vector<Entry>,std::greater<Entry>> queue;
-    for (uint32_t y=0;y<h;++y) for (uint32_t x=0;x<w;++x) {
-        const auto a=index(x,y);
-        for (int axis=0;axis<2;++axis) {
-            const auto b=index(x+(axis==0),y+(axis==1));
-            if (owners[a]==owners[b]) continue;
-            const double opening=(axis==0?velocity[b].x-velocity[a].x:velocity[b].y-velocity[a].y)*cell_m/dt;
-            if (opening<=0) continue;
-            for (auto i:{a,b}) rate[i]=std::max(rate[i],opening*.5);
-        }
+    for (size_t e=0;e<table.size();++e) {
+        const auto a=table[e].a,b=table[e].b;
+        if (owners[a]==owners[b]) continue;
+        const double opening=-metric.closing(e,velocity[a],velocity[b])*metric.displacementunit_m()/dt;
+        if (opening<=0) continue;
+        for (auto i:{a,b}) rate[i]=std::max(rate[i],opening*.5);
     }
     for (uint32_t i=0;i<count;++i) if (rate[i]>0) {
-        distance[i]=cell_m*.5;source[i]=i;queue.emplace(distance[i],i,i);
+        distance[i]=metric.width_m(i)*.5;source[i]=i;queue.emplace(distance[i],i,i);
     }
     constexpr double extent=800000;
     while (!queue.empty()) {
         const auto [d,s,i]=queue.top();queue.pop();
         if (d!=distance[i] || s!=source[i]) continue;
-        const int x=i%w,y=i/w;
-        for (auto j:{index(x-1,y),index(x+1,y),index(x,y-1),index(x,y+1)}) {
-            const double next=d+cell_m;
+        for (uint8_t k=0;k<grid::directioncount;++k) {
+            const auto j=metric.grid().neighbour(i,k);
+            const double next=d+metric.distance_m(metric.edge(i,k));
             if (owners[j]!=owners[i] || next>extent) continue;
             if (next<distance[j] || (next==distance[j] && s<source[j])) {
                 distance[j]=next;source[j]=s;queue.emplace(next,s,j);
             }
         }
     }
+    // The long-wave background: planar the 5 x 5 box mean; on the cube the area-weighted
+    // mean of the two-step ring over the eight-neighbour table (the box's equivalent).
+    const auto background=[&](uint32_t i) {
+        double mean=0;
+        if (metric.planar()) {
+            const auto index=[&](int x,int y) { return static_cast<uint32_t>((y%static_cast<int>(h)+h)%h)*w
+                +static_cast<uint32_t>((x%static_cast<int>(w)+w)%w); };
+            const int x=i%w,y=i/w;
+            for (int dy=-2;dy<=2;++dy) for (int dx=-2;dx<=2;++dx) mean+=elevations[index(x+dx,y+dy)]/25;
+            return mean;
+        }
+        std::vector<grid::CellId> ring{i};
+        for (int step=0;step<2;++step) {
+            const auto reached=ring;
+            for (const auto c : reached) for (const auto& n : metric.eight(c))
+                if (n.cell!=grid::nocell) ring.push_back(n.cell);
+            std::sort(ring.begin(),ring.end());
+            ring.erase(std::unique(ring.begin(),ring.end()),ring.end());
+        }
+        double area=0;
+        for (const auto c : ring) { mean+=elevations[c]*metric.area_m2(c); area+=metric.area_m2(c); }
+        return mean/area;
+    };
     std::vector<Cell> result(count);
     for (uint32_t i=0;i<count;++i) {
-        const int x=i%w,y=i/w;
-        double mean=0;
-        for (int dy=-2;dy<=2;++dy) for (int dx=-2;dx<=2;++dx) mean+=elevations[index(x+dx,y+dy)]/25;
+        const double mean=background(i);
         // Keep the seeded fine relief; modify only the long-wave background.
         const double detail=elevations[i]-mean;
         double z=elevations[i];

@@ -61,17 +61,20 @@ Forcing forcing(uint32_t w,uint32_t h,double cell_m,double dt,
         const std::vector<uint32_t>& owners,const std::vector<columns::Cell>& cells,
         const std::vector<transport::Displacement>& rigid,const Parameters& p,Polarity* polarity,long seed,double time_myr,
         const grid::TectonicGrid* grid) {
-    grid::requireplanar(grid, "margins");
     validate(p);
-    const size_t count=static_cast<size_t>(w)*h;
-    if (w<2 || h<2 || owners.size()!=count || cells.size()!=count || rigid.size()!=count ||
-        !std::isfinite(cell_m) || cell_m<=0 || !std::isfinite(dt) || dt<=0 || !std::isfinite(time_myr))
+    const bool planar=!grid || grid->kind()==grid::TectonicGrid::Kind::planar;
+    const size_t count=planar?static_cast<size_t>(w)*h:grid->cellcount();
+    if ((planar && (w<2 || h<2 || !std::isfinite(cell_m) || cell_m<=0)) || owners.size()!=count || cells.size()!=count ||
+        rigid.size()!=count || !std::isfinite(dt) || dt<=0 || !std::isfinite(time_myr))
         throw std::runtime_error("Invalid margin forcing grid");
     constexpr auto none=std::numeric_limits<uint32_t>::max();
     Forcing result{std::vector<double>(count,-1),std::vector<double>(count),std::vector<uint32_t>(count,none),owners,{},{},{}};
     if (!p.enabled) return result;
+    const columns::Metric metric(grid,w,h,cell_m);
+    const auto extent=metric.extent_km();
     const auto factor=[&](size_t i,uint32_t channel) {
-        return variation::multiplier((i%w+.5)/w,(i/w+.5)/h,w*cell_m/1000,h*cell_m/1000,time_myr,
+        const auto position=metric.unitposition(static_cast<grid::CellId>(i));
+        return variation::multiplier(position[0],position[1],extent[0],extent[1],time_myr,
             seed,channel,p.process_variation,p.process_wavelength_km,p.process_period_myr);
     };
     if (p.process_variation>0) {
@@ -81,77 +84,81 @@ Forcing forcing(uint32_t w,uint32_t h,double cell_m,double dt,
             result.sediment_multiplier[i]=factor(i,3);
         }
     }
-    const auto index=[&](int x,int y) { return static_cast<uint32_t>((y%static_cast<int>(h)+h)%h)*w
-        + static_cast<uint32_t>((x%static_cast<int>(w)+w)%w); };
+    const auto& table=metric.grid().edges();
     struct Source { double rate=0, load=0; uint32_t receiver=std::numeric_limits<uint32_t>::max(); };
     std::vector<Source> ridge(count),trench(count);
     std::vector<Source> overlap(count);
     const auto ocean_age=[&](size_t i) { return cells[i].ocean>0?cells[i].oceanic_age_volume/cells[i].ocean:0; };
-    for (uint32_t y=0;y<h;++y) for (uint32_t x=0;x<w;++x) {
-        const auto a=index(x,y);
-        if (!std::isfinite(rigid[a].x) || !std::isfinite(rigid[a].y))
+    for (size_t i=0;i<count;++i)
+        if (!std::isfinite(rigid[i].x) || !std::isfinite(rigid[i].y))
             throw std::runtime_error("Invalid margin velocity");
-        for (int axis=0;axis<2;++axis) {
-            const auto b=index(x+(axis==0),y+(axis==1));
-            if (owners[a]==owners[b]) continue;
-            // Normal relative motion in m/Myr. Sliding alone creates no arc/trench.
-            const double closing=(axis==0?rigid[a].x-rigid[b].x:rigid[a].y-rigid[b].y)*cell_m/dt;
-            if (closing<0) {
-                for (auto i : {a,b}) if (cells[i].oceanic_area>.5)
-                    ridge[i].rate=std::max(ridge[i].rate,-closing*.5);
-                continue;
-            }
-            if (closing==0 || (cells[a].continental_area>=.5 && cells[b].continental_area>=.5)) continue;
-            // Continental crust overrides oceanic crust; for ocean/ocean contact,
-            // older (colder) lithosphere descends. Ties use stable raster ordering.
-            auto lower=cells[a].continental_area>=.5?b:cells[b].continental_area>=.5?a:
-                (ocean_age(a)>=ocean_age(b)?a:b);
-            if (polarity && cells[a].continental_area<.5 && cells[b].continental_area<.5) {
-                const std::pair<uint32_t,uint32_t> pair=std::minmax(owners[a],owners[b]);
-                const auto [entry,inserted]=polarity->emplace(pair,owners[lower]);
-                (void)inserted;
-                lower=owners[a]==entry->second?a:b;
-            }
-            const auto upper=lower==a?b:a;
-            const int sign=lower==a?1:-1;
-            uint32_t receiver=upper;
-            const int steps=static_cast<int>(std::ceil(p.arc_distance_km*1000/cell_m));
-            // Walk inward on the overriding plate, never across another plate.
-            for (int s=1;s<=steps;++s) {
-                const auto j=index(static_cast<int>(upper%w)+(axis==0?sign*s:0),
-                                   static_cast<int>(upper/w)+(axis==1?sign*s:0));
-                if (owners[j]!=owners[upper]) break;
-                receiver=j;
-            }
-            const double maturity=1-std::exp(-ocean_age(lower)/20);
-            const double load=p.trench_load_n_m*(closing/(closing+10000))*maturity*factor(lower,0);
-            if (load>trench[lower].load) trench[lower]={closing,load,receiver};
-            // Eulerian overlap is often received by the upper boundary cell as
-            // the descending slab moves into it. Route that removed basalt to
-            // the same arc without incorrectly bending the overriding plate.
-            if (load>overlap[upper].load) overlap[upper]={closing,load,receiver};
+    // The arc walk's reach: planar ceil(arc distance / cell) cells; on the cube the steps
+    // continue while the distance walked is below the arc distance.
+    const double arc_m=p.arc_distance_km*1000;
+    const int planar_steps=metric.planar()?static_cast<int>(std::ceil(arc_m/cell_m)):0;
+    for (size_t e=0;e<table.size();++e) {
+        const auto a=table[e].a,b=table[e].b;
+        if (owners[a]==owners[b]) continue;
+        // Normal relative motion in m/Myr. Sliding alone creates no arc/trench.
+        const double closing=metric.closing(e,rigid[a],rigid[b])*metric.displacementunit_m()/dt;
+        if (closing<0) {
+            for (auto i : {a,b}) if (cells[i].oceanic_area>.5)
+                ridge[i].rate=std::max(ridge[i].rate,-closing*.5);
+            continue;
         }
+        if (closing==0 || (cells[a].continental_area>=.5 && cells[b].continental_area>=.5)) continue;
+        // Continental crust overrides oceanic crust; for ocean/ocean contact,
+        // older (colder) lithosphere descends. Ties use stable cell ordering.
+        auto lower=cells[a].continental_area>=.5?b:cells[b].continental_area>=.5?a:
+            (ocean_age(a)>=ocean_age(b)?a:b);
+        if (polarity && cells[a].continental_area<.5 && cells[b].continental_area<.5) {
+            const std::pair<uint32_t,uint32_t> pair=std::minmax(owners[a],owners[b]);
+            const auto [entry,inserted]=polarity->emplace(pair,owners[lower]);
+            (void)inserted;
+            lower=owners[a]==entry->second?a:b;
+        }
+        const auto upper=lower==a?b:a;
+        uint32_t receiver=upper;
+        // Walk inward on the overriding plate, straight on along the face normal (across
+        // cube face edges by the cell table's ahead), never across another plate.
+        grid::Step at=lower==a?metric.grid().ahead(a,table[e].direction)
+                              :grid::Step{a,grid::opposite(table[e].direction)};
+        double walked=0;
+        for (int s=1;metric.planar()?s<=planar_steps:walked<arc_m;++s) {
+            const grid::Step next=metric.grid().ahead(at.cell,at.direction);
+            if (owners[next.cell]!=owners[upper]) break;
+            walked+=metric.distance_m(metric.edge(at.cell,at.direction));
+            receiver=next.cell;
+            at=next;
+        }
+        const double maturity=1-std::exp(-ocean_age(lower)/20);
+        const double load=p.trench_load_n_m*(closing/(closing+10000))*maturity*factor(lower,0);
+        if (load>trench[lower].load) trench[lower]={closing,load,receiver};
+        // Eulerian overlap is often received by the upper boundary cell as
+        // the descending slab moves into it. Route that removed basalt to
+        // the same arc without incorrectly bending the overriding plate.
+        if (load>overlap[upper].load) overlap[upper]={closing,load,receiver};
     }
-    // Nearest-source propagation is confined to its plate, joins both periodic
-    // seams and has deterministic ties. It does not add dozens of raster-face
-    // forces at a jagged boundary onto the same cell.
+    // Nearest-source propagation over the cell table's centre distances is confined to its
+    // plate, joins the periodic seams or face edges and has deterministic ties. It does not
+    // add dozens of raster-face forces at a jagged boundary onto the same cell.
     const auto spread=[&](const std::vector<Source>& sources,bool heating) {
         using Entry=std::tuple<double,uint32_t,uint32_t>;
         std::priority_queue<Entry,std::vector<Entry>,std::greater<Entry>> queue;
         std::vector<double> distance(count,std::numeric_limits<double>::infinity());
         std::vector<uint32_t> origin(count,none);
         for (uint32_t i=0;i<count;++i) if (sources[i].rate>0) {
-            distance[i]=cell_m*.5; origin[i]=i; queue.emplace(distance[i],i,i);
+            distance[i]=metric.width_m(i)*.5; origin[i]=i; queue.emplace(distance[i],i,i);
         }
-        const double extent=heating?600000:4*p.flexural_length_km*1000;
+        const double extent_m=heating?600000:4*p.flexural_length_km*1000;
         while (!queue.empty()) {
             const auto [d,s,i]=queue.top(); queue.pop();
             if (d!=distance[i] || s!=origin[i]) continue;
-            const int x=i%w,y=i/w;
-            for (const auto j : {index(x-1,y),index(x+1,y),index(x,y-1),index(x,y+1)}) {
+            for (uint8_t k=0;k<grid::directioncount;++k) {
+                const auto j=metric.grid().neighbour(i,k);
                 if (owners[j]!=owners[i] || cells[j].oceanic_area<=.5) continue;
-                const double next=d+cell_m;
-                if (next>extent) continue;
+                const double next=d+metric.distance_m(metric.edge(i,k));
+                if (next>extent_m) continue;
                 if (next<distance[j] || (next==distance[j] && s<origin[j])) {
                     distance[j]=next;origin[j]=s;queue.emplace(next,s,j);
                 }

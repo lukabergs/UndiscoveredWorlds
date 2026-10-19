@@ -3,6 +3,7 @@
 #include "simulations/geology/plate_tectonics/tectonic_ocean_relief.hpp"
 #include <algorithm>
 #include <cmath>
+#include <optional>
 #include <stdexcept>
 
 namespace tectonics::noise_pass {
@@ -14,17 +15,22 @@ void validate(const Parameters& p) {
 }
 double apply(uint32_t w,uint32_t h,double cell_m,std::vector<columns::Cell>& cells,
              long seed,double start,double end,const Parameters& p,double thermal_strength,double root_kg_m3,
-             double root_max_thickness_m, double root_delamination_width_m) {
+             double root_max_thickness_m, double root_delamination_width_m, const columns::Metric* metric) {
     using namespace columns;
     validate(p);
-    if (w<2 || h<2 || cells.size()!=static_cast<size_t>(w)*h ||
-        !std::isfinite(cell_m) || cell_m<=0 || !std::isfinite(start) || !std::isfinite(end) || start<0 || end<start ||
+    const bool planar=!metric || metric->planar();
+    if ((planar && (w<2 || h<2 || cells.size()!=static_cast<size_t>(w)*h ||
+        !std::isfinite(cell_m) || cell_m<=0)) || (!planar && cells.size()!=metric->cellcount()) ||
+        !std::isfinite(start) || !std::isfinite(end) || start<0 || end<start ||
         !std::isfinite(thermal_strength) || thermal_strength<0 ||
         !std::isfinite(root_kg_m3) || root_kg_m3<0 || root_kg_m3>=mantle_density-continental_density ||
         !valid_root_max_thickness(root_max_thickness_m) ||
         !valid_root_delamination_width(root_max_thickness_m,root_delamination_width_m))
         throw std::runtime_error("Invalid noise pass grid or time");
     if (p.amplitude_m==0 || start==end) return 0;
+    if (!planar) throw std::logic_error("noise pass: the noise is not on the cube yet (E4)");
+    std::optional<Metric> own;
+    if (!metric) metric=&own.emplace(nullptr,w,h,cell_m);
     constexpr double tau=6.28318530717958647692;
     const auto kx=static_cast<uint32_t>(std::clamp(std::round(w*cell_m/(p.wavelength_km*1000)),1.,static_cast<double>(w)));
     const auto ky=static_cast<uint32_t>(std::clamp(std::round(h*cell_m/(p.wavelength_km*1000)),1.,static_cast<double>(h)));
@@ -45,33 +51,36 @@ double apply(uint32_t w,uint32_t h,double cell_m,std::vector<columns::Cell>& cel
             coast_weight[y*w+x]=t*t*(3-2*t);land[y*w+x]=z>=0;
         }
     }
+    // Face transfers over the cell table: each face's potential difference times its
+    // length / distance, each side's thickness by its reference / own area (planar: 1).
+    const auto& table=metric->grid().edges();
     double transferred=0;
     for (const auto member:{&Cell::continent,&Cell::ocean}) {
         const bool continental=member==&Cell::continent;
         const double density=continental?continental_density:oceanic_density;
         const auto moment=continental?&Cell::continental_age_volume:&Cell::oceanic_age_volume;
         std::vector<double> volume(cells.size()),age(cells.size()),thermal(cells.size());
-        for (uint32_t y=0;y<h;++y) for (uint32_t x=0;x<w;++x) {
-            const size_t a=static_cast<size_t>(y)*w+x;
-            for (auto b:{static_cast<size_t>(y)*w+(x+1)%w,static_cast<size_t>((y+1)%h)*w+x}) {
-                // Do not move a rock component across its support boundary.
-                if (cells[a].*member<=0 || cells[b].*member<=0) continue;
-                if (p.coast_taper_m>0 && land[a]!=land[b]) continue;
-                const double q=.125*(potential[b]-potential[a])*mantle_density/(mantle_density-density)
-                    *std::min(coast_weight[a],coast_weight[b]);
-                const auto from=q>0?a:b,to=q>0?b:a;
-                const double original=cells[from].*member;
-                // Four incident faces: positivity bound, never a height clamp.
-                const double moved=std::min(.24*original,std::abs(q));
-                volume[from]-=moved;volume[to]+=moved;
-                const double moved_age=moved*(cells[from].*moment)/original;
-                age[from]-=moved_age;age[to]+=moved_age;
-                if (!continental) {
-                    const double deficit=moved*cells[from].thermal_rejuvenation_volume/original;
-                    thermal[from]-=deficit;thermal[to]+=deficit;
-                }
-                transferred+=moved*density*cell_m*cell_m;
+        for (size_t e=0;e<table.size();++e) {
+            const size_t a=table[e].a,b=table[e].b;
+            // Do not move a rock component across its support boundary.
+            if (cells[a].*member<=0 || cells[b].*member<=0) continue;
+            if (p.coast_taper_m>0 && land[a]!=land[b]) continue;
+            const double q=.125*(potential[b]-potential[a])*mantle_density/(mantle_density-density)
+                *std::min(coast_weight[a],coast_weight[b])*metric->weight(e);
+            const auto from=q>0?a:b,to=q>0?b:a;
+            const double from_scale=metric->scale(static_cast<grid::CellId>(from));
+            const double to_scale=metric->scale(static_cast<grid::CellId>(to));
+            const double original=cells[from].*member;
+            // Four incident faces: positivity bound, never a height clamp.
+            const double moved=std::min(.24*original/from_scale,std::abs(q));
+            volume[from]-=moved*from_scale;volume[to]+=moved*to_scale;
+            const double moved_age=moved*(cells[from].*moment)/original;
+            age[from]-=moved_age*from_scale;age[to]+=moved_age*to_scale;
+            if (!continental) {
+                const double deficit=moved*cells[from].thermal_rejuvenation_volume/original;
+                thermal[from]-=deficit*from_scale;thermal[to]+=deficit*to_scale;
             }
+            transferred+=metric->referencemass(moved*density);
         }
         for (size_t i=0;i<cells.size();++i) {
             cells[i].*member+=volume[i];cells[i].*moment+=age[i];

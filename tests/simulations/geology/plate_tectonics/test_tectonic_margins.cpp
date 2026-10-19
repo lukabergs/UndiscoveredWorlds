@@ -3,6 +3,8 @@
 #include "simulations/geology/plate_tectonics/tectonic_margins.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_initialization.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_variation.hpp"
+#include "core/mesh/cube_geometry.hpp"
+#include "core/mesh/mesh_geometry.hpp"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -984,4 +986,51 @@ TEST(TectonicMargins, MaximumThicknessAndCollapseAreValidated) {
     EXPECT_THROW(tectonics::margins::validate(margins_off),std::runtime_error);
     margins_off.enabled=true;
     EXPECT_NO_THROW(tectonics::margins::validate(margins_off));
+}
+
+// The arc walk on the cube (W2-E, E2B): an ocean plate on face 0 closes on a continent that
+// holds the face's last two columns and every other face; the walk from the overriding
+// boundary cell goes straight on across the face edge, by the cell table's ahead.
+TEST(TectonicMarginsCube, ArcWalkCrossesAFaceEdgeStraightOn) {
+    using tectonics::grid::CellId;
+    constexpr int n = 32;
+    constexpr double earth_km = 6371.0;
+    const auto grid = tectonics::grid::TectonicGrid::cube(n, earth_km);
+    const auto& mesh = *grid->mesh();
+    const tectonics::columns::Metric metric(grid.get(), 0, 0, 0);
+    const size_t count = grid->cellcount();
+    std::vector<uint32_t> owners(count, 1);
+    std::vector<tectonics::columns::Cell> cells(count, tectonics::columns::seed(500, true, 100));
+    std::vector<tectonics::transport::Displacement> rigid(count);
+    const mesh::Vec3 right = mesh::cubeface(0).right;
+    for (CellId c = 0; c < count; ++c) {
+        int face = 0, column = 0, row = 0;
+        mesh::cubeindices(n, c, face, column, row);
+        if (face != 0 || column >= n - 2) continue;
+        owners[c] = 0;
+        cells[c] = tectonics::columns::seed(-4000, false, 60);
+        // 30 km per update toward the face's east edge.
+        const mesh::Vec3 r = mesh.centre(c);
+        rigid[c] = metric.local(c, 30000.0 * mesh::normalise(right - mesh::dot(right, r) * r));
+    }
+    tectonics::margins::Parameters p;
+    p.enabled = true;
+    p.arc_distance_km = 700;
+    const auto forcing = tectonics::margins::forcing(0, 0, 0, 1, owners, cells, rigid, p, nullptr, 1, 0, grid.get());
+    const CellId lower = mesh::cubeid(n, 0, n - 3, n / 2), upper = mesh::cubeid(n, 0, n - 2, n / 2);
+    const CellId receiver = forcing.arc_receiver[lower];
+    ASSERT_NE(receiver, std::numeric_limits<uint32_t>::max());
+    EXPECT_EQ(forcing.arc_receiver[upper], receiver);
+    EXPECT_GT(forcing.trench_m[lower], 0);
+    int face = 0, column = 0, row = 0;
+    mesh::cubeindices(n, receiver, face, column, row);
+    EXPECT_NE(face, 0);
+    EXPECT_EQ(owners[receiver], 1u);
+    // Three steps of about 313 km (the walk stops at the first beyond 700 km), straight on:
+    // the receiver lies on the great circle through the trench and its overriding cell.
+    const double spacing_km = mesh.distance_m(upper, 3) / 1000;
+    const double walked_km = mesh::greatcircle_rad(mesh.centre(upper), mesh.centre(receiver)) * earth_km;
+    EXPECT_NEAR(walked_km, 3 * spacing_km, .05 * spacing_km);
+    const mesh::Vec3 pole = mesh::normalise(mesh::cross(mesh.centre(lower), mesh.centre(upper)));
+    EXPECT_LT(std::abs(mesh::dot(pole, mesh.centre(receiver))) * earth_km, .15 * spacing_km);
 }

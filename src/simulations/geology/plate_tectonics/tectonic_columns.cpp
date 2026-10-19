@@ -1,4 +1,5 @@
 #include "simulations/geology/plate_tectonics/tectonic_columns.hpp"
+#include "core/mesh/mesh_geometry.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_grid.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_thermal.hpp"
 #include "simulations/landscape/depressions.hpp"
@@ -70,6 +71,123 @@ constexpr double upper_cap_residual_area=1e-6;
 constexpr double collapse_step_limit=.1;
 // Response time of the continental growth controller to the reservoir's error, Myr.
 constexpr double growth_response_myr=50;
+// The unit tangent of v at the unit vector r.
+mesh::Vec3 tangent(const mesh::Vec3& v, const mesh::Vec3& r) { return mesh::normalise(v - mesh::dot(v, r) * r); }
+}
+
+Metric::Metric(const grid::TectonicGrid* grid, uint32_t width, uint32_t height, double cell_m) {
+    if (!grid) {
+        owned_ = grid::TectonicGrid::planar(width, height, width * cell_m / 1000.0);
+        grid = owned_.get();
+    }
+    grid_ = grid;
+    planar_ = grid->kind() == grid::TectonicGrid::Kind::planar;
+    if (planar_) {
+        if (grid->width() != width || grid->height() != height || !std::isfinite(cell_m) || cell_m <= 0)
+            throw std::invalid_argument("Metric: the planar scaffold does not match the grid");
+        width_cells_ = width; height_cells_ = height;
+        cell_m_ = cell_m;
+        cell_area_m2_ = cell_m * cell_m;
+        reference_area_m2_ = cell_area_m2_;
+        return;
+    }
+    const size_t count = grid->cellcount();
+    const mesh::CellGrid& mesh = *grid->mesh();
+    area_.resize(count); width_.resize(count); scale_.resize(count);
+    edges_.assign(4 * count, UINT32_MAX);
+    const auto& table = grid->edges();
+    weight_.resize(table.size());
+    for (size_t e = 0; e < table.size(); ++e) {
+        const auto& edge = table[e];
+        weight_[e] = edge.length_m / edge.distance_m;
+        edges_[4 * static_cast<size_t>(edge.a) + edge.direction] = static_cast<uint32_t>(e);
+        for (uint8_t k = 0; k < grid::directioncount; ++k)
+            if (grid->neighbour(edge.b, k) == edge.a) edges_[4 * static_cast<size_t>(edge.b) + k] = static_cast<uint32_t>(e);
+    }
+    reference_area_m2_ = std::numeric_limits<double>::infinity();
+    east_.resize(count); south_.resize(count);
+    for (grid::CellId c = 0; c < count; ++c) {
+        area_[c] = grid->area_m2(c);
+        width_[c] = std::sqrt(area_[c]);
+        for (uint8_t k = 0; k < grid::directioncount; ++k) {
+            const uint32_t e = edges_[4 * static_cast<size_t>(c) + k];
+            if (e == UINT32_MAX) throw std::logic_error("Metric: a cell face without an edge");
+            reference_area_m2_ = std::min(reference_area_m2_, area_[c] / weight_[e]);
+        }
+        // The frame: x toward the east neighbour (central difference), y orthogonal toward the south one.
+        const mesh::Vec3 r = mesh.centre(c);
+        east_[c] = tangent(mesh.centre(grid->neighbour(c, grid::east)) - mesh.centre(grid->neighbour(c, grid::west)), r);
+        const mesh::Vec3 down = mesh.centre(grid->neighbour(c, grid::south)) - mesh.centre(grid->neighbour(c, grid::north));
+        south_[c] = mesh::normalise(down - mesh::dot(down, east_[c]) * east_[c] - mesh::dot(down, r) * r);
+    }
+    for (grid::CellId c = 0; c < count; ++c) scale_[c] = reference_area_m2_ / area_[c];
+}
+
+size_t Metric::edge(grid::CellId c, uint8_t k) const {
+    if (!planar_) return edges_[4 * static_cast<size_t>(c) + k];
+    // Planar: edge 2 i is (i, east of i), 2 i + 1 is (i, south of i).
+    switch (k) {
+    case grid::east: return 2 * static_cast<size_t>(c);
+    case grid::south: return 2 * static_cast<size_t>(c) + 1;
+    case grid::west: return 2 * static_cast<size_t>(grid_->neighbour(c, grid::west));
+    default: return 2 * static_cast<size_t>(grid_->neighbour(c, grid::north)) + 1;
+    }
+}
+
+std::array<Metric::Neighbour, 8> Metric::eight(grid::CellId c) const {
+    std::array<Neighbour, 8> result;
+    if (planar_) {
+        const grid::CellId n = grid_->neighbour(c, grid::north), s = grid_->neighbour(c, grid::south);
+        const grid::CellId cells[8] = {grid_->neighbour(n, grid::west), n, grid_->neighbour(n, grid::east),
+            grid_->neighbour(c, grid::west), grid_->neighbour(c, grid::east),
+            grid_->neighbour(s, grid::west), s, grid_->neighbour(s, grid::east)};
+        for (int k = 0; k < 8; ++k)
+            result[k] = {cells[k], cell_m_ * (k == 0 || k == 2 || k == 5 || k == 7 ? std::sqrt(2.) : 1.)};
+        return result;
+    }
+    constexpr int slots[8] = {8, 1, 2, 7, 3, 6, 5, 4};
+    const mesh::CellGrid& mesh = *grid_->mesh();
+    for (int k = 0; k < 8; ++k) {
+        const std::int32_t n = mesh.neighbour(c, slots[k]);
+        if (n >= 0) result[k] = {static_cast<grid::CellId>(n), mesh.distance_m(c, slots[k])};
+    }
+    return result;
+}
+
+mesh::Vec3 Metric::vector(grid::CellId c, const Displacement& d) const {
+    if (planar_) return {d.x, d.y, 0.0};
+    return d.x * east_[c] + d.y * south_[c];
+}
+
+Displacement Metric::local(grid::CellId c, const mesh::Vec3& v) const {
+    if (planar_) return {v.x, v.y};
+    return {mesh::dot(v, east_[c]), mesh::dot(v, south_[c])};
+}
+
+Displacement Metric::inframe(grid::CellId to, grid::CellId from, const Displacement& d) const {
+    if (planar_ || to == from) return d;
+    return local(to, vector(from, d));
+}
+
+double Metric::closing(size_t e, const Displacement& a, const Displacement& b) const {
+    const auto& edge = grid_->edges()[e];
+    if (planar_) return edge.axis == 0 ? a.x - b.x : a.y - b.y;
+    return mesh::dot(vector(edge.a, a) - vector(edge.b, b), edge.normal);
+}
+
+std::array<double, 2> Metric::unitposition(grid::CellId c) const {
+    if (planar_) return {(c % width_cells_ + .5) / width_cells_, (c / width_cells_ + .5) / height_cells_};
+    constexpr double pi = 3.14159265358979323846;
+    const mesh::CellGrid& mesh = *grid_->mesh();
+    const double u = (mesh.longitude_rad(c) + pi) / (2 * pi), v = (pi / 2 - mesh.latitude_rad(c)) / pi;
+    return {std::min(u, std::nextafter(1.0, 0.0)), std::clamp(v, 0.0, std::nextafter(1.0, 0.0))};
+}
+
+std::array<double, 2> Metric::extent_km() const {
+    if (planar_) return {width_cells_ * cell_m_ / 1000, height_cells_ * cell_m_ / 1000};
+    constexpr double pi = 3.14159265358979323846;
+    const double radius_km = grid_->mesh()->radius_m() / 1000;
+    return {2 * pi * radius_km, pi * radius_km};
 }
 double shortening_m(const Strain& s, double cell_m) {
     const double least = (s.xx + s.yy) / 2 - std::hypot((s.xx - s.yy) / 2, s.xy);
@@ -216,8 +334,8 @@ void Model::initialize(uint32_t width, uint32_t height, double cell_m, std::vect
         uint32_t subdivision, long seed, const ocean_relief::Parameters& relief, bool preserve_initial,
         double root_kg_m3, double root_max_thickness_m, double root_delamination_width_m,
         const grid::TectonicGrid* grid) {
+    // Transport, reconciliation, implicit rivers and the newborn crust's noise are planar until E3.
     grid::requireplanar(grid, "columns");
-    grid_ = grid;
     if (width < 2 || height < 2 || cells.size() != static_cast<size_t>(width) * height
         || !std::isfinite(cell_m) || cell_m <= 0 || (subdivision != 1 && subdivision != 2 && subdivision != 4))
         throw std::runtime_error("Invalid column grid");
@@ -228,6 +346,7 @@ void Model::initialize(uint32_t width, uint32_t height, double cell_m, std::vect
     if (!valid_root_delamination_width(root_max_thickness_m, root_delamination_width_m))
         throw std::runtime_error("Continental root delamination width must be 0, or finite and positive "
                                  "with a root maximum thickness");
+    metric_ = Metric(grid, width, height, cell_m);
     width_ = width; height_ = height; cell_m_ = cell_m; cells_ = std::move(cells);
     seed_=seed;root_kg_m3_=root_kg_m3;root_max_thickness_m_=root_max_thickness_m;time_myr_=0;
     root_delamination_width_m_=root_delamination_width_m;
@@ -240,12 +359,13 @@ void Model::initialize(uint32_t width, uint32_t height, double cell_m, std::vect
     budget_ = {}; budget_.enabled = true;
     uplift_rate_m_myr_.assign(cells_.size(), 0.0);
     strain_.assign(cells_.size(), Strain{});
-    for (const auto& c : cells_) {
+    for (grid::CellId i = 0; i < cells_.size(); ++i) {
+        const auto& c = cells_[i];
         validate(c);
-        budget_.initial_mass_kg += mass_per_area(c) * cell_m * cell_m;
-        budget_.initial_felsic_kg += felsic_mass_per_area(c) * cell_m * cell_m;
-        budget_.initial_continent_kg += c.continent * continental_density * cell_m * cell_m;
-        budget_.initial_continental_area_m2 += c.continental_area * cell_m * cell_m;
+        budget_.initial_mass_kg += metric_.mass(mass_per_area(c), i);
+        budget_.initial_felsic_kg += metric_.mass(felsic_mass_per_area(c), i);
+        budget_.initial_continent_kg += metric_.mass(c.continent * continental_density, i);
+        budget_.initial_continental_area_m2 += metric_.mass(c.continental_area, i);
     }
     budget_.mass_kg = budget_.initial_mass_kg;
     budget_.felsic_kg = budget_.initial_felsic_kg;
@@ -336,70 +456,77 @@ void Model::reconcileTransport(const std::vector<Cell>& evolved) {
         }
     }
 }
-void Model::spreadRoots(std::vector<Cell>& cells, double dt, double thermal_strength, bool sediment_feedback) {
+void spread_roots(const Metric& metric, std::vector<Cell>& cells, double dt, const Isostasy& isostasy,
+                  bool sediment_feedback, Budget& budget) {
     // Effective n=3 power-law creep in a lower-crust channel. Unlike globally
     // Newtonian weak crust, small pressure gradients do not rapidly erase quiet
     // terrain. eta=1e20 Pa s at 5 MPa is an explicit rheological assumption;
     // temperature/composition are not resolved. Integrating the cubic shear
     // profile gives 3/5 times the Newtonian flux times (wall stress / 5 MPa)^2.
+    // Finite volumes on the cell table: a face's flux per length over its centre
+    // distance, times its length / distance over the reference area (mobility per
+    // reference area), each side's thickness by its reference / own area.
     constexpr double viscosity = 1e20, reference_stress_pa = 5e6, seconds_per_myr = 3.15576e13;
     constexpr double mobility_factor = continental_density * 9.80665 * seconds_per_myr / (12 * viscosity);
-    const auto index = [&](uint32_t x, uint32_t y) { return static_cast<size_t>(y) * width_ + x; };
-    struct Edge { size_t a, b; double mobility; };
-    std::vector<Edge> edges;
-    edges.reserve(2 * cells.size());
+    if (cells.size() != metric.cellcount()) throw std::runtime_error("Root flow cell count mismatch");
+    const auto& table = metric.grid().edges();
+    const double reference_area = metric.reference_area_m2();
+    struct Face { size_t a, b; double mobility; };
+    std::vector<Face> faces;
+    faces.reserve(table.size());
     std::vector<double> rates(cells.size()), z(cells.size()), channel(cells.size());
     std::vector<double> outgoing(cells.size()), incoming(cells.size()), incoming_age(cells.size());
     std::vector<double> mobile(cells.size()),out_sediment(cells.size()),in_sediment(cells.size());
     double remaining = dt;
     for (int step = 0; remaining > dt * 1e-12; ++step) {
         if (step > 10000) throw std::runtime_error("Root flow requires a smaller outer timestep");
-        edges.clear();
+        faces.clear();
         for (auto* buffer : {&rates, &outgoing, &incoming, &incoming_age}) std::fill(buffer->begin(), buffer->end(), 0);
         std::fill(out_sediment.begin(),out_sediment.end(),0);std::fill(in_sediment.begin(),in_sediment.end(),0);
         for (size_t i = 0; i < cells.size(); ++i) {
-            z[i] = elevation_m(cells[i], thermal_strength, root_kg_m3_, root_max_thickness_m_, root_delamination_width_m_);
+            z[i] = isostasy.elevation(cells[i]);
             mobile[i]=cells[i].continent+(sediment_feedback?cells[i].sediment*cells[i].continental_area:0);
             channel[i] = std::pow(.5 * mobile[i], 5);
         }
-        for (uint32_t y = 0; y < height_; ++y) for (uint32_t x = 0; x < width_; ++x) {
-            const auto a = index(x, y);
-            for (auto b : {index((x + 1) % width_, y), index(x, (y + 1) % height_)}) {
-                const double ka = channel[a], kb = channel[b];
-                // Vanishing continental traces can underflow h^5 to zero.
-                // Zero conductance means zero flow, never a 0/0 mobility.
-                if (ka == 0 || kb == 0) continue;
-                const double small = std::min(ka, kb), large = std::max(ka, kb);
-                const double harmonic = 2 * small / (1 + small / large);
-                const double pressure_gradient = continental_density * 9.80665
-                    * std::abs(z[a] - z[b]) / cell_m_;
-                const double mobility = mobility_factor * .6 * harmonic
-                    * std::pow(pressure_gradient / (2 * reference_stress_pa), 2) / (cell_m_ * cell_m_);
-                edges.push_back({a, b, mobility});
-                // Cubic flux has three times its secant slope. Thickness also
-                // changes mobility; a factor two safety margin covers that here.
-                rates[a] += 6 * mobility; rates[b] += 6 * mobility;
-            }
+        for (size_t e = 0; e < table.size(); ++e) {
+            const size_t a = table[e].a, b = table[e].b;
+            const double ka = channel[a], kb = channel[b];
+            // Vanishing continental traces can underflow h^5 to zero.
+            // Zero conductance means zero flow, never a 0/0 mobility.
+            if (ka == 0 || kb == 0) continue;
+            const double small = std::min(ka, kb), large = std::max(ka, kb);
+            const double harmonic = 2 * small / (1 + small / large);
+            const double pressure_gradient = continental_density * 9.80665
+                * std::abs(z[a] - z[b]) / metric.distance_m(e);
+            const double mobility = mobility_factor * .6 * harmonic
+                * std::pow(pressure_gradient / (2 * reference_stress_pa), 2) * metric.weight(e) / reference_area;
+            faces.push_back({a, b, mobility});
+            // Cubic flux has three times its secant slope. Thickness also
+            // changes mobility; a factor two safety margin covers that here.
+            rates[a] += 6 * mobility * metric.scale(static_cast<grid::CellId>(a));
+            rates[b] += 6 * mobility * metric.scale(static_cast<grid::CellId>(b));
         }
         const double sensitivity = (mantle_density - (sediment_feedback?sediment_density:continental_density)) / (mantle_density - water_density);
         const double max_rate = *std::max_element(rates.begin(), rates.end()) * sensitivity;
         const double sub_dt = max_rate > 0 ? std::min(remaining, .4 / max_rate) : remaining;
-        for (const auto& edge : edges) {
-            const size_t from = z[edge.a] > z[edge.b] ? edge.a : edge.b;
-            const size_t to = from == edge.a ? edge.b : edge.a;
+        for (const auto& face : faces) {
+            const size_t from = z[face.a] > z[face.b] ? face.a : face.b;
+            const size_t to = from == face.a ? face.b : face.a;
+            const double from_scale = metric.scale(static_cast<grid::CellId>(from));
+            const double to_scale = metric.scale(static_cast<grid::CellId>(to));
             // The quarter-volume bound keeps all four outgoing faces positive;
             // it limits flux, never elevation, and preserves the transferred mass.
-            const double volume = std::min(.25 * mobile[from],
-                edge.mobility * std::abs(z[from] - z[to]) * sub_dt);
+            const double volume = std::min(.25 * mobile[from] / from_scale,
+                face.mobility * std::abs(z[from] - z[to]) * sub_dt);
             const double sediment=sediment_feedback?volume*(cells[from].sediment*cells[from].continental_area/mobile[from]):0;
             const double continent=volume-sediment;
             const double age = cells[from].continent > 0
                 ? cells[from].continental_age_volume / cells[from].continent : 0;
-            outgoing[from] += continent; incoming[to] += continent;
-            incoming_age[to] += continent * age;
-            out_sediment[from]+=sediment;in_sediment[to]+=sediment;
-            budget_.redistributed_continent_kg += continent * continental_density * cell_m_ * cell_m_;
-            budget_.redistributed_sediment_kg += sediment * sediment_density * cell_m_ * cell_m_;
+            outgoing[from] += continent * from_scale; incoming[to] += continent * to_scale;
+            incoming_age[to] += continent * to_scale * age;
+            out_sediment[from]+=sediment*from_scale;in_sediment[to]+=sediment*to_scale;
+            budget.redistributed_continent_kg += metric.referencemass(continent * continental_density);
+            budget.redistributed_sediment_kg += metric.referencemass(sediment * sediment_density);
         }
         for (size_t i = 0; i < cells.size(); ++i) {
             const double retained = cells[i].continent > 0
@@ -411,9 +538,10 @@ void Model::spreadRoots(std::vector<Cell>& cells, double dt, double thermal_stre
         remaining -= sub_dt;
     }
 }
-void Model::collapseOrogens(std::vector<Cell>& cells, double dt, const margins::Parameters& p) {
+void collapse_orogens(const Metric& metric, std::vector<Cell>& cells, double dt, const margins::Parameters& p,
+                      Budget& budget) {
     // Linear diffusion of the cell-mean continent above the maximum thickness, toward the
-    // lower side of each face (east and south, torus wrap): v = kappa max(0, c_a - max(c_b,
+    // lower side of each face (the cell table's edges): v = kappa max(0, c_a - max(c_b,
     // h_max)). Unlike root flow it reaches interior cells and pure ocean. Continental age
     // moves with the rock; sediment stays. Simultaneous update per sub-step. A positive
     // orogenic_collapse_onset_thickness_m replaces h_max here (not in the area cap): crust
@@ -426,7 +554,10 @@ void Model::collapseOrogens(std::vector<Cell>& cells, double dt, const margins::
     // an interior cell too). orogenic_collapse_below_onset_km2_myr: weak creep D_low (min(c_a, onset) -
     // max(c_b, cap))+ plus the full D (c_a - max(c_b, onset))+. With both, a margin receiver
     // takes the full collapse above the cap (the creep is subsumed) and interior faces the
-    // two regimes. The sub-step count follows the larger coefficient.
+    // two regimes. The sub-step count follows the larger coefficient and the reference area
+    // (finite volumes: kappa per reference area times the face's length / distance, each
+    // side's thickness by its reference / own area).
+    if (cells.size() != metric.cellcount()) throw std::runtime_error("Orogenic collapse cell count mismatch");
     const double cap=p.continental_max_thickness_m, onset=p.orogenic_collapse_onset_thickness_m;
     const double h_max=onset>0 ? onset : cap;
     const double diffusivity=p.orogenic_collapse_km2_myr*1e6;
@@ -434,41 +565,43 @@ void Model::collapseOrogens(std::vector<Cell>& cells, double dt, const margins::
     const bool margin_cap=onset>0 && p.orogenic_collapse_margin_cap;
     const bool two_regimes=margin_cap || low_diffusivity>0;
     if (diffusivity==0 && low_diffusivity==0) return;
-    const double total=std::max(diffusivity,low_diffusivity)*dt/(cell_m_*cell_m_);
+    const double reference_area=metric.reference_area_m2();
+    const double total=std::max(diffusivity,low_diffusivity)*dt/reference_area;
     const double steps=std::max(1.0,std::ceil(total/collapse_step_limit));
     if (steps>10000) throw std::runtime_error("Orogenic collapse requires a smaller outer timestep");
-    const double kappa=diffusivity*dt/(cell_m_*cell_m_)/steps;
-    const double kappa_low=low_diffusivity*dt/(cell_m_*cell_m_)/steps;
-    const auto index=[&](uint32_t x,uint32_t y) { return static_cast<size_t>(y)*width_+x; };
+    const double kappa=diffusivity*dt/reference_area/steps;
+    const double kappa_low=low_diffusivity*dt/reference_area/steps;
+    const auto& table=metric.grid().edges();
     std::vector<double> outgoing(cells.size()),incoming(cells.size()),incoming_age(cells.size());
     for (int step=0;step<static_cast<int>(steps);++step) {
         for (auto* buffer : {&outgoing,&incoming,&incoming_age}) std::fill(buffer->begin(),buffer->end(),0);
-        for (uint32_t y=0;y<height_;++y) for (uint32_t x=0;x<width_;++x) {
-            const auto a=index(x,y);
-            for (auto b : {index((x+1)%width_,y),index(x,(y+1)%height_)}) {
-                const double ca=cells[a].continent,cb=cells[b].continent;
-                size_t from=cells.size();
-                double volume=0;
-                if (!two_regimes) {
-                    from=ca>std::max(cb,h_max)?a:cb>std::max(ca,h_max)?b:cells.size();
-                    if (from==cells.size()) continue;
-                    volume=kappa*(cells[from].continent-std::max(cells[(from==a?b:a)].continent,h_max));
-                } else {
-                    if (ca==cb) continue;
-                    from=ca>cb?a:b;
-                    const double c_from=cells[from].continent,c_to=cells[from==a?b:a].continent;
-                    if (margin_cap && cells[from==a?b:a].oceanic_area>upper_cap_residual_area)
-                        volume=kappa*std::max(0.0,c_from-std::max(c_to,cap));
-                    else
-                        volume=kappa_low*std::max(0.0,std::min(c_from,onset)-std::max(c_to,cap))
-                            +kappa*std::max(0.0,c_from-std::max(c_to,onset));
-                    if (!(volume>0)) continue;
-                }
-                const size_t to=from==a?b:a;
-                outgoing[from]+=volume;incoming[to]+=volume;
-                incoming_age[to]+=volume*cells[from].continental_age_volume/cells[from].continent;
-                budget_.collapsed_continent_kg+=volume*continental_density*cell_m_*cell_m_;
+        for (size_t e=0;e<table.size();++e) {
+            const size_t a=table[e].a,b=table[e].b;
+            const double ca=cells[a].continent,cb=cells[b].continent;
+            size_t from=cells.size();
+            double volume=0;
+            if (!two_regimes) {
+                from=ca>std::max(cb,h_max)?a:cb>std::max(ca,h_max)?b:cells.size();
+                if (from==cells.size()) continue;
+                volume=kappa*metric.weight(e)*(cells[from].continent-std::max(cells[(from==a?b:a)].continent,h_max));
+            } else {
+                if (ca==cb) continue;
+                from=ca>cb?a:b;
+                const double c_from=cells[from].continent,c_to=cells[from==a?b:a].continent;
+                if (margin_cap && cells[from==a?b:a].oceanic_area>upper_cap_residual_area)
+                    volume=kappa*std::max(0.0,c_from-std::max(c_to,cap));
+                else
+                    volume=kappa_low*std::max(0.0,std::min(c_from,onset)-std::max(c_to,cap))
+                        +kappa*std::max(0.0,c_from-std::max(c_to,onset));
+                volume*=metric.weight(e);
+                if (!(volume>0)) continue;
             }
+            const size_t to=from==a?b:a;
+            const double moved_from=volume*metric.scale(static_cast<grid::CellId>(from));
+            const double moved_to=volume*metric.scale(static_cast<grid::CellId>(to));
+            outgoing[from]+=moved_from;incoming[to]+=moved_to;
+            incoming_age[to]+=moved_to*cells[from].continental_age_volume/cells[from].continent;
+            budget.collapsed_continent_kg+=metric.referencemass(volume*continental_density);
         }
         for (size_t i=0;i<cells.size();++i) {
             if (outgoing[i]==0 && incoming[i]==0) continue;
@@ -478,6 +611,64 @@ void Model::collapseOrogens(std::vector<Cell>& cells, double dt, const margins::
         }
     }
 }
+double surface_diffusion_number(const Metric& metric, double erosion_strength, double dt) {
+    return transport_diffusivity * erosion_strength * dt / metric.reference_area_m2();
+}
+void diffuse_surface(const Metric& metric, std::vector<Cell>& cells, const std::vector<double>& elevation,
+                     double diffusion, double submarine_erosion_ratio, Budget& budget) {
+    // Conservative downhill transport. Erode the top sediment first, then
+    // continental/oceanic rock; deposit the same mass at the lower neighbour.
+    // Density conversion includes sediment expansion; no sediment is deleted.
+    // Finite volumes: each face's drop weighted by its length / distance, the source's
+    // removal by its reference / own area, each deposit by the source / receiver areas.
+    if (cells.size() != metric.cellcount() || elevation.size() != cells.size())
+        throw std::runtime_error("Surface diffusion cell count mismatch");
+    const auto& grid = metric.grid();
+    std::vector<double> deposits(cells.size(), 0);
+    for (grid::CellId i = 0; i < cells.size(); ++i) {
+        const auto neighbors = grid.neighbours(i);
+        double weighted[grid::directioncount];
+        double drop_sum = 0;
+        for (uint8_t k = 0; k < grid::directioncount; ++k) {
+            weighted[k] = metric.weight(metric.edge(i, k)) * std::max(0.0, elevation[i] - elevation[neighbors[k]]);
+            drop_sum += weighted[k];
+        }
+        if (drop_sum == 0 || diffusion == 0) continue;
+        auto& c = cells[i];
+        // Reduced submarine redistribution: land weathering is not applied at
+        // full strength in deep water. Smoothly transition over the upper 1 km
+        // to avoid a mobility jump when a cell crosses sea level. This depth and
+        // the ratio are coarse modelling choices, not an ocean-current model.
+        const double depth_fraction=std::clamp(-elevation[i]/1000,0.0,1.0);
+        const double submerged=depth_fraction*depth_fraction*(3-2*depth_fraction);
+        const double mobility=1-(1-submarine_erosion_ratio)*submerged;
+        const double requested = diffusion * mobility * (drop_sum * metric.scale(i)) * sediment_density;
+        double remaining = std::min(requested, mass_per_area(c)), removed = 0;
+        const auto erode = [&](double& volume, double density, double* age_volume) {
+            const double taken = std::min(volume, std::max(0.0, remaining) / density);
+            const double age = age_volume && volume > 0 ? *age_volume / volume : 0;
+            volume -= taken;
+            if (age_volume) *age_volume = volume * age;
+            remaining -= taken * density; removed += taken * density;
+            return taken * density;
+        };
+        erode(c.sediment, sediment_density, nullptr);
+        erode(c.continent, continental_density, &c.continental_age_volume);
+        const double thermal_age_reduction=c.ocean>0?c.thermal_rejuvenation_volume/c.ocean:0;
+        budget.eroded_ocean_kg += erode(c.ocean, oceanic_density, &c.oceanic_age_volume) * metric.area_m2(i);
+        c.thermal_rejuvenation_volume=c.ocean*thermal_age_reduction;
+        for (uint8_t k = 0; k < grid::directioncount; ++k) {
+            const auto j = neighbors[k];
+            deposits[j] += removed * weighted[k] / drop_sum / sediment_density * (metric.area_m2(i) / metric.area_m2(j));
+        }
+        budget.eroded_kg += removed * metric.area_m2(i);
+    }
+    for (grid::CellId i = 0; i < cells.size(); ++i) {
+        cells[i].sediment += deposits[i];
+        budget.deposited_kg += deposits[i] * sediment_density * metric.area_m2(i);
+    }
+}
+
 
 // Relative tolerance of the implicit kernel's eroded against deposited thickness:
 // about 10 times the worst float rounding measured (2.4e-8 in the margins tests,
@@ -576,18 +767,17 @@ void Model::routeSediment(std::vector<Cell>& cells, double dt, double thermal_st
     std::vector<size_t> order(count),downstream(count);
     std::iota(order.begin(),order.end(),0);
     for (size_t i=0;i<count;++i) { z[i]=elevation_m(cells[i],thermal_strength,root_kg_m3_, root_max_thickness_m_, root_delamination_width_m_); downstream[i]=i; }
-    const auto index=[&](int x,int y) {
-        return static_cast<size_t>((y+static_cast<int>(height_))%static_cast<int>(height_))*width_
-            +(x+static_cast<int>(width_))%static_cast<int>(width_);
-    };
     for (size_t i=0;i<count;++i) {
-        const int x=static_cast<int>(i%width_),y=static_cast<int>(i/width_);
-        catchment[i]=z[i]>0?cell_m_*cell_m_/1e6:0; // Uniform runoff proxy, km².
-        for (int dy=-1;dy<=1;++dy) for (int dx=-1;dx<=1;++dx) {
-            if (!dx && !dy) continue;
-            const auto j=index(x+dx,y+dy);
-            if (z[i]>0 && z[j]<=0) exposure[i]+=1./8;
-            const double length=cell_m_*(dx && dy?std::sqrt(2.):1.);
+        const auto cell=static_cast<grid::CellId>(i);
+        catchment[i]=z[i]>0?metric_.area_m2(cell)/1e6:0; // Uniform runoff proxy, km².
+        const auto neighbours=metric_.eight(cell);
+        int present=0;
+        for (const auto& n : neighbours) present+=n.cell!=grid::nocell;
+        for (const auto& n : neighbours) {
+            if (n.cell==grid::nocell) continue;
+            const size_t j=n.cell;
+            if (z[i]>0 && z[j]<=0) exposure[i]+=1./present;
+            const double length=n.distance_m;
             const double gradient=(z[i]-z[j])/length;
             if (gradient>slope[i]) { slope[i]=gradient;downstream[i]=j;distance[i]=length; }
         }
@@ -614,14 +804,14 @@ void Model::routeSediment(std::vector<Cell>& cells, double dt, double thermal_st
             // when its cell-mean elevation is far above wave reach. Retreat
             // length * exposed relief / cell width gives removed rock thickness.
             const double waves=exposure[i]*(p.wave_erosion_m_myr*std::exp(-z[i]/p.wave_height_scale_m)
-                +p.wave_retreat_km_myr*1000*z[i]/cell_m_);
+                +p.wave_retreat_km_myr*1000*z[i]/metric_.width_m(static_cast<grid::CellId>(i)));
             const double incision=std::min(.25*(z[i]-z[j]),
                 factor*(p.river_erosion*std::sqrt(catchment[i])*river_slope+waves)*dt);
             double ocean=0;
             removed=removeRock(c,incision*sediment_density,&ocean);
-            budget_.eroded_ocean_kg+=ocean*cell_m_*cell_m_;
-            budget_.river_eroded_kg+=removed*cell_m_*cell_m_;
-            budget_.eroded_kg+=removed*cell_m_*cell_m_;
+            budget_.eroded_ocean_kg+=metric_.mass(ocean,static_cast<grid::CellId>(i));
+            budget_.river_eroded_kg+=metric_.mass(removed,static_cast<grid::CellId>(i));
+            budget_.eroded_kg+=metric_.mass(removed,static_cast<grid::CellId>(i));
         }
         const double sediment=load[i]+removed;
         // Land transfers river load downstream; lakes retain it. Submarine
@@ -638,9 +828,11 @@ void Model::routeSediment(std::vector<Cell>& cells, double dt, double thermal_st
             deposit=std::min(deposit,room*mantle_density/(mantle_density-sediment_density)*sediment_density);
         }
         c.sediment+=deposit/sediment_density;
-        budget_.deposited_kg+=deposit*cell_m_*cell_m_;
+        budget_.deposited_kg+=metric_.mass(deposit,static_cast<grid::CellId>(i));
         if (j!=i) {
-            load[j]+=sediment-deposit;catchment[j]+=catchment[i];
+            // The load per area of the source, on the receiver's area.
+            load[j]+=(sediment-deposit)*(metric_.area_m2(static_cast<grid::CellId>(i))/metric_.area_m2(static_cast<grid::CellId>(j)));
+            catchment[j]+=catchment[i];
             upstream_drop[j]=std::min(upstream_drop[j],z[i]-z[j]);
         }
     }
@@ -669,7 +861,7 @@ void Model::advance(const std::vector<Displacement>& velocity, double dt,
         || !std::isfinite(submarine_erosion_ratio) || submarine_erosion_ratio < 0 || submarine_erosion_ratio > 1
         || !std::isfinite(uplift_rate_window_myr) || uplift_rate_window_myr <= 0)
         throw std::runtime_error("Invalid column update parameters");
-    const double diffusion = transport_diffusivity * erosion_strength * dt / (cell_m_ * cell_m_);
+    const double diffusion = surface_diffusion_number(metric_, erosion_strength, dt);
     if (diffusion > .2) throw std::runtime_error("Sediment transport requires a smaller timestep");
     for (const auto& v : velocity)
         if (!std::isfinite(v.x) || !std::isfinite(v.y) || std::max(std::abs(v.x), std::abs(v.y)) > .95)
@@ -695,23 +887,26 @@ void Model::advance(const std::vector<Displacement>& velocity, double dt,
         return static_cast<size_t>(f / fine_width / subdivision_) * width_ + (f % fine_width) / subdivision_;
     };
     // Strain of this update on the rock before it moves (strain()): rotate the tensor by
-    // the local spin, add sym(grad u); derivatives by one-sided differences within the plate.
+    // the local spin, add sym(grad u); derivatives by one-sided differences within the plate,
+    // the neighbour's displacement on the cell's frame over the edge's centre distance
+    // (planar: cells per cell, the identity).
+    const auto& grid = metric_.grid();
     const auto same_plate = [&](size_t a, size_t b) { return !forcing || forcing->owners[a] == forcing->owners[b]; };
-    const auto derivative = [&](size_t i, size_t behind, size_t ahead, double Displacement::* component) {
+    const auto derivative = [&](grid::CellId i, uint8_t back_k, uint8_t ahead_k, double Displacement::* component) {
+        const grid::CellId behind = grid.neighbour(i, back_k), ahead = grid.neighbour(i, ahead_k);
         const bool back = same_plate(i, behind), front = same_plate(i, ahead);
-        const double db = velocity[i].*component - velocity[behind].*component;
-        const double df = velocity[ahead].*component - velocity[i].*component;
+        const double db = (velocity[i].*component - metric_.inframe(i, behind, velocity[behind]).*component)
+            / metric_.displacementdistance(metric_.edge(i, back_k));
+        const double df = (metric_.inframe(i, ahead, velocity[ahead]).*component - velocity[i].*component)
+            / metric_.displacementdistance(metric_.edge(i, ahead_k));
         if (back && front) return std::abs(db) < std::abs(df) ? db : std::abs(df) < std::abs(db) ? df : (db + df) / 2;
         return back ? db : front ? df : 0.0;
     };
-    for (uint32_t y = 0; y < height_; ++y) for (uint32_t x = 0; x < width_; ++x) {
-        const int ix = static_cast<int>(x), iy = static_cast<int>(y);
-        const auto i = index(ix, iy), west = index(ix - 1, iy), east = index(ix + 1, iy);
-        const auto north = index(ix, iy - 1), south = index(ix, iy + 1);
-        const double dux_dx = derivative(i, west, east, &Displacement::x);
-        const double duy_dx = derivative(i, west, east, &Displacement::y);
-        const double dux_dy = derivative(i, north, south, &Displacement::x);
-        const double duy_dy = derivative(i, north, south, &Displacement::y);
+    for (grid::CellId i = 0; i < cells_.size(); ++i) {
+        const double dux_dx = derivative(i, grid::west, grid::east, &Displacement::x);
+        const double duy_dx = derivative(i, grid::west, grid::east, &Displacement::y);
+        const double dux_dy = derivative(i, grid::north, grid::south, &Displacement::x);
+        const double duy_dy = derivative(i, grid::north, grid::south, &Displacement::y);
         const double spin = (duy_dx - dux_dy) / 2, c = std::cos(spin), s = std::sin(spin);
         const Strain old = strain_[i];
         strain_[i].xx = c * c * old.xx - 2 * c * s * old.xy + s * s * old.yy + dux_dx;
@@ -740,14 +935,17 @@ void Model::advance(const std::vector<Displacement>& velocity, double dt,
     };
     const auto elevation_stay = coarse_mean(carried[0]), rate_stay = coarse_mean(carried[1]);
     const auto xx_stay = coarse_mean(carried[3]), yy_stay = coarse_mean(carried[4]), xy_stay = coarse_mean(carried[5]);
-    const double area = cell_m_ * cell_m_;
+    // True cell areas from the cell table (planar: cell_m², the torus' area).
+    const auto area_of = [&](size_t i) { return metric_.area_m2(static_cast<grid::CellId>(i)); };
     // The reservoir before this update, for the growth controller (serial sum): felsic,
     // or the continent alone.
     const bool continent_only = margin_parameters.continental_growth_continent_only;
     double reservoir_start = 0;
     if (margin_parameters.continental_growth_control)
-        for (const auto& c : cells_)
-            reservoir_start += (continent_only ? c.continent * continental_density : felsic_mass_per_area(c)) * area;
+        for (size_t i = 0; i < cells_.size(); ++i) {
+            const auto& c = cells_[i];
+            reservoir_start += (continent_only ? c.continent * continental_density : felsic_mass_per_area(c)) * area_of(i);
+        }
     auto next = transportColumns(velocity, dt, carried);
     std::vector<double> arc_source(next.size());
     std::vector<double> created_area(next.size(), 0.0); // New ocean floor of this update, share of the cell.
@@ -756,6 +954,7 @@ void Model::advance(const std::vector<Displacement>& velocity, double dt,
     double continent_sinks = 0; // This update's subducted continent, kg.
     for (size_t i=0; i<next.size(); ++i) {
         auto& c=next[i];
+        const double area = area_of(i);
         double coverage = c.continental_area + c.oceanic_area;
         if (coverage > 1 && c.oceanic_area > 0) {
             // Overlapping oceanic area sinks; continental volume is retained
@@ -859,7 +1058,7 @@ void Model::advance(const std::vector<Displacement>& velocity, double dt,
         double melt=0;
         if (forcing) for (size_t i=0;i<next.size();++i)
             if (arc_source[i]>0 && forcing->arc_receiver[i]!=std::numeric_limits<uint32_t>::max())
-                melt+=arc_source[i]*oceanic_density*area;
+                melt+=arc_source[i]*oceanic_density*area_of(i);
         const double initial=continent_only?budget_.initial_continent_kg:budget_.initial_felsic_kg;
         const double growth=margin_parameters.continental_growth_per_gyr;
         const double sinks=continent_only?continent_sinks:reservoir_sinks;
@@ -876,17 +1075,33 @@ void Model::advance(const std::vector<Displacement>& velocity, double dt,
         if (receiver>=next.size()) throw std::runtime_error("Invalid volcanic arc receiver");
         // Resolve a 100 km magma emplacement width over native cell centres.
         // The source is actual removed ocean slab; new magma is separately budgeted.
-        const int radius=static_cast<int>(std::ceil(300000/cell_m_));
         std::vector<std::pair<size_t,double>> outlets;
         double total=0;
-        for (int dy=-radius;dy<=radius;++dy) for (int dx=-radius;dx<=radius;++dx) {
-            const auto j=index(static_cast<int>(receiver%width_)+dx,static_cast<int>(receiver/width_)+dy);
-            if (forcing->owners[j]!=forcing->owners[receiver]) continue;
-            const double weight=std::exp(-.5*(dx*dx+dy*dy)*area/1e10);
-            outlets.push_back({j,weight});total+=weight;
+        if (metric_.planar()) {
+            // The torus: a box of ceil(300 km / cell) cells, equal areas.
+            const double area=area_of(receiver);
+            const int radius=static_cast<int>(std::ceil(300000/cell_m_));
+            for (int dy=-radius;dy<=radius;++dy) for (int dx=-radius;dx<=radius;++dx) {
+                const auto j=index(static_cast<int>(receiver%width_)+dx,static_cast<int>(receiver/width_)+dy);
+                if (forcing->owners[j]!=forcing->owners[receiver]) continue;
+                const double weight=std::exp(-.5*(dx*dx+dy*dy)*area/1e10);
+                outlets.push_back({j,weight});total+=weight;
+            }
+        } else {
+            // The cells within 300 km (great circle), each weight times its area: the share
+            // of the melt's volume, so the emplaced thickness is the Gaussian.
+            const auto& mesh=*grid.mesh();
+            const mesh::Vec3 centre=mesh.centre(receiver);
+            for (const auto j : grid.withinkm(receiver,300)) {
+                if (forcing->owners[j]!=forcing->owners[receiver]) continue;
+                const double distance=mesh::greatcircle_m(centre,mesh.centre(j),mesh.radius_m());
+                const double weight=std::exp(-.5*distance*distance/1e10)*area_of(j);
+                outlets.push_back({j,weight});total+=weight;
+            }
         }
         for (const auto [j,weight] : outlets) {
-            const double melt=arc_source[i]*weight/total;
+            // The source's thickness on the outlet's area (planar: 1).
+            const double melt=arc_source[i]*(area_of(i)/area_of(j))*weight/total;
             if (arc_share>0) {
                 // The continental share keeps its mass (volume x 2900/2800), age 0. An
                 // island arc (mostly oceanic outlet) also gains continental area.
@@ -897,11 +1112,11 @@ void Model::advance(const std::vector<Displacement>& velocity, double dt,
                     const double converted=std::min(next[j].oceanic_area,continent/min_thickness);
                     next[j].oceanic_area-=converted;
                     next[j].continental_area+=converted;
-                    budget_.arc_continental_area_m2+=converted*area;
+                    budget_.arc_continental_area_m2+=converted*area_of(j);
                 }
             } else next[j].ocean+=melt;
         }
-        const double mass=arc_source[i]*oceanic_density*area;
+        const double mass=arc_source[i]*oceanic_density*area_of(i);
         if (arc_share>0) {
             const double continental_mass=mass*arc_share;
             budget_.generated_ocean_kg+=mass-continental_mass;
@@ -914,7 +1129,7 @@ void Model::advance(const std::vector<Displacement>& velocity, double dt,
         const double added=plume->basalt_m[i];
         if (!std::isfinite(added) || added<0) throw std::runtime_error("Invalid mantle plume basalt");
         next[i].ocean+=added;
-        const double mass=added*oceanic_density*area;
+        const double mass=added*oceanic_density*area_of(i);
         budget_.generated_ocean_kg+=mass;budget_.generated_plume_kg+=mass;
         // Reheat ocean floor above the plume toward the swell age, with the ridge
         // heating response; the plate carries the warm, shallow rock away.
@@ -925,14 +1140,16 @@ void Model::advance(const std::vector<Displacement>& velocity, double dt,
                 +response*std::max(0.0,deficit-next[i].thermal_rejuvenation_volume),0.0,next[i].oceanic_age_volume);
         }
     }
-    spreadRoots(next, dt*margin_parameters.root_mobility, thermal_strength,sediment_feedback);
-    collapseOrogens(next,dt,margin_parameters);
+    const Isostasy isostasy{thermal_strength, root_kg_m3_, root_max_thickness_m_, root_delamination_width_m_};
+    spread_roots(metric_, next, dt*margin_parameters.root_mobility, isostasy, sediment_feedback, budget_);
+    collapse_orogens(metric_, next, dt, margin_parameters, budget_);
     // Upper area cap: oceanic area under continent beyond continental area x the maximum
     // thickness (collisions, arc continent, root inflow, collapse) relaxes into continental
     // area; no rock moves. Before the uplift rate is read, so the rate records it as
     // tectonic: collapse and spreading lower an overthickened margin.
     const double max_thickness=margin_parameters.continental_max_thickness_m;
-    if (margin_parameters.enabled && max_thickness>0) for (auto& c : next) {
+    if (margin_parameters.enabled && max_thickness>0) for (size_t i=0;i<next.size();++i) {
+        auto& c=next[i];
         if (!(c.oceanic_area>0 && c.continent>c.continental_area*max_thickness)) continue;
         double gained=std::min(c.oceanic_area,c.continent/max_thickness-c.continental_area)
             *(-std::expm1(-dt/area_upper_cap_response_myr));
@@ -941,12 +1158,10 @@ void Model::advance(const std::vector<Displacement>& velocity, double dt,
         if (c.oceanic_area-gained<upper_cap_residual_area) gained=c.oceanic_area;
         c.continental_area+=gained;
         c.oceanic_area-=gained;
-        budget_.continentalized_oceanic_area_m2+=gained*area;
+        budget_.continentalized_oceanic_area_m2+=gained*area_of(i);
     }
-    // Conservative downhill transport. Erode the top sediment first, then
-    // continental/oceanic rock; deposit the same mass at the lower neighbour.
-    // Density conversion includes sediment expansion; no sediment is deleted.
-    std::vector<double> elevation(next.size()), deposits(next.size(), 0);
+    // Conservative downhill transport (diffuse_surface) after the uplift rate below.
+    std::vector<double> elevation(next.size());
     for (size_t i = 0; i < next.size(); ++i) elevation[i] = elevation_m(next[i], thermal_strength, root_kg_m3_, root_max_thickness_m_, root_delamination_width_m_);
     // Rock uplift rate: the tectonic elevation change of this step (before the
     // surface processes below), kept as an exponential mean. Measurement only.
@@ -986,52 +1201,16 @@ void Model::advance(const std::vector<Displacement>& velocity, double dt,
         strain_[i].yy = (strain_[i].yy + yy_moved[i] / coverage[i] - yy_stay[i]) * kept;
         strain_[i].xy = (strain_[i].xy + xy_moved[i] / coverage[i] - xy_stay[i]) * kept;
     }
-    for (uint32_t y = 0; y < height_; ++y) for (uint32_t x = 0; x < width_; ++x) {
-        const auto i = index(x, y);
-        const size_t neighbors[] = {index(static_cast<int>(x) - 1, y), index(x + 1, y),
-            index(x, static_cast<int>(y) - 1), index(x, y + 1)};
-        double drop_sum = 0;
-        for (auto j : neighbors) drop_sum += std::max(0.0, elevation[i] - elevation[j]);
-        if (drop_sum == 0 || diffusion == 0) continue;
-        auto& c = next[i];
-        // Reduced submarine redistribution: land weathering is not applied at
-        // full strength in deep water. Smoothly transition over the upper 1 km
-        // to avoid a mobility jump when a cell crosses sea level. This depth and
-        // the ratio are coarse modelling choices, not an ocean-current model.
-        const double depth_fraction=std::clamp(-elevation[i]/1000,0.0,1.0);
-        const double submerged=depth_fraction*depth_fraction*(3-2*depth_fraction);
-        const double mobility=1-(1-submarine_erosion_ratio)*submerged;
-        const double requested = diffusion * mobility * drop_sum * sediment_density;
-        double remaining = std::min(requested, mass_per_area(c)), removed = 0;
-        const auto erode = [&](double& volume, double density, double* age_volume) {
-            const double taken = std::min(volume, std::max(0.0, remaining) / density);
-            const double age = age_volume && volume > 0 ? *age_volume / volume : 0;
-            volume -= taken;
-            if (age_volume) *age_volume = volume * age;
-            remaining -= taken * density; removed += taken * density;
-            return taken * density;
-        };
-        erode(c.sediment, sediment_density, nullptr);
-        erode(c.continent, continental_density, &c.continental_age_volume);
-        const double thermal_age_reduction=c.ocean>0?c.thermal_rejuvenation_volume/c.ocean:0;
-        budget_.eroded_ocean_kg += erode(c.ocean, oceanic_density, &c.oceanic_age_volume) * area;
-        c.thermal_rejuvenation_volume=c.ocean*thermal_age_reduction;
-        for (auto j : neighbors)
-            deposits[j] += removed * std::max(0.0, elevation[i] - elevation[j]) / drop_sum / sediment_density;
-        budget_.eroded_kg += removed * area;
-    }
-    for (size_t i = 0; i < next.size(); ++i) {
-        next[i].sediment += deposits[i];
-        budget_.deposited_kg += deposits[i] * sediment_density * area;
-    }
+    diffuse_surface(metric_, next, elevation, diffusion, submarine_erosion_ratio, budget_);
     routeSediment(next,dt,thermal_strength,margin_parameters,forcing);
     if (noise.amplitude_m>0)
-        budget_.noise_redistributed_kg+=noise_pass::apply(width_,height_,cell_m_,next,seed_,time_myr_,time_myr_+dt,noise,thermal_strength,root_kg_m3_, root_max_thickness_m_, root_delamination_width_m_);
+        budget_.noise_redistributed_kg+=noise_pass::apply(width_,height_,cell_m_,next,seed_,time_myr_,time_myr_+dt,noise,thermal_strength,root_kg_m3_, root_max_thickness_m_, root_delamination_width_m_,&metric_);
     budget_.mass_kg = 0;
     budget_.felsic_kg = 0;
     budget_.continent_kg = 0;
     for (size_t i=0;i<next.size();++i) {
         validate(next[i]);
+        const double area = area_of(i);
         budget_.mass_kg += mass_per_area(next[i]) * area;
         budget_.felsic_kg += felsic_mass_per_area(next[i]) * area;
         budget_.continent_kg += next[i].continent * continental_density * area;
