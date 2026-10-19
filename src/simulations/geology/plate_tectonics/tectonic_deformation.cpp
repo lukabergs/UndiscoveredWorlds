@@ -8,7 +8,6 @@
 #include <queue>
 #include <stdexcept>
 #include <tuple>
-#include <type_traits>
 
 namespace tectonics::deformation {
 double taper(double distance, double peak) {
@@ -19,29 +18,21 @@ double taper(double distance, double peak) {
 }
 
 namespace {
-// Displacement arithmetic of either reading: planar cells (2-D), cube metres (3-D tangent).
-bool finite(const transport::Displacement& d) { return std::isfinite(d.x) && std::isfinite(d.y); }
 bool finite(const mesh::Vec3& v) { return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z); }
-void addscaled(transport::Displacement& to, double k, const transport::Displacement& v) { to.x += k*v.x; to.y += k*v.y; }
 void addscaled(mesh::Vec3& to, double k, const mesh::Vec3& v) { to.x += k*v.x; to.y += k*v.y; to.z += k*v.z; }
-void adddifference(transport::Displacement& to, double k, const transport::Displacement& a, const transport::Displacement& b) {
-    to.x += k*(a.x-b.x); to.y += k*(a.y-b.y);
-}
 void adddifference(mesh::Vec3& to, double k, const mesh::Vec3& a, const mesh::Vec3& b) {
     to.x += k*(a.x-b.x); to.y += k*(a.y-b.y); to.z += k*(a.z-b.z);
 }
-void divide(transport::Displacement& v, uint32_t n) { v.x/=n; v.y/=n; }
 void divide(mesh::Vec3& v, uint32_t n) { v.x/=n; v.y/=n; v.z/=n; }
+} // namespace
 
-template <class V>
-std::vector<V> distributeon(uint32_t w, uint32_t h, double cell_m,
-        const std::vector<uint32_t>& owners, const std::vector<double>& continent,
-        const std::vector<V>& rigid, long seed, const Parameters& p,
-        const grid::TectonicGrid* grid) {
+std::vector<mesh::Vec3> distribute(const columns::Metric& metric, const std::vector<uint32_t>& owners,
+        const std::vector<double>& continent, const std::vector<mesh::Vec3>& rigid, long seed,
+        const Parameters& p) {
+    using V = mesh::Vec3;
     variation::validate(p.process_variation,p.process_wavelength_km,p.process_period_myr);
-    const bool planar=!grid || grid->kind()==grid::TectonicGrid::Kind::planar;
-    const size_t size=planar?static_cast<size_t>(w)*h:grid->cellcount();
-    if ((planar && (w<2 || h<2 || !std::isfinite(cell_m) || cell_m<=0)) || owners.size()!=size ||
+    const size_t size=metric.cellcount();
+    if (size==0 || owners.size()!=size ||
         continent.size()!=size || rigid.size()!=size || !std::isfinite(p.peak_distance_km) || p.peak_distance_km<0 ||
         !std::isfinite(p.distance_variation) || p.distance_variation<0 || p.distance_variation>.5 ||
         !std::isfinite(p.subduction_coupling) || p.subduction_coupling<0 || p.subduction_coupling>1 || !std::isfinite(p.time_myr))
@@ -53,8 +44,6 @@ std::vector<V> distributeon(uint32_t w, uint32_t h, double cell_m,
     if (p.peak_distance_km==0) return result;
     // The cell table (W2-E): contacts on its edges, displacements through the adapter
     // (a neighbour's on the cell's own frame), distances in metres.
-    const columns::Metric metric(grid,w,h,cell_m);
-    metric.requiredisplacement(std::is_same_v<V,mesh::Vec3>,"deformation");
     const auto& table=metric.grid().edges();
     std::vector<V> correction(size);
     std::vector<uint32_t> counts(size,0), source(size,std::numeric_limits<uint32_t>::max());
@@ -82,6 +71,7 @@ std::vector<V> distributeon(uint32_t w, uint32_t h, double cell_m,
     constexpr double pi=3.14159265358979323846;
     const auto bits=static_cast<uint32_t>(seed)*1664525U+1013904223U;
     const double phase=2*pi*bits/4294967296.0;
+    // E4: replace. The peak's variation on the 4N x 2N lat-lon proxy.
     const auto extent_km=metric.extent_km();
     for (uint32_t i=0;i<size;++i) if (counts[i]) {
         divide(correction[i],counts[i]);
@@ -121,19 +111,5 @@ std::vector<V> distributeon(uint32_t w, uint32_t h, double cell_m,
         addscaled(result[i],f,metric.inframe(static_cast<grid::CellId>(i),correction[s]));
     }
     return result;
-}
-} // namespace
-
-std::vector<transport::Displacement> distribute(uint32_t w, uint32_t h, double cell_m,
-        const std::vector<uint32_t>& owners, const std::vector<double>& continent,
-        const std::vector<transport::Displacement>& rigid, long seed, const Parameters& p,
-        const grid::TectonicGrid* grid) {
-    return distributeon(w,h,cell_m,owners,continent,rigid,seed,p,grid);
-}
-
-std::vector<mesh::Vec3> distribute(const grid::TectonicGrid& grid, const std::vector<uint32_t>& owners,
-        const std::vector<double>& continent, const std::vector<mesh::Vec3>& rigid_m, long seed,
-        const Parameters& p) {
-    return distributeon(0,0,0,owners,continent,rigid_m,seed,p,&grid);
 }
 }

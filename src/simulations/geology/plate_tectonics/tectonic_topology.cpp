@@ -1,4 +1,5 @@
 #include "simulations/geology/plate_tectonics/tectonic_topology.hpp"
+#include "core/mesh/mesh_geometry.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -10,18 +11,22 @@
 #include <tuple>
 
 namespace tectonics::topology {
-namespace { constexpr uint32_t missing = std::numeric_limits<uint32_t>::max(); }
-void Model::initialize(uint32_t width, uint32_t height, uint32_t plates, const std::vector<uint32_t>& owners) {
-    if (width < 2 || height < 2) throw std::runtime_error("Invalid plate topology grid");
-    initialize(grid::TectonicGrid::planar(width, height, static_cast<double>(width)), plates, owners);
+namespace {
+constexpr uint32_t missing = std::numeric_limits<uint32_t>::max();
+bool finite(const mesh::Vec3& v) { return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z); }
+// The unit tangent of v at the unit vector r (zero for a radial v).
+mesh::Vec3 tangent(const mesh::Vec3& v, const mesh::Vec3& r) {
+    const mesh::Vec3 t = v - mesh::dot(v, r) * r;
+    const double length = mesh::length(t);
+    return length > 0 ? (1.0 / length) * t : mesh::Vec3{};
+}
 }
 void Model::initialize(std::shared_ptr<const grid::TectonicGrid> grid, uint32_t plates,
         const std::vector<uint32_t>& owners) {
-    if (!grid || grid->kind() != grid::TectonicGrid::Kind::planar || grid->width() < 2 || grid->height() < 2 ||
-        plates == 0 || owners.size() != grid->cellcount())
+    if (!grid || grid->facecells() < 2 || plates == 0 || owners.size() != grid->cellcount())
         throw std::runtime_error("Invalid plate topology grid");
     grid_ = std::move(grid);
-    width_ = grid_->width(); height_ = grid_->height();
+    lattice_ = sphere_transport::Lattice::make(grid_->facecells(), 1, grid_->radius_m());
     diagnostics_ = {}; diagnostics_.enabled = true;
     coverage_.assign(plates, std::vector<double>(owners.size(), 0));
     rifts_.assign(plates, {}); welding_.clear(); next_id_ = plates;
@@ -40,18 +45,29 @@ void Model::removePlate(uint32_t index) {
     diagnostics_.stable_ids[index] = diagnostics_.stable_ids.back();
     diagnostics_.stable_ids.pop_back();
 }
-std::vector<uint32_t> Model::advance(const std::vector<transport::Displacement>& displacement) {
-    if (!diagnostics_.enabled || displacement.size() != coverage_.size())
+std::vector<uint32_t> Model::advance(const std::vector<mesh::Vec3>& rotation) {
+    if (!diagnostics_.enabled || rotation.size() != coverage_.size())
         throw std::runtime_error("Invalid plate topology motion");
-    const size_t size = static_cast<size_t>(width_) * height_;
+    for (const auto& w : rotation) if (!finite(w)) throw std::runtime_error("Invalid plate topology rotation");
+    const size_t size = grid_->cellcount();
     for (size_t p = 0; p < coverage_.size(); ++p) {
-        const std::vector<transport::Displacement> motion(size, displacement[p]);
-        if (!rifts_[p].side.empty())
-            rifts_[p].side = transport::remap(width_, height_, rifts_[p].side, motion);
-        if (!rifts_[p].cracks.empty())
-            rifts_[p].cracks = transport::remap(width_, height_, rifts_[p].cracks, motion);
-        coverage_[p] = transport::remap(width_, height_, coverage_[p],
-            motion);
+        // The plate's coverage (and its rift fields) moved by its rotation alone, over the
+        // cells it covers: the per-plate kernel keeps a rigid interior at exactly 1.
+        sphere_transport::Motion motion;
+        motion.rotation = {rotation[p]};
+        motion.plate.assign(size, sphere_transport::noplate);
+        for (size_t i = 0; i < size; ++i) if (coverage_[p][i] > 0) motion.plate[i] = 0;
+        const sphere_transport::Stencil stencil(lattice_, motion);
+        std::vector<std::vector<double>*> fields{&coverage_[p]};
+        if (!rifts_[p].side.empty()) fields.push_back(&rifts_[p].side);
+        if (!rifts_[p].cracks.empty()) fields.push_back(&rifts_[p].cracks);
+        std::vector<const std::vector<double>*> inputs(fields.begin(), fields.end());
+        const auto layers = stencil.transport(inputs);
+        for (auto* field : fields) std::fill(field->begin(), field->end(), 0.0);
+        for (const auto& layer : layers)
+            for (size_t k = 0; k < layer.cells.size(); ++k)
+                for (size_t f = 0; f < fields.size(); ++f)
+                    (*fields[f])[layer.cells[k]] += layer.values[f][k] * layer.coverage[k];
     }
     std::vector<uint32_t> owners(size, 0);
     for (size_t i = 0; i < size; ++i) {
@@ -74,19 +90,30 @@ std::vector<uint32_t> Model::advance(const std::vector<transport::Displacement>&
 }
 
 std::vector<uint32_t> Model::partition(uint32_t plate, const std::vector<uint32_t>& owners,
-        const std::vector<dynamics::Vector>& mantle, const std::vector<double>& strength) const {
+        const std::vector<mesh::Vec3>& mantle, const std::vector<double>& strength) const {
     // Two connected traction domains, not random seeds or a new global Voronoi
-    // map. The strongest varying mantle-flow axis selects opposite anchors.
-    dynamics::Vector mean;
+    // map. The strongest varying mantle-flow axis selects opposite anchors; the flow is read
+    // on the tangent plane at the plate's centroid (east, north there).
+    mesh::Vec3 centre;
     uint32_t count = 0;
     for (size_t i = 0; i < owners.size(); ++i) if (owners[i] == plate) {
-        mean.x += mantle[i].x; mean.y += mantle[i].y; ++count;
+        centre = centre + grid_->area_m2(static_cast<grid::CellId>(i)) * grid_->position(static_cast<grid::CellId>(i));
+        ++count;
     }
-    if (count == 0) return {};
-    mean.x /= count; mean.y /= count;
+    if (count == 0 || !(mesh::length(centre) > 0)) return {};
+    centre = mesh::normalise(centre);
+    const double latitude = mesh::latitudeof(centre), longitude = mesh::longitudeof(centre);
+    const mesh::Vec3 east = mesh::eastof(latitude, longitude), north = mesh::northof(latitude, longitude);
+    const auto planar = [&](size_t i) { return std::array<double, 2>{mesh::dot(mantle[i], east), mesh::dot(mantle[i], north)}; };
+    double mean_x = 0, mean_y = 0;
+    for (size_t i = 0; i < owners.size(); ++i) if (owners[i] == plate) {
+        const auto v = planar(i); mean_x += v[0]; mean_y += v[1];
+    }
+    mean_x /= count; mean_y /= count;
     double xx = 0, xy = 0, yy = 0;
     for (size_t i = 0; i < owners.size(); ++i) if (owners[i] == plate) {
-        const double x = mantle[i].x - mean.x, y = mantle[i].y - mean.y;
+        const auto v = planar(i);
+        const double x = v[0] - mean_x, y = v[1] - mean_y;
         xx += x*x; xy += x*y; yy += y*y;
     }
     if (xx + yy < 1e-30) return {};
@@ -95,7 +122,8 @@ std::vector<uint32_t> Model::partition(uint32_t plate, const std::vector<uint32_
     uint32_t low = missing, high = missing;
     double lo = std::numeric_limits<double>::infinity(), hi = -lo;
     for (uint32_t i = 0; i < owners.size(); ++i) if (owners[i] == plate) {
-        const double projection = mantle[i].x * nx + mantle[i].y * ny;
+        const auto v = planar(i);
+        const double projection = v[0] * nx + v[1] * ny;
         if (projection < lo) { lo = projection; low = i; }
         if (projection > hi) { hi = projection; high = i; }
     }
@@ -118,36 +146,37 @@ std::vector<uint32_t> Model::partition(uint32_t plate, const std::vector<uint32_
         }
         return side;
     }
-    std::deque<uint32_t> queue{low, high}; side[low] = 0; side[high] = 1;
-    while (!queue.empty()) {
-        const uint32_t i = queue.front(); queue.pop_front();
-        for (auto n : grid_->neighbours(i))
-            if (owners[n] == plate && side[n] == missing) { side[n] = side[i]; queue.push_back(n); }
-    }
+    // Each cell to the nearer anchor by great-circle distance: the cut is the anchors' bisecting
+    // great circle wherever the plate lies (a breadth-first split counts grid steps, whose
+    // bisector bends and lengthens across a cube corner; E3).
+    const mesh::Vec3 a = grid_->position(low), b = grid_->position(high);
+    for (uint32_t i = 0; i < owners.size(); ++i)
+        if (owners[i] == plate) side[i] = mesh::dot(grid_->position(i), b) > mesh::dot(grid_->position(i), a) ? 1 : 0;
     return side;
 }
 
 std::vector<Change> Model::evolve(std::vector<uint32_t>& owners,
-        const std::vector<dynamics::Vector>& mantle, const std::vector<dynamics::Vector>& velocity,
-        const std::vector<double>& continent, double cell_m, double dt, double time,
+        const std::vector<mesh::Vec3>& mantle, const std::vector<mesh::Vec3>& rotation,
+        const std::vector<double>& continent, double dt, double time,
         const Parameters& parameters, const std::vector<double>& strength) {
-    const size_t size = static_cast<size_t>(width_) * height_, plates = coverage_.size();
+    const size_t size = grid_ ? grid_->cellcount() : 0, plates = coverage_.size();
     if (!std::isfinite(parameters.yield_n_m) || parameters.yield_n_m<=0 ||
         !std::isfinite(parameters.damage_time_myr) || parameters.damage_time_myr<=0 ||
         !std::isfinite(parameters.strain_rate_myr) || parameters.strain_rate_myr<0 ||
         (!strength.empty() && strength.size()!=size)) throw std::runtime_error("Invalid rift parameters");
     for (double v:strength) if (!std::isfinite(v) || v<=0) throw std::runtime_error("Invalid rock strength");
     if (!diagnostics_.enabled || owners.size() != size || mantle.size() != size || continent.size() != size ||
-        velocity.size() != plates || !std::isfinite(cell_m) || cell_m <= 0 ||
-        !std::isfinite(dt) || dt <= 0 || !std::isfinite(time) || time < 0)
+        rotation.size() != plates || !std::isfinite(dt) || dt <= 0 || !std::isfinite(time) || time < 0)
         throw std::runtime_error("Invalid topology evolution inputs");
     for (size_t i = 0; i < size; ++i)
-        if (owners[i] >= plates || !std::isfinite(mantle[i].x) || !std::isfinite(mantle[i].y) ||
+        if (owners[i] >= plates || !finite(mantle[i]) ||
             !std::isfinite(continent[i]) || continent[i] < 0 || continent[i] > 1 + 1e-8)
             throw std::runtime_error("Invalid topology forcing cell");
-    for (auto v : velocity) if (!std::isfinite(v.x) || !std::isfinite(v.y))
-        throw std::runtime_error("Invalid topology velocity");
+    for (const auto& w : rotation) if (!finite(w)) throw std::runtime_error("Invalid topology velocity");
+    const double radius = grid_->radius_m();
+    const double cell_area = grid_->totalarea_m2() / static_cast<double>(size);
     const auto neighbors = [&](uint32_t i) { return grid_->neighbours(i); };
+    const auto& edges = grid_->edges();
     for (size_t p=0;p<rifts_.size();++p) {
         auto& r=rifts_[p];r.cooldown=std::max(0.0,r.cooldown-dt);
         // Material damage survives a rejected geometric candidate. Heal even
@@ -169,27 +198,36 @@ std::vector<Change> Model::evolve(std::vector<uint32_t>& owners,
                 cracks[i]>.1*std::max(coverage_[p][i],1e-12);
         }
     };
-    struct Contact { uint32_t faces=0, continental=0; double compression=0, normal_motion=0; };
+    // Each contact's edges: closing ((w_a - w_b) x R x) . n at the edge's midpoint, the
+    // relative speed there and the shared length.
+    struct Contact { uint32_t faces=0, continental=0; double compression=0, normal_motion=0, speed=0, length_m=0; };
     std::map<std::pair<uint32_t,uint32_t>,Contact> contacts;
-    for (const grid::Edge& edge : grid_->edges()) {
-        const auto i = edge.a, j = edge.b, a = owners[i], b = owners[j];
+    for (const grid::Edge& edge : edges) {
+        const auto i = edge.a, j = edge.b;
+        auto a = owners[i], b = owners[j];
         if (a == b) continue;
-        auto& c = contacts[std::minmax(a,b)]; ++c.faces;
+        // From the lower plate index toward the higher (the contact's orientation).
+        mesh::Vec3 normal = edge.normal;
+        if (a > b) { std::swap(a, b); normal = -1.0 * normal; }
+        auto& c = contacts[{a, b}]; ++c.faces;
         c.continental += continent[i] >= .5 && continent[j] >= .5;
-        const double closing = (velocity[a].x-velocity[b].x)*edge.normal.x + (velocity[a].y-velocity[b].y)*edge.normal.y;
+        const mesh::Vec3 relative = mesh::cross(rotation[a] - rotation[b], radius * edge.midpoint);
+        const double closing = mesh::dot(relative, normal);
         c.compression += std::max(0.0, closing);
         c.normal_motion += std::abs(closing);
+        c.speed += mesh::length(relative);
+        c.length_m += edge.length_m;
     }
     std::map<std::pair<uint32_t,uint32_t>,double> next_welding;
     for (const auto& entry : contacts) {
         const auto [a,b] = entry.first;
         const auto& c = entry.second;
         const auto key = std::minmax(diagnostics_.stable_ids[a], diagnostics_.stable_ids[b]);
-        const double speed = std::hypot(velocity[a].x-velocity[b].x, velocity[a].y-velocity[b].y);
+        const double speed = c.speed / c.faces;
         const double previous = welding_.count(key) ? welding_.at(key) : 0;
         // Require broad continental contact, compatible full velocity (including
         // transform slip), and evidence of compression. Mere proximity is not welding.
-        const bool locked = c.faces >= 4 && c.faces*cell_m >= 500000 &&
+        const bool locked = c.faces >= 4 && c.length_m >= 500000 &&
             c.continental >= .8*c.faces && speed <= weld_speed_m_s &&
             (c.compression > c.faces*1e-13 || (previous > 0 && speed < 1e-13)) &&
             c.normal_motion >= .25*c.faces*speed && rifts_[a].cooldown == 0 && rifts_[b].cooldown == 0;
@@ -213,7 +251,7 @@ std::vector<Change> Model::evolve(std::vector<uint32_t>& owners,
         return {{EventKind::Fusion,a,b}};
     }
     welding_ = std::move(next_welding);
-    const auto min_cells = static_cast<uint32_t>(std::max(16.0, std::ceil(minimum_plate_area_m2/(cell_m*cell_m))));
+    const auto min_cells = static_cast<uint32_t>(std::max(16.0, std::ceil(minimum_plate_area_m2/cell_area)));
     for (uint32_t p = 0; p < plates; ++p) {
         auto& r = rifts_[p];
         if (r.cooldown > 0) continue;
@@ -234,11 +272,12 @@ std::vector<Change> Model::evolve(std::vector<uint32_t>& owners,
         }
         std::vector<uint32_t> side(size, missing);
         uint32_t counts[2]{}, anchors[2]{missing,missing};
-        dynamics::Vector flow[2]{};
+        double areas[2]{};
+        mesh::Vec3 flow[2]{};
         for (uint32_t i = 0; i < size; ++i) if (owners[i] == p) {
             const uint32_t s = r.side[i] > .5*coverage_[p][i] ? 1U : 0U;
-            side[i] = s; ++counts[s]; anchors[s] = i;
-            flow[s].x += mantle[i].x; flow[s].y += mantle[i].y;
+            side[i] = s; ++counts[s]; anchors[s] = i; areas[s] += grid_->area_m2(i);
+            flow[s] = flow[s] + mantle[i];
         }
         if (std::min(counts[0],counts[1]) < min_cells || std::min(counts[0],counts[1]) < .15*count) {
             reset_candidate(r); continue;
@@ -247,41 +286,45 @@ std::vector<Change> Model::evolve(std::vector<uint32_t>& owners,
         // Advected candidates that develop islands are discarded, not promoted.
         std::vector<uint8_t> visited(size,0);
         bool connected = true;
-        double center[2][2]{};
+        mesh::Vec3 center[2]{};
         for (uint32_t s = 0; s < 2; ++s) {
             std::deque<uint32_t> queue{anchors[s]}; visited[anchors[s]] = 1;
             uint32_t found = 0;
             while (!queue.empty()) {
                 const auto i = queue.front(); queue.pop_front(); ++found;
-                // Coordinates relative to a common anchor, unwrapped on the torus.
-                center[s][0] += std::remainder(static_cast<double>(i%width_)-anchors[0]%width_, static_cast<double>(width_));
-                center[s][1] += std::remainder(static_cast<double>(i/width_)-anchors[0]/width_, static_cast<double>(height_));
+                center[s] = center[s] + grid_->area_m2(i) * grid_->position(i);
                 for (auto n : neighbors(i)) if (!visited[n] && side[n] == s) { visited[n]=1; queue.push_back(n); }
             }
             connected &= found == counts[s];
-            flow[s].x /= counts[s]; flow[s].y /= counts[s];
-            center[s][0] /= counts[s]; center[s][1] /= counts[s];
+            flow[s] = (1.0 / counts[s]) * flow[s];
         }
-        if (!connected) { reset_candidate(r); continue; }
-        double nx = center[1][0]-center[0][0], ny = center[1][1]-center[0][1];
-        const double distance = std::hypot(nx,ny);
+        if (!connected || !(mesh::length(center[0]) > 0) || !(mesh::length(center[1]) > 0)) { reset_candidate(r); continue; }
+        // The direction from side 0's centroid toward side 1's, at their midpoint; their
+        // great-circle distance in cell spacings.
+        const mesh::Vec3 c0 = mesh::normalise(center[0]), c1 = mesh::normalise(center[1]);
+        const double distance = mesh::greatcircle_rad(c0, c1) * radius / grid_->cellspacing_m();
         if (distance < 1) { reset_candidate(r); continue; }
-        nx /= distance; ny /= distance;
-        uint32_t faces = 0;
-        for (uint32_t i = 0; i < size; ++i) if (side[i] == 0)
-            for (auto n : neighbors(i)) faces += side[n] == 1;
-        const double opening = (flow[1].x-flow[0].x)*nx + (flow[1].y-flow[0].y)*ny;
-        const double reduced_area = cell_m*cell_m*counts[0]*counts[1]/count;
-        const double tension = faces > 0 ? dynamics::kBasalDrag*reduced_area*opening/(faces*cell_m) : 0;
+        const mesh::Vec3 middle = mesh::normalise(c0 + c1);
+        const mesh::Vec3 n = tangent(c1 - c0, middle);
+        // The fault's length: each cut edge projected on the cut's normal there (the direction
+        // between the sides' centroids), so a cut across the grid's axes (a staircase of
+        // edges) measures its own length, not the staircase's (E3).
+        double interface_m = 0;
+        for (const grid::Edge& edge : edges)
+            if (side[edge.a] != missing && side[edge.b] != missing && side[edge.a] != side[edge.b])
+                interface_m += edge.length_m * std::abs(mesh::dot(edge.normal, tangent(c1 - c0, edge.midpoint)));
+        const double opening = mesh::dot(flow[1] - flow[0], n);
+        const double reduced_area = areas[0]*areas[1]/(areas[0]+areas[1]);
+        const double tension = interface_m > 0 ? dynamics::kBasalDrag*reduced_area*opening/interface_m : 0;
         diagnostics_.max_tension_n_m=std::max(diagnostics_.max_tension_n_m,tension);
         if (parameters.progressive_rifting) {
             double total=0;uint32_t interface_cells=0;
             auto next=r.cracks;
             for (uint32_t i=0;i<size;++i) if (owners[i]==p) {
                 bool interface=false;double neighbor_damage=0;
-                for (auto n:neighbors(i)) if (owners[n]==p) {
-                    interface|=side[n]!=side[i];
-                    neighbor_damage=std::max(neighbor_damage,r.cracks[n]/std::max(coverage_[p][n],1e-12));
+                for (auto nb:neighbors(i)) if (owners[nb]==p) {
+                    interface|=side[nb]!=side[i];
+                    neighbor_damage=std::max(neighbor_damage,r.cracks[nb]/std::max(coverage_[p][nb],1e-12));
                 }
                 double damage=r.cracks[i]/std::max(coverage_[p][i],1e-12);
                 // Inherited thin/warm rock and nearby damage reduce strength.
@@ -337,26 +380,27 @@ std::vector<double> Model::damageField(const std::vector<uint32_t>& owners) cons
     return result;
 }
 
-std::vector<transport::Displacement> Model::riftDisplacement(const std::vector<uint32_t>& owners,
+std::vector<mesh::Vec3> Model::riftDisplacement(const std::vector<uint32_t>& owners,
         double dt,const Parameters& parameters) const {
-    std::vector<transport::Displacement> result(owners.size());
+    std::vector<mesh::Vec3> result(owners.size());
     if (!parameters.progressive_rifting || parameters.strain_rate_myr==0) return result;
     const auto damage=damageField(owners);
     // Opening motion points away from an incipient fault. Conservative column
     // transport converts this distributed extension to thinning and subsidence;
-    // no rift depth is painted onto the terrain and no rock is deleted.
-    // Unit steps of west, east, north, south (planar: x and y).
-    constexpr int step_x[grid::directioncount]={-1,1,0,0}, step_y[grid::directioncount]={0,0,-1,1};
+    // no rift depth is painted onto the terrain and no rock is deleted. Each damaged face
+    // across the fault moves the cell away from its neighbour by the opening strain times
+    // their centre distance, along the line between the centres.
     for (uint32_t i=0;i<owners.size();++i) {
         const auto p=owners[i];
         if (rifts_[p].side.empty() || damage[i]==0) continue;
         const bool side=rifts_[p].side[i]>.5*coverage_[p][i];
+        const mesh::Vec3 r=grid_->position(i);
         for (std::uint8_t k=0;k<grid::directioncount;++k) {
             const uint32_t j=grid_->neighbour(i,k);
-            const int dx=step_x[k],dy=step_y[k];
             if (owners[j]!=p || (rifts_[p].side[j]>.5*coverage_[p][j])==side) continue;
             const double opening=.5*parameters.strain_rate_myr*dt*std::min(damage[i],damage[j]);
-            result[i].x-=dx*opening;result[i].y-=dy*opening;
+            const double distance=grid_->edges()[grid_->edge(i,k)].distance_m;
+            result[i]=result[i]-(opening*distance)*tangent(grid_->position(j)-r,r);
         }
     }
     return result;

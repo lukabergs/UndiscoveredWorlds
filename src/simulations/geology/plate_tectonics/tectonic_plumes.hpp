@@ -22,23 +22,21 @@ struct Parameters {
     double weakening = 0;              // 0..1 strength reduction for progressive rifting
     double min_spacing_km = 3000;
 };
-// x_km, y_km on the torus; position (a unit vector) on the sphere (placesphere).
-struct Plume { double x_km = 0, y_km = 0, birth_myr = 0; mesh::Vec3 position{}; };
+// position: a unit vector (placesphere).
+struct Plume { double birth_myr = 0; mesh::Vec3 position{}; };
 struct Source {
     std::vector<double> basalt_m;      // added basalt, volume per cell area over the step
     std::vector<double> influence;     // 0..1 proximity to an active plume (swell, weakening, map)
     double swell_age_myr = 0;
 };
 void validate(const Parameters& parameters);
-// Deterministic positions on the width_km x height_km torus from the seed alone.
-std::vector<Plume> place(double width_km, double height_km, long seed, const Parameters& parameters);
-// Deterministic positions on the sphere of radius_km from the seed alone: the same hashes as
-// place, read as a point uniform on the sphere (mesh::uniformpoint), spacing by great circle.
+// Deterministic positions on the sphere of radius_km from the seed alone: stateless hashes of
+// the seed read as a point uniform on the sphere (mesh::uniformpoint), spacing by great circle.
 std::vector<Plume> placesphere(double radius_km, long seed, const Parameters& parameters);
-// Source over [start_myr, end_myr]; volumes integrate exactly over any time step. On the cube
-// (width, height and cell_m ignored) the plumes are placed on the sphere, the Gaussians use
-// great-circle distances and the basalt is the volume share per true cell area.
-Source source(uint32_t width, uint32_t height, double cell_m, long seed, double start_myr, double end_myr,
-              const Parameters& parameters, const grid::TectonicGrid* grid = nullptr);
+// Source over [start_myr, end_myr]; volumes integrate exactly over any time step. The plumes
+// are placed on the sphere, the Gaussians use great-circle distances and the basalt is the
+// volume share per true cell area.
+Source source(const grid::TectonicGrid& grid, long seed, double start_myr, double end_myr,
+              const Parameters& parameters);
 }
 #endif

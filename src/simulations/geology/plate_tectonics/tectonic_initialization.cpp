@@ -7,23 +7,20 @@
 #include <queue>
 #include <stdexcept>
 #include <tuple>
-#include <type_traits>
 
 namespace tectonics::initialization {
 namespace {
-bool finite(const transport::Displacement& d) { return std::isfinite(d.x) && std::isfinite(d.y); }
 bool finite(const mesh::Vec3& v) { return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z); }
+} // namespace
 
-template <class V>
-std::vector<columns::Cell> terrainon(uint32_t w,uint32_t h,double cell_m,double dt,
+std::vector<columns::Cell> terrain(const columns::Metric& metric,double dt,
         const std::vector<double>& elevations,const std::vector<double>& ages,
-        const std::vector<uint32_t>& owners,const std::vector<V>& velocity,
+        const std::vector<uint32_t>& owners,const std::vector<mesh::Vec3>& velocity,
         double thermal_strength, double margin_width_m, double boundary_influence, double root_kg_m3,
-        double root_max_thickness_m, double root_delamination_width_m, const grid::TectonicGrid* grid) {
+        double root_max_thickness_m, double root_delamination_width_m) {
     using namespace columns;
-    const bool planar=!grid || grid->kind()==grid::TectonicGrid::Kind::planar;
-    const size_t count=planar?static_cast<size_t>(w)*h:grid->cellcount();
-    if ((planar && (w<2 || h<2 || !std::isfinite(cell_m) || cell_m<=0)) || elevations.size()!=count ||
+    const size_t count=metric.cellcount();
+    if (count==0 || elevations.size()!=count ||
         ages.size()!=count || owners.size()!=count || velocity.size()!=count || !std::isfinite(dt) || dt<=0 ||
         !std::isfinite(thermal_strength) || thermal_strength<0 ||
         !std::isfinite(margin_width_m) || margin_width_m<0 || margin_width_m>4000 ||
@@ -37,8 +34,6 @@ std::vector<columns::Cell> terrainon(uint32_t w,uint32_t h,double cell_m,double 
         throw std::runtime_error("Invalid initial terrain cell");
     // The cell table (W2-E): openings on its edges through the displacement adapter, the
     // spreading distance by Dijkstra in metres.
-    const Metric metric(grid,w,h,cell_m);
-    metric.requiredisplacement(std::is_same_v<V,mesh::Vec3>,"initialization");
     const auto& table=metric.grid().edges();
     constexpr uint32_t none=std::numeric_limits<uint32_t>::max();
     std::vector<double> distance(count,std::numeric_limits<double>::infinity()),rate(count);
@@ -48,7 +43,7 @@ std::vector<columns::Cell> terrainon(uint32_t w,uint32_t h,double cell_m,double 
     for (size_t e=0;e<table.size();++e) {
         const auto a=table[e].a,b=table[e].b;
         if (owners[a]==owners[b]) continue;
-        const double opening=-metric.closing(e,velocity[a],velocity[b])*metric.displacementunit_m()/dt;
+        const double opening=-metric.closing(e,velocity[a],velocity[b])/dt;
         if (opening<=0) continue;
         for (auto i:{a,b}) rate[i]=std::max(rate[i],opening*.5);
     }
@@ -68,17 +63,10 @@ std::vector<columns::Cell> terrainon(uint32_t w,uint32_t h,double cell_m,double 
             }
         }
     }
-    // The long-wave background: planar the 5 x 5 box mean; on the cube the area-weighted
-    // mean of the two-step ring over the eight-neighbour table (the box's equivalent).
+    // The long-wave background: the area-weighted mean of the two-step ring over the
+    // eight-neighbour table (the torus engine's 5 x 5 box mean).
     const auto background=[&](uint32_t i) {
         double mean=0;
-        if (metric.planar()) {
-            const auto index=[&](int x,int y) { return static_cast<uint32_t>((y%static_cast<int>(h)+h)%h)*w
-                +static_cast<uint32_t>((x%static_cast<int>(w)+w)%w); };
-            const int x=i%w,y=i/w;
-            for (int dy=-2;dy<=2;++dy) for (int dx=-2;dx<=2;++dx) mean+=elevations[index(x+dx,y+dy)]/25;
-            return mean;
-        }
         std::vector<grid::CellId> ring{i};
         for (int step=0;step<2;++step) {
             const auto reached=ring;
@@ -146,24 +134,5 @@ std::vector<columns::Cell> terrainon(uint32_t w,uint32_t h,double cell_m,double 
         }
     }
     return result;
-}
-} // namespace
-
-std::vector<columns::Cell> terrain(uint32_t w,uint32_t h,double cell_m,double dt,
-        const std::vector<double>& elevations,const std::vector<double>& ages,
-        const std::vector<uint32_t>& owners,const std::vector<transport::Displacement>& velocity,
-        double thermal_strength, double margin_width_m, double boundary_influence, double root_kg_m3,
-        double root_max_thickness_m, double root_delamination_width_m, const grid::TectonicGrid* grid) {
-    return terrainon(w,h,cell_m,dt,elevations,ages,owners,velocity,thermal_strength,margin_width_m,
-        boundary_influence,root_kg_m3,root_max_thickness_m,root_delamination_width_m,grid);
-}
-
-std::vector<columns::Cell> terrain(const grid::TectonicGrid& grid,double dt,
-        const std::vector<double>& elevations,const std::vector<double>& ages,
-        const std::vector<uint32_t>& owners,const std::vector<mesh::Vec3>& velocity_m,
-        double thermal_strength, double margin_width_m, double boundary_influence, double root_kg_m3,
-        double root_max_thickness_m, double root_delamination_width_m) {
-    return terrainon(0,0,0,dt,elevations,ages,owners,velocity_m,thermal_strength,margin_width_m,
-        boundary_influence,root_kg_m3,root_max_thickness_m,root_delamination_width_m,&grid);
 }
 }

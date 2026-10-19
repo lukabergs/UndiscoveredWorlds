@@ -27,6 +27,7 @@
 #include "simulations/geology/plate_tectonics/tectonic_thermal.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_initialization.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_deformation.hpp"
+#include "core/mesh/mesh_geometry.hpp"
 
 #include <algorithm>
 #include <array>
@@ -277,115 +278,119 @@ const char* tectonics::PhaseTimings::name(int phase) {
     return phase >= 0 && phase < count ? names[phase] : "";
 }
 
-tectonics::PlateState tectonics::PlateState::fromSeed(uint32_t seed) {
-    // The torus engine's plate motion: speed 1 toward the first draw of the plate's own sequence.
+tectonics::PlateState tectonics::PlateState::fromSeed(uint32_t seed, double spacing_m, double radius_m, double dt_s) {
+    // A seed plate's motion: speed 1 cell spacing per update, a rotation about a pole drawn
+    // from the plate's own sequence.
     SimpleRandom random(seed);
-    const float angle = 2.0f * PI * random.next_float();
+    const double u = std::min(static_cast<double>(random.next_double()), std::nextafter(1.0, 0.0));
+    const double v = std::min(static_cast<double>(random.next_double()), std::nextafter(1.0, 0.0));
     PlateState state;
-    state.direction_x = cosf(angle);
-    state.direction_y = sinf(angle);
-    state.speed = 1.0f;
+    state.rotation_rad_s = (spacing_m / (radius_m * dt_s)) * mesh::uniformpoint(u, v);
     return state;
 }
 
-void tectonics::PlateState::setVelocity(float x, float y) {
-    const float length = sqrtf(x * x + y * y);
-    if (!std::isfinite(length) || length <= 1.0e-6f) {
-        speed = 0.0f;
-        direction_x = 1.0f;
-        direction_y = 0.0f;
-    } else {
-        speed = length;
-        direction_x = x / length;
-        direction_y = y / length;
-    }
+namespace {
+// The cube's cells (6 N^2); 0 for an invalid N (makegrid throws first).
+size_t cubecells(const tectonics::scenario::Scenario& params) {
+    return params.sphere_face_cells >= 2 && params.sphere_face_cells <= 1024
+        ? 6 * static_cast<size_t>(params.sphere_face_cells) * params.sphere_face_cells : 0;
 }
+std::shared_ptr<const tectonics::grid::TectonicGrid> makegrid(const tectonics::scenario::Scenario& params) {
+    if (params.sphere_face_cells < 2 || params.sphere_face_cells > 1024)
+        throw runtime_error("sphere_face_cells must be 2 to 1024");
+    if (!std::isfinite(params.radius_km) || !(params.radius_km > 0))
+        throw runtime_error("radius_km must be finite and positive");
+    return tectonics::grid::TectonicGrid::cube(static_cast<int>(params.sphere_face_cells), params.radius_km);
+}
+tectonics::dynamics::MantleFlowShape mantleshape(const tectonics::scenario::Scenario& params) {
+    tectonics::dynamics::MantleFlowShape shape;
+    shape.wavelength_km = params.mantle_flow_wavelength_km;
+    shape.octaves = static_cast<int>(params.mantle_flow_octaves);
+    shape.wobble_rad = params.mantle_flow_wobble;
+    shape.drift_cycles = params.mantle_flow_drift;
+    shape.shear_ratio = params.mantle_flow_shear_ratio;
+    return shape;
+}
+} // namespace
 
 lithosphere::lithosphere(const tectonics::scenario::Scenario& params) noexcept(false)
     : scenario(params),
-      grid_(params.width >= 5 && params.height >= 5 && std::isfinite(params.world_width_km) &&
-                    params.world_width_km > 0
-                ? tectonics::grid::TectonicGrid::planar(params.width, params.height, params.world_width_km)
-                : nullptr),
-      hmap(static_cast<size_t>(params.width) * params.height, 0.0f),
-      prev_hmap(static_cast<size_t>(params.width) * params.height, 0.0f),
-      display_hmap(static_cast<size_t>(params.width) * params.height, 0.0f),
-      prev_display_hmap(static_cast<size_t>(params.width) * params.height, 0.0f),
-      initial_hmap(static_cast<size_t>(params.width) * params.height, 0.0f),
-      imap(static_cast<size_t>(params.width) * params.height, 0U),
-      prev_imap(static_cast<size_t>(params.width) * params.height, 0U),
-      amap(static_cast<size_t>(params.width) * params.height, 0U),
-      owner_crust_map(static_cast<size_t>(params.width) * params.height, 0.0f),
-      owner_material_map(static_cast<size_t>(params.width) * params.height,
+      grid_(makegrid(params)),
+      hmap(cubecells(params), 0.0f),
+      prev_hmap(cubecells(params), 0.0f),
+      display_hmap(cubecells(params), 0.0f),
+      prev_display_hmap(cubecells(params), 0.0f),
+      initial_hmap(cubecells(params), 0.0f),
+      imap(cubecells(params), 0U),
+      prev_imap(cubecells(params), 0U),
+      amap(cubecells(params), 0U),
+      owner_crust_map(cubecells(params), 0.0f),
+      owner_material_map(cubecells(params),
                          tectonics::material::to_index(tectonics::material::kDefaultType)),
       iter_count(0), time_origin_step(0), max_plates(params.plate_count), num_plates(0),
       erosion_strength(std::max(0.0f, params.erosion_strength)),
       sea_level_m(TopographyCodec::default_import_sea_level_m()),
       initial_ocean_depth_m(params.initial_ocean_depth_m),
       initial_land_relief_m(params.initial_land_relief_m),
-      convergence_map(static_cast<size_t>(params.width) * static_cast<size_t>(params.height), 0U),
-      divergence_map(static_cast<size_t>(params.width) * static_cast<size_t>(params.height), 0U),
-      shear_map(static_cast<size_t>(params.width) * static_cast<size_t>(params.height), 0U),
-      geologic_regime_map(static_cast<size_t>(params.width) * static_cast<size_t>(params.height),
+      convergence_map(cubecells(params), 0U),
+      divergence_map(cubecells(params), 0U),
+      shear_map(cubecells(params), 0U),
+      geologic_regime_map(cubecells(params),
                           static_cast<uint8_t>(tectonics::contract::GeologicRegime::Stable)),
-      crust_age_myr_map(static_cast<size_t>(params.width) * static_cast<size_t>(params.height), 0.0f),
-      crust_thickness_map(static_cast<size_t>(params.width) * static_cast<size_t>(params.height),
+      crust_age_myr_map(cubecells(params), 0.0f),
+      crust_thickness_map(cubecells(params),
                           0.0f),
-      crust_class_map(static_cast<size_t>(params.width) * static_cast<size_t>(params.height),
+      crust_class_map(cubecells(params),
                       static_cast<uint8_t>(tectonics::contract::CrustClass::None)),
-      uplift_tendency_map(static_cast<size_t>(params.width) * static_cast<size_t>(params.height),
+      uplift_tendency_map(cubecells(params),
                           0.0f),
-      rock_uplift_rate_map(static_cast<size_t>(params.width) * static_cast<size_t>(params.height),
+      rock_uplift_rate_map(cubecells(params),
                            0.0f),
-      shortening_map(static_cast<size_t>(params.width) * static_cast<size_t>(params.height), 0.0f),
-      shortening_direction_map(static_cast<size_t>(params.width) * static_cast<size_t>(params.height), 0.0f),
+      shortening_map(cubecells(params), 0.0f),
+      shortening_direction_map(cubecells(params), 0.0f),
       subsidence_tendency_map(
-          static_cast<size_t>(params.width) * static_cast<size_t>(params.height), 0.0f),
+          cubecells(params), 0.0f),
       accumulated_strain_map(
-          static_cast<size_t>(params.width) * static_cast<size_t>(params.height), 0.0f),
-      boundary_type_map(static_cast<size_t>(params.width) * static_cast<size_t>(params.height),
+          cubecells(params), 0.0f),
+      boundary_type_map(cubecells(params),
                         static_cast<uint8_t>(tectonics::contract::BoundaryType::None)),
       boundary_distance_map(
-          static_cast<size_t>(params.width) * static_cast<size_t>(params.height), 0U),
+          cubecells(params), 0U),
       boundary_segment_id_map(
-          static_cast<size_t>(params.width) * static_cast<size_t>(params.height),
+          cubecells(params),
           tectonics::contract::kNoBoundaryId),
       nearest_boundary_id_map(
-          static_cast<size_t>(params.width) * static_cast<size_t>(params.height),
+          cubecells(params),
           tectonics::contract::kNoBoundaryId),
       deforming_region_id_map(
-          static_cast<size_t>(params.width) * static_cast<size_t>(params.height),
+          cubecells(params),
           tectonics::contract::kNoDeformingRegionId),
       deforming_region_type_map(
-          static_cast<size_t>(params.width) * static_cast<size_t>(params.height),
+          cubecells(params),
           static_cast<uint8_t>(tectonics::contract::DeformingRegionType::None)),
       deformation_rate_map(
-          static_cast<size_t>(params.width) * static_cast<size_t>(params.height), 0.0f),
+          cubecells(params), 0.0f),
       deformation_velocity_x_map(
-          static_cast<size_t>(params.width) * static_cast<size_t>(params.height), 0.0f),
+          cubecells(params), 0.0f),
       deformation_velocity_y_map(
-          static_cast<size_t>(params.width) * static_cast<size_t>(params.height), 0.0f),
+          cubecells(params), 0.0f),
       junction_rift_influence_map(
-          static_cast<size_t>(params.width) * static_cast<size_t>(params.height), 0.0f),
+          cubecells(params), 0.0f),
       junction_transform_influence_map(
-          static_cast<size_t>(params.width) * static_cast<size_t>(params.height), 0.0f),
+          cubecells(params), 0.0f),
       junction_subduction_influence_map(
-          static_cast<size_t>(params.width) * static_cast<size_t>(params.height), 0.0f),
+          cubecells(params), 0.0f),
       surface_crust_type_map(
-          static_cast<size_t>(params.width) * static_cast<size_t>(params.height),
+          cubecells(params),
           static_cast<uint8_t>(tectonics::contract::CrustClass::Oceanic)),
-      material_map(static_cast<size_t>(params.width) * static_cast<size_t>(params.height),
+      material_map(cubecells(params),
                    tectonics::material::to_index(tectonics::material::kDefaultType)),
       continental_lock_map(
-          static_cast<size_t>(params.width) * static_cast<size_t>(params.height), 0U),
-      rift_tension_x_map(static_cast<size_t>(params.width) * static_cast<size_t>(params.height), 0.0f),
-      rift_tension_y_map(static_cast<size_t>(params.width) * static_cast<size_t>(params.height), 0.0f),
-      rift_tension_map(static_cast<size_t>(params.width) * static_cast<size_t>(params.height), 0.0f),
+          cubecells(params), 0U),
+      rift_tension_x_map(cubecells(params), 0.0f),
+      rift_tension_y_map(cubecells(params), 0.0f),
+      rift_tension_map(cubecells(params), 0.0f),
       _randsource(params.seed), _steps(0) {
-    if (params.width < 5 || params.height < 5) {
-        throw runtime_error("Width and height should be >=5");
-    }
-    tectonics::grid::requireplanar(grid_.get(), "lithosphere");
     if (!std::isfinite(params.delta_time_myr) || params.delta_time_myr <= 0.0) {
         throw runtime_error("delta_time_myr must be finite and > 0");
     }
@@ -397,10 +402,11 @@ lithosphere::lithosphere(const tectonics::scenario::Scenario& params) noexcept(f
             static_cast<double>(std::numeric_limits<int>::max() - 10000)) {
         throw runtime_error("evolution_duration_myr must be finite, positive and fit the update counter");
     }
-    if (!std::isfinite(params.world_width_km) || params.world_width_km <= 0.0 ||
-        !std::isfinite(params.mantle_flow_speed_cm_yr) || params.mantle_flow_speed_cm_yr < 0.0) {
-        throw runtime_error("world_width_km must be positive and mantle_flow_speed_cm_yr nonnegative and finite");
+    if (!std::isfinite(params.mantle_flow_speed_cm_yr) || params.mantle_flow_speed_cm_yr < 0.0) {
+        throw runtime_error("mantle_flow_speed_cm_yr must be nonnegative and finite");
     }
+    mantle_flow = std::make_shared<const tectonics::dynamics::SphereMantleFlow>(params.seed,
+        params.mantle_flow_speed_cm_yr, mantleshape(params), params.radius_km);
     tectonics::ocean_relief::validate({params.ocean_crust_variation_m, params.ocean_noise_wavelength_km,
         params.seamount_crust_m,params.seamount_radius_km,params.seamount_spacing_km,params.seamount_roughness});
     if (!std::isfinite(params.submarine_erosion_ratio) || params.submarine_erosion_ratio<0 || params.submarine_erosion_ratio>1)
@@ -548,7 +554,9 @@ void lithosphere::createPlates() {
         // Each plate draws its motion from a seed of the world's sequence; it records the
         // crust and material of its cells.
         plates.assign(num_plates, {});
-        for (uint32_t i = 0; i < num_plates; ++i) plates[i] = tectonics::PlateState::fromSeed(_randsource.next());
+        const double dt_s = scenario.delta_time_myr * tectonics::dynamics::kSecondsPerMyr;
+        for (uint32_t i = 0; i < num_plates; ++i)
+            plates[i] = tectonics::PlateState::fromSeed(_randsource.next(), grid_->cellspacing_m(), grid_->radius_m(), dt_s);
         std::vector<uint32_t> occupied(num_plates, 0U), continental(num_plates, 0U);
         for (uint32_t k = 0; k < map_area; ++k) {
             owner_crust_map[k] = hmap[k];
@@ -829,46 +837,49 @@ void lithosphere::updateTectonicProvenance() {
     for (uint32_t index = 0; index < cellCount(); ++index)
         if (imap[index] < num_plates) plates[imap[index]].area_m2 += grid_->area_m2(index);
     const auto& stable_ids = topology_model.diagnostics().stable_ids;
+    plate_rotation_update = plateRotations();
     for (uint32_t plate_index = 0; plate_index < num_plates; ++plate_index) {
         tectonics::PlateState& state = plates[plate_index];
         state.centroid = centroids[plate_index];
         state.stable_id = plate_index < stable_ids.size() ? stable_ids[plate_index] : plate_index;
+        // Until contract schema 8 (E5): the velocity at the centroid (east, north) in cell
+        // spacings per update, the spin about it in radians per update, the centroid as
+        // longitude and latitude in degrees.
         tectonics::contract::PlateKinematics& kinematics = plate_kinematics[plate_index];
-        kinematics.unit_velocity_x = state.direction_x;
-        kinematics.unit_velocity_y = state.direction_y;
-        kinematics.linear_velocity_x = state.velocityX();
-        kinematics.linear_velocity_y = state.velocityY();
-        // Planar translations only: no rotation about a plate centre (the torus engine's 0).
-        kinematics.angular_velocity = 0.0f;
-        // The area centroid in cell coordinates (the torus engine published the mass centre
-        // of its per-plate raster).
-        kinematics.mass_center_x = static_cast<float>(state.centroid.x);
-        kinematics.mass_center_y = static_cast<float>(state.centroid.y);
+        const auto velocity = tectonics::boundary_cube::velocity(*grid_, plate_rotation_update.data(), plate_index,
+            num_plates, state.centroid);
+        const float speed = std::hypot(velocity[0], velocity[1]);
+        kinematics.unit_velocity_x = speed > 0 ? velocity[0] / speed : 1.0f;
+        kinematics.unit_velocity_y = speed > 0 ? velocity[1] / speed : 0.0f;
+        kinematics.linear_velocity_x = velocity[0];
+        kinematics.linear_velocity_y = velocity[1];
+        kinematics.angular_velocity = static_cast<float>(mesh::dot(plate_rotation_update[plate_index], state.centroid));
+        const auto centre = tectonics::boundary_cube::encodecentroid(state.centroid);
+        kinematics.mass_center_x = centre[0];
+        kinematics.mass_center_y = centre[1];
     }
 
+    // Velocities in cell spacings per update to cm/yr: cellspacing_m / dt.
     const tectonics::provenance::Inputs inputs{
-        grid_->width(),
-        grid_->height(),
         display_hmap.data(),
         imap.data(),
-        plate_kinematics.data(),
-        static_cast<uint32_t>(plate_kinematics.size()),
+        num_plates,
         crust_class_map.data(),
         motion_diagnostics.enabled
-            ? scenario.world_width_km / (grid_->width() * scenario.delta_time_myr * 10.0)
+            ? grid_->cellspacing_m() * 100.0 / (scenario.delta_time_myr * 1e6)
             : 0.0,
         grid_.get(),
+        plate_rotation_update.data(),
     };
     tectonics::provenance::compute_maps(inputs, convergence_map.data(), divergence_map.data(),
                                      shear_map.data(), geologic_regime_map.data());
 }
 
 void lithosphere::updateBoundaryDistanceMap() {
-    const uint32_t width = grid_->width();
-    const uint32_t height = grid_->height();
     const uint32_t map_area = cellCount();
+    // Farther than any cell can be from a boundary (half a great circle is 2 N steps).
     const uint16_t fallback_distance = static_cast<uint16_t>(
-        std::min<uint32_t>(std::numeric_limits<uint16_t>::max(), width + height));
+        std::min<uint32_t>(std::numeric_limits<uint16_t>::max(), 6U * static_cast<uint32_t>(grid_->facecells())));
 
     std::fill(boundary_distance_map.begin(), boundary_distance_map.end(), fallback_distance);
     std::fill(nearest_boundary_id_map.begin(), nearest_boundary_id_map.end(),
@@ -910,14 +921,10 @@ void lithosphere::updateBoundaryDistanceMap() {
 }
 
 void lithosphere::updateBoundaryGraphMaps() {
-    const uint32_t width = grid_->width();
-    const uint32_t height = grid_->height();
     const uint32_t map_area = cellCount();
     const std::vector<uint8_t> raw_geologic_regime = geologic_regime_map;
 
     const tectonics::boundary_graph::Inputs inputs{
-        width,
-        height,
         imap.data(),
         convergence_map.data(),
         divergence_map.data(),
@@ -1013,15 +1020,13 @@ void lithosphere::updateBoundaryGraphMaps() {
 
 void lithosphere::updateTectonicJunctions() {
     const tectonics::tectonic_junctions::Inputs inputs{
-        grid_->width(),
-        grid_->height(),
         imap.data(),
         boundary_segment_id_map.data(),
         boundary_segments.data(),
         static_cast<uint32_t>(boundary_segments.size()),
-        plate_kinematics.data(),
-        static_cast<uint32_t>(plate_kinematics.size()),
+        static_cast<uint32_t>(plate_rotation_update.size()),
         grid_.get(),
+        plate_rotation_update.data(),
     };
     tectonics::tectonic_junctions::Outputs outputs = tectonics::tectonic_junctions::build(inputs);
     tectonic_junctions = std::move(outputs.junctions);
@@ -1030,8 +1035,6 @@ void lithosphere::updateTectonicJunctions() {
 void lithosphere::updateTectonicJunctionCouplingMaps() {
     const uint32_t map_area = cellCount();
     const tectonics::tectonic_junction_coupling::Inputs inputs{
-        grid_->width(),
-        grid_->height(),
         tectonic_junctions.data(),
         static_cast<uint32_t>(tectonic_junctions.size()),
         grid_.get(),
@@ -1066,8 +1069,6 @@ void lithosphere::updateTectonicJunctionCouplingMaps() {
 
 void lithosphere::updateDeformingRegionMaps() {
     const tectonics::deforming_regions::Inputs inputs{
-        grid_->width(),
-        grid_->height(),
         imap.data(),
         crust_class_map.data(),
         convergence_map.data(),
@@ -1079,9 +1080,9 @@ void lithosphere::updateDeformingRegionMaps() {
         nearest_boundary_id_map.data(),
         boundary_segments.data(),
         static_cast<uint32_t>(boundary_segments.size()),
-        plate_kinematics.data(),
-        static_cast<uint32_t>(plate_kinematics.size()),
+        static_cast<uint32_t>(plate_rotation_update.size()),
         grid_.get(),
+        plate_rotation_update.data(),
     };
     tectonics::deforming_regions::Outputs outputs =
         tectonics::deforming_regions::build(inputs);
@@ -1393,28 +1394,24 @@ void lithosphere::seedInitialTopography(float ocean_coverage, int32_t sea_level_
     std::vector<float> raw_height(map_area);
     std::vector<uint8_t> is_land(map_area, 0);
 
-    for (uint32_t y = 0; y < grid_->height(); ++y) {
-        for (uint32_t x = 0; x < grid_->width(); ++x) {
-            const uint32_t index = y * grid_->width() + x;
-            const float warp_x = sample_toroidal_noise(static_cast<float>(x), static_cast<float>(y),
-                                                       TorusSize{grid_->width(), grid_->height()}, warp_x_noise) *
-                                 18.0f;
-            const float warp_y = sample_toroidal_noise(static_cast<float>(x), static_cast<float>(y),
-                                                       TorusSize{grid_->width(), grid_->height()}, warp_y_noise) *
-                                 18.0f;
-            const float sample_x = static_cast<float>(x) + warp_x;
-            const float sample_y = static_cast<float>(y) + warp_y;
-            warped_x[index] = sample_x;
-            warped_y[index] = sample_y;
-            const float macro = sample_toroidal_noise(sample_x, sample_y, TorusSize{grid_->width(), grid_->height()},
-                                                      continent_macro_noise);
-            const float detail = sample_toroidal_noise(sample_x * 1.15f, sample_y * 1.15f,
-                                                       TorusSize{grid_->width(), grid_->height()}, continent_detail_noise);
-            const float coast_breakup = sample_toroidal_noise(sample_x * 1.55f, sample_y * 1.55f,
-                                                              TorusSize{grid_->width(), grid_->height()},
-                                                              coast_breakup_noise);
-            continentality[index] = macro * 0.70f + detail * 0.22f + coast_breakup * 0.08f;
-        }
+    // E4: replace. The torus noise read at each cell's position on the 4N x 2N lat-lon proxy
+    // (its column and row as the torus' x and y).
+    const tectonics::grid::LatLonProxy proxy(*grid_);
+    const TorusSize torus{proxy.width(), proxy.height()};
+    const auto proxy_x = [&](uint32_t index) { return static_cast<float>(proxy.cellposition(index)[0] - 0.5); };
+    const auto proxy_y = [&](uint32_t index) { return static_cast<float>(proxy.cellposition(index)[1] - 0.5); };
+    for (uint32_t index = 0; index < map_area; ++index) {
+        const float x = proxy_x(index), y = proxy_y(index);
+        const float warp_x = sample_toroidal_noise(x, y, torus, warp_x_noise) * 18.0f;
+        const float warp_y = sample_toroidal_noise(x, y, torus, warp_y_noise) * 18.0f;
+        const float sample_x = x + warp_x;
+        const float sample_y = y + warp_y;
+        warped_x[index] = sample_x;
+        warped_y[index] = sample_y;
+        const float macro = sample_toroidal_noise(sample_x, sample_y, torus, continent_macro_noise);
+        const float detail = sample_toroidal_noise(sample_x * 1.15f, sample_y * 1.15f, torus, continent_detail_noise);
+        const float coast_breakup = sample_toroidal_noise(sample_x * 1.55f, sample_y * 1.55f, torus, coast_breakup_noise);
+        continentality[index] = macro * 0.70f + detail * 0.22f + coast_breakup * 0.08f;
     }
 
     const float continent_threshold = grid_->quantile(continentality, ocean_coverage);
@@ -1437,32 +1434,31 @@ void lithosphere::seedInitialTopography(float ocean_coverage, int32_t sea_level_
     float raw_ocean_min = FLT_MAX;
     float raw_ocean_max = -FLT_MAX;
 
-    for (uint32_t y = 0; y < grid_->height(); ++y) {
-        for (uint32_t x = 0; x < grid_->width(); ++x) {
-            const uint32_t index = y * grid_->width() + x;
+    for (uint32_t index = 0; index < map_area; ++index) {
+        {
             const float sample_x = warped_x[index];
             const float sample_y = warped_y[index];
             const float detail = sample_toroidal_noise(sample_x * 1.15f, sample_y * 1.15f,
-                                                       TorusSize{grid_->width(), grid_->height()}, continent_detail_noise);
+                                                       torus, continent_detail_noise);
             const float shelf = sample_toroidal_noise(sample_x * 1.4f, sample_y * 1.4f,
-                                                      TorusSize{grid_->width(), grid_->height()}, shelf_noise);
+                                                      torus, shelf_noise);
             const float sea_base = sample_toroidal_noise(sample_x * 1.15f, sample_y * 1.15f,
-                                                         TorusSize{grid_->width(), grid_->height()}, sea_base_noise);
+                                                         torus, sea_base_noise);
             const float sea_detail = sample_toroidal_noise(sample_x * 2.3f, sample_y * 2.3f,
-                                                           TorusSize{grid_->width(), grid_->height()}, sea_detail_noise);
+                                                           torus, sea_detail_noise);
             const float sea_micro = sample_toroidal_noise(sample_x * 4.8f, sample_y * 4.8f,
-                                                          TorusSize{grid_->width(), grid_->height()}, sea_micro_noise);
+                                                          torus, sea_micro_noise);
             const float land_detail = sample_toroidal_noise(sample_x * 1.55f, sample_y * 1.55f,
-                                                            TorusSize{grid_->width(), grid_->height()}, land_noise);
+                                                            torus, land_noise);
             const float foothills = sample_toroidal_noise(sample_x * 2.15f, sample_y * 2.15f,
-                                                          TorusSize{grid_->width(), grid_->height()}, foothill_noise);
+                                                          torus, foothill_noise);
             const float mountains =
                 1.0f - std::abs(sample_toroidal_noise(sample_x * 3.05f, sample_y * 3.05f,
-                                                      TorusSize{grid_->width(), grid_->height()}, mountain_noise));
+                                                      torus, mountain_noise));
             const float ridge = 1.0f - std::abs(sample_toroidal_noise(sample_x * 2.1f, sample_y * 2.1f,
-                                                                      TorusSize{grid_->width(), grid_->height()}, ridge_noise));
+                                                                      torus, ridge_noise));
             const float trench = 1.0f - std::abs(sample_toroidal_noise(sample_x * 2.35f, sample_y * 2.35f,
-                                                                       TorusSize{grid_->width(), grid_->height()}, trench_noise));
+                                                                       torus, trench_noise));
             const float distance_to_coast = continentality[index] - ocean_edge(index);
             const float coastal_transition =
                 smoothstep(0.010f, 0.110f, std::abs(distance_to_coast));
@@ -1648,23 +1644,19 @@ void lithosphere::seedMaterialMap() {
     const FractalNoiseConfig material_detail_noise =
         make_noise_config(material_rng, 6.0f, 0.61f, 0.75f, 2.4f);
 
-    for (uint32_t y = 0; y < grid_->height(); ++y) {
-        for (uint32_t x = 0; x < grid_->width(); ++x) {
-            const uint32_t index = y * grid_->width() + x;
-            const float warp_x =
-                static_cast<float>(x) +
-                sample_toroidal_noise(static_cast<float>(x), static_cast<float>(y),
-                                      TorusSize{grid_->width(), grid_->height()}, warp_x_noise) *
-                    2.4f;
-            const float warp_y =
-                static_cast<float>(y) +
-                sample_toroidal_noise(static_cast<float>(x), static_cast<float>(y),
-                                      TorusSize{grid_->width(), grid_->height()}, warp_y_noise) *
-                    2.4f;
+    // E4: replace. The torus noise at each cell's 4N x 2N lat-lon proxy position.
+    const tectonics::grid::LatLonProxy proxy(*grid_);
+    const TorusSize torus{proxy.width(), proxy.height()};
+    for (uint32_t index = 0; index < map_area; ++index) {
+        {
+            const float x = static_cast<float>(proxy.cellposition(index)[0] - 0.5);
+            const float y = static_cast<float>(proxy.cellposition(index)[1] - 0.5);
+            const float warp_x = x + sample_toroidal_noise(x, y, torus, warp_x_noise) * 2.4f;
+            const float warp_y = y + sample_toroidal_noise(x, y, torus, warp_y_noise) * 2.4f;
             const float macro =
-                sample_toroidal_noise(warp_x, warp_y, TorusSize{grid_->width(), grid_->height()}, material_macro_noise);
+                sample_toroidal_noise(warp_x, warp_y, torus, material_macro_noise);
             const float detail =
-                sample_toroidal_noise(warp_x * 1.8f, warp_y * 1.8f, TorusSize{grid_->width(), grid_->height()},
+                sample_toroidal_noise(warp_x * 1.8f, warp_y * 1.8f, torus,
                                       material_detail_noise);
             const float composite = 0.68f * macro + 0.32f * detail;
 
@@ -1742,8 +1734,6 @@ void lithosphere::seedInitialCrustAges() {
         }
     }
 
-    const uint32_t world_width = grid_->width();
-    const uint32_t world_height = grid_->height();
     while (!frontier.empty()) {
         const uint32_t current = frontier.front();
         frontier.pop_front();
@@ -1769,9 +1759,13 @@ void lithosphere::seedInitialCrustAges() {
     uint32_t max_age_steps = 0U;
     std::vector<uint32_t> timestamps(map_area, 0U);
 
-    for (uint32_t y = 0; y < world_height; ++y) {
-        for (uint32_t x = 0; x < world_width; ++x) {
-            const uint32_t index = y * grid_->width() + x;
+    // E4: replace. The torus noise at each cell's 4N x 2N lat-lon proxy position.
+    const tectonics::grid::LatLonProxy proxy(*grid_);
+    const TorusSize torus{proxy.width(), proxy.height()};
+    for (uint32_t index = 0; index < map_area; ++index) {
+        {
+            const float x = static_cast<float>(proxy.cellposition(index)[0] - 0.5);
+            const float y = static_cast<float>(proxy.cellposition(index)[1] - 0.5);
             if (imap[index] >= num_plates || hmap[index] <= FLT_EPSILON) {
                 continue;
             }
@@ -1780,27 +1774,16 @@ void lithosphere::seedInitialCrustAges() {
             float age_myr = 0.0f;
             if (crust_class == CrustClass::Oceanic) {
                 const int32_t distance = std::max(0, ocean_distance[index]);
-                const float macro =
-                    sample_toroidal_noise(static_cast<float>(x), static_cast<float>(y),
-                                          TorusSize{grid_->width(), grid_->height()}, ocean_age_noise);
-                const float detail =
-                    sample_toroidal_noise(static_cast<float>(x) * 1.8f,
-                                          static_cast<float>(y) * 1.8f, TorusSize{grid_->width(), grid_->height()},
-                                          ocean_detail_noise);
+                const float macro = sample_toroidal_noise(x, y, torus, ocean_age_noise);
+                const float detail = sample_toroidal_noise(x * 1.8f, y * 1.8f, torus, ocean_detail_noise);
                 age_myr = static_cast<float>(distance) * 0.55f;
                 if (distance > 0) {
                     age_myr += 2.0f * macro + 1.5f * detail;
                 }
                 age_myr = std::max(0.0f, std::min(140.0f, age_myr));
             } else {
-                const float macro =
-                    0.5f + 0.5f * sample_toroidal_noise(static_cast<float>(x) * 0.75f,
-                                                        static_cast<float>(y) * 0.75f,
-                                                        TorusSize{grid_->width(), grid_->height()}, continental_macro_noise);
-                const float detail =
-                    0.5f + 0.5f * sample_toroidal_noise(static_cast<float>(x) * 1.7f,
-                                                        static_cast<float>(y) * 1.7f,
-                                                        TorusSize{grid_->width(), grid_->height()}, continental_detail_noise);
+                const float macro = 0.5f + 0.5f * sample_toroidal_noise(x * 0.75f, y * 0.75f, torus, continental_macro_noise);
+                const float detail = 0.5f + 0.5f * sample_toroidal_noise(x * 1.7f, y * 1.7f, torus, continental_detail_noise);
                 const float normalized = clamp_unit(0.68f * macro + 0.32f * detail);
                 const float min_age = crust_class == CrustClass::Transitional ? 55.0f : 110.0f;
                 const float span = crust_class == CrustClass::Transitional ? 55.0f : 120.0f;
@@ -1819,9 +1802,8 @@ void lithosphere::seedInitialCrustAges() {
         time_origin_step = iter_count;
     }
 
-    for (uint32_t y = 0; y < world_height; ++y) {
-        for (uint32_t x = 0; x < world_width; ++x) {
-            const uint32_t index = y * grid_->width() + x;
+    for (uint32_t index = 0; index < map_area; ++index) {
+        {
             const uint32_t owner = imap[index];
             if (owner >= num_plates || hmap[index] <= FLT_EPSILON) {
                 amap[index] = 0U;
@@ -1952,16 +1934,37 @@ void lithosphere::removeEmptyPlates() {
     }
 }
 
+std::vector<tectonics::dynamics::MantleSample> lithosphere::mantleSamples(double time_myr) const {
+    if (mantle_cache_time == time_myr && mantle_cache.size() == cellCount()) return mantle_cache;
+    const double radius = grid_->radius_m();
+    std::vector<tectonics::dynamics::MantleSample> samples(cellCount());
+    for (uint32_t c = 0; c < cellCount(); ++c) samples[c] = mantle_flow->at(grid_->position(c), time_myr, radius);
+    mantle_cache = samples;
+    mantle_cache_time = time_myr;
+    return samples;
+}
+
+std::vector<mesh::Vec3> lithosphere::plateRotations() const {
+    const double dt_s = scenario.delta_time_myr * tectonics::dynamics::kSecondsPerMyr;
+    std::vector<mesh::Vec3> rotation(num_plates);
+    for (uint32_t p = 0; p < num_plates; ++p) rotation[p] = dt_s * plates[p].rotation_rad_s;
+    return rotation;
+}
+
+std::vector<mesh::Vec3> lithosphere::rigidDisplacement() const {
+    tectonics::sphere_transport::Motion motion;
+    motion.rotation = plateRotations();
+    motion.plate.assign(imap.begin(), imap.end());
+    return tectonics::columns::Model::displacement(*grid_, motion);
+}
+
 void lithosphere::solvePlateMotion() {
     using namespace tectonics::dynamics;
     PhaseTimer timer(phase_timings, Phase::motion);
-    const uint32_t width = grid_->width(), height = grid_->height();
-    const bool planar = grid_->kind() == tectonics::grid::TectonicGrid::Kind::planar;
-    const double cell_m = grid_->cell_m();
+    const double radius = grid_->radius_m();
     const double dt_s = scenario.delta_time_myr * kSecondsPerMyr;
     const std::vector<tectonics::grid::Edge>& edges = grid_->edges();
-    std::vector<tectonics::dynamics::Plate> bodies(num_plates);
-    std::vector<Contact> contacts;
+    std::vector<SphereContact> contacts;
     std::vector<size_t> contact_faces; // edge ids
     std::map<std::tuple<uint32_t,uint32_t,uint32_t>,std::array<double,3>> activity;
     for (size_t face=0;face<motion_history.size() && face<edges.size();++face) {
@@ -1978,49 +1981,39 @@ void lithosphere::solvePlateMotion() {
         for (const auto& c:column_model.cells()) pressure.push_back(tectonics::columns::mountain_force_n_m(c,scenario.sediment_load_feedback,
             scenario.continental_root_kg_m3));
     }
-    // Plate areas and their area-mean mantle flow.
-    for (uint32_t index = 0; index < cellCount(); ++index) {
-        const uint32_t owner = imap[index];
-        if (owner >= num_plates) continue;
-        const uint32_t x = index % width, y = index / width;
-        auto& body = bodies[owner];
-        const auto flow = mantle_flow((x + .5) / width, (y + .5) / height,
-            getTimeMyr(), scenario.seed, scenario.mantle_flow_speed_cm_yr);
-        const double area = grid_->area_m2(index);
-        body.area_m2 += area;
-        // The scaffold keeps the torus' product order (flow x cell x cell).
-        body.mantle_velocity_m_s.x += planar ? flow.x * cell_m * cell_m : flow.x * area;
-        body.mantle_velocity_m_s.y += planar ? flow.y * cell_m * cell_m : flow.y * area;
-    }
-    // One contact per edge between two plates.
+    // Plate drag moments and their mantle forcing.
+    const auto mantle = mantleSamples(getTimeMyr());
+    const std::vector<SpherePlate> bodies = sphere_plates(*grid_, imap, num_plates, mantle);
+    for (const auto& body : bodies)
+        if (body.area_m2 <= 0.0) throw runtime_error("Force balance found an empty plate owner");
+    // One contact per edge between two plates, its normal from the owner of edge.a.
     for (size_t face = 0; face < edges.size(); ++face) {
         const tectonics::grid::Edge& edge = edges[face];
         const uint32_t index = edge.a, neighbor = edge.b, owner = imap[index], other = imap[neighbor];
         if (owner >= num_plates || other == owner || other >= num_plates) continue;
-        const float closing_x = plates[owner].velocityX() - plates[other].velocityX();
-        const float closing_y = plates[owner].velocityY() - plates[other].velocityY();
-        contacts.push_back({owner, other, {edge.normal.x, edge.normal.y},
-            edge.length_m, is_continental_material(material_map[index]),
-            is_continental_material(material_map[neighbor]),
-            (iter_count - std::min(iter_count, amap[index])) * scenario.delta_time_myr,
-            (iter_count - std::min(iter_count, amap[neighbor])) * scenario.delta_time_myr,
-            (closing_x * edge.normal.x + closing_y * edge.normal.y) * edge.length_m / dt_s});
-        contacts.back().activation_speed_m_s = scenario.boundary_force_ramp_cm_yr / 3.15576e9;
+        contacts.push_back(sphere_contact(*grid_, edge, imap));
+        SphereContact& contact = contacts.back();
+        contact.continental_a = is_continental_material(material_map[index]);
+        contact.continental_b = is_continental_material(material_map[neighbor]);
+        contact.age_a_myr = (iter_count - std::min(iter_count, amap[index])) * scenario.delta_time_myr;
+        contact.age_b_myr = (iter_count - std::min(iter_count, amap[neighbor])) * scenario.delta_time_myr;
+        contact.closing_m_s = sphere_closing_m_s(contact, plates[owner].rotation_rad_s, plates[other].rotation_rad_s, radius);
+        contact.activation_speed_m_s = scenario.boundary_force_ramp_cm_yr / 3.15576e9;
         contact_faces.push_back(face);
         if (scenario.consistent_motion) {
             const auto& stable=topology_model.diagnostics().stable_ids;
             const auto found=subduction_polarity.find(std::minmax(stable[owner],stable[other]));
             if (found!=subduction_polarity.end())
-                contacts.back().descending_side=found->second==stable[owner]?0:1;
+                contact.descending_side=found->second==stable[owner]?0:1;
             else {
                 const auto& ca=column_model.cells()[index];
                 const auto& cb=column_model.cells()[neighbor];
                 const double aa=ca.ocean>0?ca.oceanic_age_volume/ca.ocean:0;
                 const double ab=cb.ocean>0?cb.oceanic_age_volume/cb.ocean:0;
-                contacts.back().descending_side=aa>=ab?0:1;
-                if (!contacts.back().continental_a && !contacts.back().continental_b)
+                contact.descending_side=aa>=ab?0:1;
+                if (!contact.continental_a && !contact.continental_b)
                     subduction_polarity.emplace(std::minmax(stable[owner],stable[other]),
-                        contacts.back().descending_side==0?stable[owner]:stable[other]);
+                        contact.descending_side==0?stable[owner]:stable[other]);
             }
         }
         {
@@ -2030,57 +2023,58 @@ void lithosphere::solvePlateMotion() {
                     return c.ocean>0?std::max(0.0,
                         (c.oceanic_age_volume-c.thermal_rejuvenation_volume)/c.ocean):0.0;
                 };
-                contacts.back().age_a_myr=thermal_age(cells[index]);
-                contacts.back().age_b_myr=thermal_age(cells[neighbor]);
-                contacts.back().slab_pull_scale=scenario.thermal_subsidence_strength;
+                contact.age_a_myr=thermal_age(cells[index]);
+                contact.age_b_myr=thermal_age(cells[neighbor]);
+                contact.slab_pull_scale=scenario.thermal_subsidence_strength;
             }
-            contacts.back().mountain_force_n_m = .5 * (tectonics::columns::mountain_force_n_m(cells[index],scenario.sediment_load_feedback,
+            contact.mountain_force_n_m = .5 * (tectonics::columns::mountain_force_n_m(cells[index],scenario.sediment_load_feedback,
                     scenario.continental_root_kg_m3)
                 + tectonics::columns::mountain_force_n_m(cells[neighbor],scenario.sediment_load_feedback,
                     scenario.continental_root_kg_m3));
+            // The inland strips walk away from the contact on each side: from edge.a
+            // opposite the edge's direction, from edge.b straight on in its own frame.
             if (!pressure.empty())
-                contacts.back().mountain_force_n_m=.5*(inland_pressure(width,height,cell_m,pressure_owners,pressure,
-                    index,edge.axis,-1,scenario.mountain_force_range_km*1000,grid_.get())
-                    +inland_pressure(width,height,cell_m,pressure_owners,pressure,
-                    neighbor,edge.axis,1,scenario.mountain_force_range_km*1000,grid_.get()));
+                contact.mountain_force_n_m=.5*(inland_pressure(*grid_,pressure_owners,pressure,
+                    index,tectonics::grid::opposite(edge.direction),scenario.mountain_force_range_km*1000)
+                    +inland_pressure(*grid_,pressure_owners,pressure,
+                    neighbor,grid_->ahead(index,edge.direction).direction,scenario.mountain_force_range_km*1000));
             // The same excess crustal GPE can resist compression at an
             // active continental margin. Previously the force solver
             // discarded this pressure whenever the other side was oceanic.
-            if (!contacts.back().continental_a || !contacts.back().continental_b)
-                contacts.back().mountain_force_n_m *= (contacts.back().continental_a || contacts.back().continental_b)
+            if (!contact.continental_a || !contact.continental_b)
+                contact.mountain_force_n_m *= (contact.continental_a || contact.continental_b)
                     ? scenario.coastal_gpe_strength : 0;
         }
     }
-    for (auto& body : bodies) {
-        if (body.area_m2 <= 0.0) throw runtime_error("Force balance found an empty plate owner");
-        body.mantle_velocity_m_s.x /= body.area_m2;
-        body.mantle_velocity_m_s.y /= body.area_m2;
-    }
-    if (scenario.consistent_motion) for (size_t k=0;k<contacts.size();++k) {
-        auto& edge=contacts[k];
-        const auto& stable=topology_model.diagnostics().stable_ids;
-        const uint32_t a=stable[edge.a],b=stable[edge.b],axis=edges[contact_faces[k]].axis;
-        const auto found=activity.find({a,b,axis});
-        if (contact_faces[k]<motion_history.size() && motion_history[contact_faces[k]].a==a && motion_history[contact_faces[k]].b==b) {
-            edge.ridge_activity=motion_history[contact_faces[k]].ridge;
-            edge.slab_activity=motion_history[contact_faces[k]].slab;
-        } else if (found!=activity.end()) {
-            edge.ridge_activity=found->second[0]/found->second[2];
-            edge.slab_activity=found->second[1]/found->second[2];
-        } else {
-            // Initial activity follows prescribed mantle forcing, not random
-            // constructor velocities. Newly exposed faces inherit their pair.
-            const auto va=bodies[edge.a].mantle_velocity_m_s,vb=bodies[edge.b].mantle_velocity_m_s;
-            const double closing=(va.x-vb.x)*edge.normal.x+(va.y-vb.y)*edge.normal.y;
-            const double strength=std::abs(closing)/std::hypot(closing,edge.activation_speed_m_s);
-            edge.ridge_activity=closing<0?strength:0;edge.slab_activity=closing>0?strength:0;
+    if (scenario.consistent_motion) {
+        // Initial activity follows the prescribed mantle forcing, not the seeded rotations:
+        // the closing of each plate's motion under its basal drag alone.
+        std::vector<Vec3> free(num_plates);
+        for (uint32_t p = 0; p < num_plates; ++p) free[p] = drag_rotation(bodies[p], radius);
+        for (size_t k=0;k<contacts.size();++k) {
+            auto& edge=contacts[k];
+            const auto& stable=topology_model.diagnostics().stable_ids;
+            const uint32_t a=stable[edge.a],b=stable[edge.b],axis=edges[contact_faces[k]].axis;
+            const auto found=activity.find({a,b,axis});
+            if (contact_faces[k]<motion_history.size() && motion_history[contact_faces[k]].a==a && motion_history[contact_faces[k]].b==b) {
+                edge.ridge_activity=motion_history[contact_faces[k]].ridge;
+                edge.slab_activity=motion_history[contact_faces[k]].slab;
+            } else if (found!=activity.end()) {
+                edge.ridge_activity=found->second[0]/found->second[2];
+                edge.slab_activity=found->second[1]/found->second[2];
+            } else {
+                // Newly exposed faces inherit their pair.
+                const double closing=sphere_closing_m_s(edge,free[edge.a],free[edge.b],radius);
+                const double strength=std::abs(closing)/std::hypot(closing,edge.activation_speed_m_s);
+                edge.ridge_activity=closing<0?strength:0;edge.slab_activity=closing>0?strength:0;
+            }
+            edge.activity_response=scenario.delta_time_myr/(scenario.boundary_memory_myr+scenario.delta_time_myr);
         }
-        edge.activity_response=scenario.delta_time_myr/(scenario.boundary_memory_myr+scenario.delta_time_myr);
     }
-    std::vector<Vector> old_velocity(num_plates);
-    for (uint32_t p=0;p<num_plates;++p)
-        old_velocity[p]={plates[p].velocityX()*cell_m/dt_s,plates[p].velocityY()*cell_m/dt_s};
-    const auto solution = scenario.consistent_motion?solve_consistent(bodies,contacts,old_velocity):solve(bodies, contacts);
+    std::vector<Vec3> old_rotation(num_plates);
+    for (uint32_t p=0;p<num_plates;++p) old_rotation[p]=plates[p].rotation_rad_s;
+    const auto solution = scenario.consistent_motion
+        ? solve_sphere_consistent(bodies,contacts,old_rotation,radius) : solve_sphere(bodies, contacts, radius);
     const auto previous_diagnostics=motion_diagnostics;
     motion_diagnostics = solution.diagnostics;
     motion_diagnostics.max_velocity_consistency_cm_yr=std::max(previous_diagnostics.max_velocity_consistency_cm_yr,
@@ -2089,6 +2083,7 @@ void lithosphere::solvePlateMotion() {
     motion_diagnostics.reversing_face_steps=previous_diagnostics.reversing_face_steps;
     motion_diagnostics.strong_face_steps=previous_diagnostics.strong_face_steps;
     motion_diagnostics.strong_reversing_face_steps=previous_diagnostics.strong_reversing_face_steps;
+    sphere_measures(bodies, contacts, solution.rotation_rad_s, radius, motion_diagnostics);
     if (getTimeMyr()>motion_history_time) {
         // The motion history of every edge: its plate pair and closing speed (cm/yr).
         motion_history.resize(edges.size());
@@ -2097,8 +2092,8 @@ void lithosphere::solvePlateMotion() {
             const auto& edge=edges[face];
             const auto a=imap[edge.a],b=imap[edge.b];
             auto& sample=motion_history[face];
-            const double closing=((solution.velocity_m_s[a].x-solution.velocity_m_s[b].x)*edge.normal.x+
-                (solution.velocity_m_s[a].y-solution.velocity_m_s[b].y)*edge.normal.y)*3.15576e9;
+            const double closing=mesh::dot(mesh::cross(solution.rotation_rad_s[a]-solution.rotation_rad_s[b],
+                radius*edge.midpoint),edge.normal)*3.15576e9;
             if (a!=b && sample.a==stable[a] && sample.b==stable[b]) {
                 ++motion_diagnostics.persistent_face_steps;
                 const bool reversal=sample.closing*closing<0;
@@ -2119,56 +2114,53 @@ void lithosphere::solvePlateMotion() {
         motion_history_time=getTimeMyr();
     }
     for (uint32_t p = 0; p < num_plates; ++p) {
-        const auto velocity = solution.velocity_m_s[p];
-        const double dx = velocity.x * dt_s / cell_m, dy = velocity.y * dt_s / cell_m;
-        // Raster transport cannot resolve skipping cells. Fail explicitly rather
-        // than hiding excessive velocities behind a minimum/maximum speed clamp.
-        if (!std::isfinite(dx) || !std::isfinite(dy) || std::max(std::abs(dx), std::abs(dy)) > .95)
-            throw runtime_error("Force-balance displacement exceeds 0.95 cell; reduce delta_time_myr");
-        // Version 1 solves planar translations, not torques or spherical rotations.
-        plates[p].setVelocity(static_cast<float>(dx), static_cast<float>(dy));
+        const Vec3 w = solution.rotation_rad_s[p];
+        if (!std::isfinite(w.x) || !std::isfinite(w.y) || !std::isfinite(w.z))
+            throw runtime_error("Force balance produced a non-finite plate rotation");
+        plates[p].rotation_rad_s = w;
     }
+    // The transport cannot resolve a cell skipping its neighbour. Fail explicitly rather than
+    // hiding excessive velocities behind a speed clamp: each cell moves at most 0.95 of its
+    // smallest edge per update.
+    double largest = 0;
+    for (uint32_t c = 0; c < cellCount(); ++c) {
+        const double moved = mesh::length(mesh::cross(plates[imap[c]].rotation_rad_s, radius * grid_->position(c))) * dt_s;
+        largest = std::max(largest, moved / grid_->smallestedge_m(c));
+    }
+    if (largest > tectonics::columns::displacement_limit)
+        throw runtime_error("Force-balance displacement exceeds 0.95 of a cell's smallest edge; reduce delta_time_myr");
 }
 
 void lithosphere::initializeColumns() {
     subduction_polarity.clear();
     motion_history.clear();motion_history_time=-1;
     updateCrustAgeMyrMap();
-    const uint32_t width = grid_->width(), height = grid_->height();
     std::vector<tectonics::columns::Cell> cells(cellCount());
     for (uint32_t i = 0; i < cellCount(); ++i)
         cells[i] = tectonics::columns::seed(internalToPhysicalMeters(hmap[i]) - sea_level_m,
             hmap[i] >= CONTINENTAL_BASE || is_continental_material(material_map[i]), crust_age_myr_map[i],
             scenario.continental_root_kg_m3, scenario.continental_root_max_thickness_m, scenario.continental_root_delamination_width_m);
-    column_model.initialize(width, height,
-        scenario.world_width_km * 1000 / width, std::move(cells), scenario.transport_subdivision,
-        scenario.seed, {scenario.ocean_crust_variation_m, scenario.ocean_noise_wavelength_km,
-        scenario.seamount_crust_m,scenario.seamount_radius_km,scenario.seamount_spacing_km,scenario.seamount_roughness},
-        false, scenario.continental_root_kg_m3, scenario.continental_root_max_thickness_m, scenario.continental_root_delamination_width_m,
-        grid_.get());
+    const tectonics::ocean_relief::Parameters relief{scenario.ocean_crust_variation_m, scenario.ocean_noise_wavelength_km,
+        scenario.seamount_crust_m,scenario.seamount_radius_km,scenario.seamount_spacing_km,scenario.seamount_roughness};
+    column_model.initialize(grid_, std::move(cells), scenario.transport_subdivision, scenario.seed, relief,
+        false, scenario.continental_root_kg_m3, scenario.continental_root_max_thickness_m, scenario.continental_root_delamination_width_m);
     topology_model.initialize(grid_, num_plates, imap);
     if (scenario.boundary_conditioned_terrain) {
         // Use the initial force-balanced motion when available, so terrain is
         // conditioned on opening contacts that will actually drive the first step.
         solvePlateMotion();
         std::vector<double> elevations(cellCount()),ages(cellCount());
-        std::vector<tectonics::transport::Displacement> velocity(cellCount());
         for (uint32_t i=0;i<cellCount();++i) {
             elevations[i]=internalToPhysicalMeters(hmap[i])-sea_level_m;
             ages[i]=crust_age_myr_map[i];
-            velocity[i]={plates[imap[i]].velocityX(),plates[imap[i]].velocityY()};
         }
-        auto conditioned=tectonics::initialization::terrain(width,height,
-            scenario.world_width_km*1000/width,scenario.delta_time_myr,
-            elevations,ages,imap,velocity,scenario.thermal_subsidence_strength,scenario.initial_margin_width_m,
+        auto conditioned=tectonics::initialization::terrain(column_model.metric(),scenario.delta_time_myr,
+            elevations,ages,imap,rigidDisplacement(),scenario.thermal_subsidence_strength,scenario.initial_margin_width_m,
             scenario.initial_boundary_influence,scenario.continental_root_kg_m3,
-            scenario.continental_root_max_thickness_m, scenario.continental_root_delamination_width_m, grid_.get());
-        column_model.initialize(width,height,
-            scenario.world_width_km*1000/width,std::move(conditioned),scenario.transport_subdivision,
-            scenario.seed,{scenario.ocean_crust_variation_m,scenario.ocean_noise_wavelength_km,
-            scenario.seamount_crust_m,scenario.seamount_radius_km,scenario.seamount_spacing_km,scenario.seamount_roughness},true,
-            scenario.continental_root_kg_m3,scenario.continental_root_max_thickness_m, scenario.continental_root_delamination_width_m,
-            grid_.get());
+            scenario.continental_root_max_thickness_m, scenario.continental_root_delamination_width_m);
+        column_model.initialize(grid_,std::move(conditioned),scenario.transport_subdivision,
+            scenario.seed,relief,true,
+            scenario.continental_root_kg_m3,scenario.continental_root_max_thickness_m, scenario.continental_root_delamination_width_m);
     }
     publishColumns();
     // Conditioning changes buoyancy/GPE. Publish motion for that actual initial
@@ -2205,27 +2197,37 @@ void lithosphere::publishColumns() {
     for (size_t i = 0; i < rock_uplift_rate_map.size(); ++i)
         rock_uplift_rate_map[i] = i < uplift_rate.size() ? static_cast<float>(uplift_rate[i]) : 0.0f;
     const auto& strain = column_model.strain();
-    const double cell_m = scenario.world_width_km * 1000 / grid_->width();
+    const auto& metric = column_model.metric();
+    const double cell_m = grid_->cellspacing_m();
+    constexpr double pi = 3.14159265358979323846;
     for (size_t i = 0; i < shortening_map.size(); ++i) {
         const auto s = i < strain.size() ? strain[i] : tectonics::columns::Strain{};
         shortening_map[i] = static_cast<float>(tectonics::columns::shortening_m(s, cell_m));
-        // An axis just below pi rounds to the float pi, the same axis as 0.
-        const auto direction = static_cast<float>(tectonics::columns::shortening_direction(s));
-        shortening_direction_map[i] = direction >= static_cast<float>(3.14159265358979323846) ? 0.0f : direction;
+        // The axis from the cell's stencil axes to geographic east toward south.
+        const auto c = static_cast<tectonics::grid::CellId>(i);
+        const double local = tectonics::columns::shortening_direction(s);
+        const mesh::Vec3 axis = std::cos(local) * metric.axis(c, 0) + std::sin(local) * metric.axis(c, 1);
+        const mesh::Vec3 p = grid_->position(c);
+        const double latitude = mesh::latitudeof(p), longitude = mesh::longitudeof(p);
+        double direction = std::atan2(-mesh::dot(axis, mesh::northof(latitude, longitude)),
+                                      mesh::dot(axis, mesh::eastof(latitude, longitude)));
+        if (direction < 0) direction += pi;
+        if (direction >= pi) direction -= pi;
+        // An axis just below pi rounds to the float pi, the same axis as 0; equal principal
+        // components have no axis (0).
+        const auto rounded = static_cast<float>(direction);
+        shortening_direction_map[i] = rounded >= static_cast<float>(pi) || std::hypot((s.xx - s.yy) / 2, s.xy) == 0
+            ? 0.0f : rounded;
     }
 }
 
 void lithosphere::updateColumns() {
-    const uint32_t width = grid_->width(), height = grid_->height();
-    const double grid_cell_m = scenario.world_width_km * 1000 / width;
     prev_hmap = hmap; prev_display_hmap = display_hmap; prev_imap = imap;
     solvePlateMotion();
-    std::vector<tectonics::columns::Displacement> displacement(cellCount());
-    for (uint32_t i = 0; i < cellCount(); ++i)
-        displacement[i] = {plates[imap[i]].velocityX(), plates[imap[i]].velocityY()};
-    std::vector<uint32_t> material_owners(displacement.size());
-    std::vector<double> continental_fraction(displacement.size());
-    for (uint32_t i=0; i<displacement.size(); ++i) {
+    const std::vector<mesh::Vec3> rigid = rigidDisplacement();
+    std::vector<uint32_t> material_owners(rigid.size());
+    std::vector<double> continental_fraction(rigid.size());
+    for (uint32_t i=0; i<rigid.size(); ++i) {
         material_owners[i]=imap[i]; continental_fraction[i]=column_model.cells()[i].continental_area;
     }
     auto stable_owners=material_owners;
@@ -2233,32 +2235,49 @@ void lithosphere::updateColumns() {
     tectonics::margins::Forcing margin_forcing;
     {
         PhaseTimer timer(phase_timings, Phase::margins);
-        margin_forcing=tectonics::margins::forcing(width,height,grid_cell_m,scenario.delta_time_myr,
-            stable_owners,column_model.cells(),displacement,scenario.margin_processes,&subduction_polarity,
-            scenario.seed,getTimeMyr(),grid_.get());
+        margin_forcing=tectonics::margins::forcing(column_model.metric(),scenario.delta_time_myr,
+            stable_owners,column_model.cells(),rigid,scenario.margin_processes,&subduction_polarity,
+            scenario.seed,getTimeMyr());
     }
+    std::vector<mesh::Vec3> displacement;
     {
         PhaseTimer timer(phase_timings, Phase::deformation);
-        displacement=tectonics::deformation::distribute(width,height,grid_cell_m,material_owners,continental_fraction,
-            displacement,scenario.seed,{scenario.deformation_peak_km,scenario.deformation_variation,scenario.subduction_coupling,
+        displacement=tectonics::deformation::distribute(column_model.metric(),material_owners,continental_fraction,
+            rigid,scenario.seed,{scenario.deformation_peak_km,scenario.deformation_variation,scenario.subduction_coupling,
             scenario.margin_processes.process_variation,getTimeMyr(),scenario.margin_processes.process_wavelength_km,
-            scenario.margin_processes.process_period_myr},grid_.get());
+            scenario.margin_processes.process_period_myr});
     }
     if (scenario.topology_processes.progressive_rifting) {
         PhaseTimer timer(phase_timings, Phase::rift_displacement);
         const auto rift=topology_model.riftDisplacement(material_owners,scenario.delta_time_myr,scenario.topology_processes);
-        for (size_t i=0;i<displacement.size();++i) {displacement[i].x+=rift[i].x;displacement[i].y+=rift[i].y;}
+        for (size_t i=0;i<displacement.size();++i) displacement[i]=displacement[i]+rift[i];
     }
-    material_displacement = displacement;
+    // The update's motion: the plates' rotations, each cell's plate and its offsets beyond the
+    // rigid motion (the distributed deformation and the rift opening).
+    tectonics::sphere_transport::Motion motion;
+    motion.rotation = plateRotations();
+    motion.plate.assign(imap.begin(), imap.end());
+    motion.offset_m.resize(displacement.size());
+    for (size_t i=0;i<displacement.size();++i) motion.offset_m[i]=displacement[i]-rigid[i];
+    {
+        // Published: (east, north) in cell spacings per update.
+        const auto moved = tectonics::columns::Model::displacement(*grid_, motion);
+        material_displacement.resize(moved.size());
+        const double spacing = grid_->cellspacing_m();
+        for (size_t i=0;i<moved.size();++i) {
+            const auto en = tectonics::boundary_cube::eastnorth(grid_->position(static_cast<tectonics::grid::CellId>(i)), moved[i]);
+            material_displacement[i] = {en[0] / spacing, en[1] / spacing};
+        }
+    }
     tectonics::plumes::Source plume;
     if (scenario.plume_processes.count>0) {
         PhaseTimer timer(phase_timings, Phase::plumes);
-        plume=tectonics::plumes::source(width,height,grid_cell_m,scenario.seed,getTimeMyr(),
-            getTimeMyr()+scenario.delta_time_myr,scenario.plume_processes,grid_.get());
+        plume=tectonics::plumes::source(*grid_,scenario.seed,getTimeMyr(),
+            getTimeMyr()+scenario.delta_time_myr,scenario.plume_processes);
     }
     {
         PhaseTimer timer(phase_timings, Phase::columns);
-        column_model.advance(displacement, scenario.delta_time_myr,
+        column_model.advance(motion, scenario.delta_time_myr,
             scenario.erosion_strength, scenario.thermal_subsidence_strength, scenario.submarine_erosion_ratio,
             &margin_forcing,scenario.margin_processes,scenario.experimental_noise,scenario.sediment_load_feedback,
             plume.basalt_m.empty()?nullptr:&plume,scenario.uplift_rate_window_myr);
@@ -2266,27 +2285,20 @@ void lithosphere::updateColumns() {
     plume_influence_map.resize(plume.influence.size());
     std::transform(plume.influence.begin(),plume.influence.end(),plume_influence_map.begin(),
         [](double value){return static_cast<float>(value);});
-    std::vector<tectonics::transport::Displacement> plate_displacement(num_plates);
-    for (uint32_t p = 0; p < num_plates; ++p)
-        plate_displacement[p] = {plates[p].velocityX(), plates[p].velocityY()};
     std::vector<uint32_t> owners;
     {
         PhaseTimer timer(phase_timings, Phase::topology_advance);
-        owners = topology_model.advance(plate_displacement);
+        owners = topology_model.advance(motion.rotation);
     }
     std::vector<tectonics::topology::Change> changes;
     {
         PhaseTimer timer(phase_timings, Phase::topology_evolve);
-        const double cell_m = grid_cell_m;
-        const double velocity_scale = cell_m / (scenario.delta_time_myr * tectonics::dynamics::kSecondsPerMyr);
-        std::vector<tectonics::dynamics::Vector> mantle(owners.size()), velocity(num_plates);
+        const auto samples = mantleSamples(getTimeMyr() + scenario.delta_time_myr);
+        std::vector<mesh::Vec3> mantle(owners.size()), rotation(num_plates);
         std::vector<double> continent(owners.size());
         std::vector<double> strength(owners.size());
         for (uint32_t i = 0; i < owners.size(); ++i) {
-            mantle[i] = tectonics::dynamics::mantle_flow(
-                (i % width + .5) / width,
-                (i / width + .5) / height,
-                getTimeMyr() + scenario.delta_time_myr, scenario.seed, scenario.mantle_flow_speed_cm_yr);
+            mantle[i] = samples[i].velocity_m_s;
             continent[i] = column_model.cells()[i].continental_area;
             const auto& c=column_model.cells()[i];
             const double thickness=c.continental_area>1e-6?c.continent/c.continental_area:35000;
@@ -2296,10 +2308,9 @@ void lithosphere::updateColumns() {
             strength[i]=std::clamp((continent[i]*std::pow(thickness/35000,2)+
                 (1-continent[i])*std::sqrt((thermal_age+5)/65))*(1-weakening),.15,4.0);
         }
-        for (uint32_t p = 0; p < num_plates; ++p)
-            velocity[p] = {plate_displacement[p].x * velocity_scale, plate_displacement[p].y * velocity_scale};
-        changes = topology_model.evolve(owners, mantle, velocity, continent,
-            cell_m, scenario.delta_time_myr, getTimeMyr() + scenario.delta_time_myr,scenario.topology_processes,strength);
+        for (uint32_t p = 0; p < num_plates; ++p) rotation[p] = plates[p].rotation_rad_s;
+        changes = topology_model.evolve(owners, mantle, rotation, continent,
+            scenario.delta_time_myr, getTimeMyr() + scenario.delta_time_myr,scenario.topology_processes,strength);
     }
     {
     PhaseTimer ownership_timer(phase_timings, Phase::ownership_publish);
@@ -2307,8 +2318,9 @@ void lithosphere::updateColumns() {
     for (const auto& change : changes) if (change.kind == tectonics::topology::EventKind::Split) {
         if (change.b != plates.size()) throw runtime_error("A split plate's index is not the next plate");
         // The newborn inherits motion until the next force solve, with no kick.
-        tectonics::PlateState daughter = tectonics::PlateState::fromSeed(static_cast<uint32_t>(scenario.seed));
-        daughter.setVelocity(plates[change.a].velocityX(), plates[change.a].velocityY());
+        tectonics::PlateState daughter = tectonics::PlateState::fromSeed(static_cast<uint32_t>(scenario.seed),
+            grid_->cellspacing_m(), grid_->radius_m(), scenario.delta_time_myr * tectonics::dynamics::kSecondsPerMyr);
+        daughter.rotation_rad_s = plates[change.a].rotation_rad_s;
         plates.push_back(daughter);
         newborn.push_back(1U);
         ++num_plates;
@@ -2345,18 +2357,18 @@ void lithosphere::updateColumns() {
     if (!changes.empty()) solvePlateMotion();
     updateDerivedMaps();
     // Preserve fractional material ages rather than rounding them to updates.
-    for (size_t i = 0; i < displacement.size(); ++i)
+    for (size_t i = 0; i < cellCount(); ++i)
         crust_age_myr_map[i] = static_cast<float>(tectonics::columns::age_myr(column_model.cells()[i]));
     finished = iter_count - time_origin_step >= static_cast<uint32_t>(
         std::ceil(scenario.evolution_duration_myr / scenario.delta_time_myr));
 }
 
 uint32_t lithosphere::getWidth() const {
-    return grid_->width();
+    return static_cast<uint32_t>(grid_->facecells());
 }
 
 uint32_t lithosphere::getHeight() const {
-    return grid_->height();
+    return 6U * static_cast<uint32_t>(grid_->facecells());
 }
 
 uint32_t* lithosphere::getPlatesMap() const throw() {

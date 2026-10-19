@@ -12,6 +12,12 @@
 
 class lithosphere;
 
+namespace tectonics::transport {
+// A published material displacement: (east, north) at a cell in cell spacings per update
+// (lithosphere::getMaterialDisplacement; the mineral frame reads it).
+struct Displacement { double x = 0, y = 0; };
+}
+
 namespace tectonics::contract {
 
 inline constexpr uint32_t kSchemaVersion = 7;
@@ -68,14 +74,16 @@ enum class JunctionStability : uint8_t {
     Indeterminate = 4,
 };
 
+// A plate's motion as published until contract schema 8 (E5) names the sphere's quantities:
+// the velocity at the plate's centroid (east, north) in cell spacings per update and its unit
+// direction, the spin about the centroid (omega . centroid) in radians per update, and the
+// centroid as longitude and latitude in degrees.
 struct PlateKinematics {
     float unit_velocity_x = 0.0f;
     float unit_velocity_y = 0.0f;
     float linear_velocity_x = 0.0f;
     float linear_velocity_y = 0.0f;
     float angular_velocity = 0.0f;
-    // The plate's area centroid in native cell coordinates (column, row; circular means on the
-    // torus), not a mass centre since W2-E step E1.
     float mass_center_x = 0.0f;
     float mass_center_y = 0.0f;
 };
@@ -143,6 +151,7 @@ struct TectonicJunction {
 
 struct Snapshot {
     uint32_t schema_version = kSchemaVersion;
+    // The id-order view of the cube's cells: N columns x 6 N rows (lithosphere::getWidth).
     uint32_t width = 0;
     uint32_t height = 0;
     uint32_t iteration_count = 0;

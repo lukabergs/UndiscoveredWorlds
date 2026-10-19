@@ -1,6 +1,5 @@
 #include "simulations/geology/plate_tectonics/tectonic_junction_coupling.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_grid.hpp"
-#include "simulations/geology/plate_tectonics/tectonic_provenance.hpp"
 
 #include "core/mesh/mesh_geometry.hpp"
 
@@ -20,34 +19,8 @@ struct Vec2 {
     float y = 0.0f;
 };
 
-size_t map_index(uint32_t x, uint32_t y, uint32_t width) {
-    return static_cast<size_t>(y) * static_cast<size_t>(width) + static_cast<size_t>(x);
-}
-
-uint32_t wrapped_add(uint32_t value, int offset, uint32_t limit) {
-    int64_t shifted = static_cast<int64_t>(value) + static_cast<int64_t>(offset);
-    const int64_t period = static_cast<int64_t>(limit);
-    shifted %= period;
-    if (shifted < 0) {
-        shifted += period;
-    }
-    return static_cast<uint32_t>(shifted);
-}
-
 float clamp_unit(float value) {
     return std::max(0.0f, std::min(1.0f, value));
-}
-
-float wrapped_delta(float value, float center, uint32_t period) {
-    float delta = value - center;
-    const float period_f = static_cast<float>(period);
-    const float half_period = period_f * 0.5f;
-    if (delta > half_period) {
-        delta -= period_f;
-    } else if (delta < -half_period) {
-        delta += period_f;
-    }
-    return delta;
 }
 
 float length(Vec2 value) {
@@ -153,11 +126,11 @@ void apply(const Strengths& strengths, size_t index, float distance, Vec2 away, 
     outputs.rift_tension_y[index] += direction.y * tension;
 }
 
-// The cube: the cells within the radius (great circle over the cell spacing) of the junction
-// (longitude, latitude), the tension (east, north) at each cell pointing away from it.
-void apply_cube(const grid::TectonicGrid& grid, const TectonicJunction& junction,
+// The cells within the radius (great circle over the cell spacing) of the junction (longitude,
+// latitude), the tension (east, north) at each cell pointing away from it.
+void apply_disc(const grid::TectonicGrid& grid, const TectonicJunction& junction,
                 const Strengths& strengths, Outputs& outputs) {
-    const double spacing = boundary_cube::cellspacing_m(grid);
+    const double spacing = grid.cellspacing_m();
     const double cells_per_radian = grid.mesh()->radius_m() / spacing;
     const mesh::Vec3 p = boundary_cube::decodecentroid(junction.centroid_x, junction.centroid_y);
     for (const grid::CellId c :
@@ -177,9 +150,7 @@ void apply_cube(const grid::TectonicGrid& grid, const TectonicJunction& junction
 
 Outputs build(const Inputs& inputs) {
     Outputs outputs;
-    const bool cube = inputs.grid != nullptr && inputs.grid->kind() == grid::TectonicGrid::Kind::cube;
-    const size_t cell_count = cube ? inputs.grid->cellcount()
-        : static_cast<size_t>(inputs.width) * static_cast<size_t>(inputs.height);
+    const size_t cell_count = inputs.grid != nullptr ? inputs.grid->cellcount() : 0U;
     outputs.rift_influence.assign(cell_count, 0.0f);
     outputs.transform_influence.assign(cell_count, 0.0f);
     outputs.subduction_influence.assign(cell_count, 0.0f);
@@ -217,35 +188,7 @@ Outputs build(const Inputs& inputs) {
         strengths.transform = transform_strength;
         strengths.subduction = subduction_strength;
         strengths.fallback_direction = fallback_rift_direction(junction);
-        if (cube) {
-            apply_cube(*inputs.grid, junction, strengths, outputs);
-            continue;
-        }
-
-        const float radius = strengths.radius;
-        const int cell_radius = static_cast<int>(std::ceil(radius));
-        const uint32_t center_x =
-            wrapped_add(0U, static_cast<int>(std::floor(junction.centroid_x)), inputs.width);
-        const uint32_t center_y =
-            wrapped_add(0U, static_cast<int>(std::floor(junction.centroid_y)), inputs.height);
-
-        for (int oy = -cell_radius; oy <= cell_radius; ++oy) {
-            for (int ox = -cell_radius; ox <= cell_radius; ++ox) {
-                const uint32_t x = wrapped_add(center_x, ox, inputs.width);
-                const uint32_t y = wrapped_add(center_y, oy, inputs.height);
-                const float dx =
-                    wrapped_delta(static_cast<float>(x) + 0.5f, junction.centroid_x,
-                                  inputs.width);
-                const float dy =
-                    wrapped_delta(static_cast<float>(y) + 0.5f, junction.centroid_y,
-                                  inputs.height);
-                const float distance = std::sqrt(dx * dx + dy * dy);
-                if (distance > radius) {
-                    continue;
-                }
-                apply(strengths, map_index(x, y, inputs.width), distance, Vec2{dx, dy}, outputs);
-            }
-        }
+        apply_disc(*inputs.grid, junction, strengths, outputs);
     }
 
     clamp_tension_vectors(outputs);

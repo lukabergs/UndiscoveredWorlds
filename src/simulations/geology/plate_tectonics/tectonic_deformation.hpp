@@ -1,11 +1,10 @@
 #ifndef TECTONIC_DEFORMATION_HPP
 #define TECTONIC_DEFORMATION_HPP
-#include "simulations/geology/plate_tectonics/tectonic_transport.hpp"
 #include "core/mesh/cell_grid.hpp"
 #include <cstdint>
 #include <vector>
 
-namespace tectonics::grid { class TectonicGrid; }
+namespace tectonics::columns { class Metric; }
 namespace tectonics::deformation {
 struct Parameters {
     double peak_distance_km = 300; // Maximum distributed shortening, inland from contact.
@@ -16,12 +15,10 @@ struct Parameters {
 };
 // Cumulative compact strain curve: -d(taper)/dd peaks at peak_distance.
 double taper(double distance_m, double peak_distance_m);
-std::vector<transport::Displacement> distribute(uint32_t width, uint32_t height, double cell_m,
-    const std::vector<uint32_t>& owners, const std::vector<double>& continental_fraction,
-    const std::vector<transport::Displacement>& rigid, long seed, const Parameters& parameters,
-    const grid::TectonicGrid* grid = nullptr);
-// The cube (W2-E): displacements per update as 3-D tangent vectors in metres (the result too).
-std::vector<mesh::Vec3> distribute(const grid::TectonicGrid& grid, const std::vector<uint32_t>& owners,
+// Displacements per update as 3-D tangent vectors in metres (the result too): the rigid
+// displacement plus the distributed share of the closing at convergent continental contacts.
+// E4: replace. The peak distance's variation reads the 4N x 2N lat-lon proxy position.
+std::vector<mesh::Vec3> distribute(const columns::Metric& metric, const std::vector<uint32_t>& owners,
     const std::vector<double>& continental_fraction, const std::vector<mesh::Vec3>& rigid_m, long seed,
     const Parameters& parameters);
 }

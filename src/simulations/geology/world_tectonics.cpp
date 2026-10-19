@@ -15,8 +15,9 @@
 #include "simulations/geology/plate_tectonics/tectonic_api.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_contract.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_recipe.hpp"
-#include "simulations/geology/plate_tectonics/tectonic_world_grid.hpp"
 #include "simulations/geology/plate_tectonics/topography_codec.hpp"
+#include "core/mesh/cell_grid.hpp"
+#include "core/mesh/mesh_remap.hpp"
 #ifdef max
 #undef max
 #endif
@@ -55,27 +56,87 @@ float nativeheightmetres(float value, uint16_t sealevelmeters)
     return TopographyCodec::internal_to_meters_exact(value, sealevelmeters);
 }
 
-void applynativeheightmap(planet& world, worldgrid<bool>& shelves, const float* outputheightmap, std::size_t cellcount, int simwidth, int simheight, uint16_t sealevelmeters)
+// The minimal hand-off of the engine's cube to the world's latitude-longitude raster (W2-E,
+// E3; E5 replaces it with the cached remap of the full contract): heights and rates sampled
+// bilinearly at each world cell's centre, codes, ids and scores from the engine cell there.
+struct HandOff
+{
+    std::shared_ptr<const mesh::CellGrid> cube;     // the engine's cube (same N and radius)
+    int width = 0, height = 0;                      // the world raster, (width + 1) x (height + 1) cells
+    std::vector<mesh::BilinearStencil> stencils;    // per world cell, x-major rows (y (width + 1) + x)
+    std::vector<mesh::CellId> nearest;              // per world cell, the engine cell at its centre
+    double scale = 1;                               // world cells per engine cell spacing (at the equator)
+
+    HandOff(const planet& world, int facecells, double radius_m)
+    {
+        if (world.grid().kind() != mesh::GridKind::latlon)
+            throw std::runtime_error("World tectonics: the hand-off to a cube world is E5's");
+        cube = mesh::makecubegrid(facecells, radius_m);
+        width = world.width();
+        height = world.height();
+        const mesh::CellGrid& raster = world.grid();
+        const std::size_t count = static_cast<std::size_t>(width + 1) * static_cast<std::size_t>(height + 1);
+        stencils.resize(count);
+        nearest.resize(count);
+        for (int y = 0; y <= height; y++)
+            for (int x = 0; x <= width; x++)
+            {
+                const mesh::Vec3 p = raster.centre(raster.cellof(x, y));
+                const std::size_t w = index(x, y);
+                stencils[w] = mesh::bilinearstencil(*cube, p);
+                nearest[w] = cube->locate(p);
+            }
+        const double spacing = std::sqrt(cube->totalarea_m2() / static_cast<double>(cube->cellcount()));
+        scale = spacing / (2.0 * 3.14159265358979323846 * radius_m / (width + 1));
+    }
+    std::size_t index(int x, int y) const { return static_cast<std::size_t>(y) * (width + 1) + x; }
+    // samplebilinear with the cached stencil (relative to the first value).
+    float bilinear(const float* field, int x, int y) const
+    {
+        const mesh::BilinearStencil& stencil = stencils[index(x, y)];
+        if (stencil.count == 0)
+            return 0.0f;
+        const double first = field[stencil.cell[0]];
+        double sum = 0.0;
+        for (int n = 1; n < stencil.count; n++)
+            sum += stencil.weight[n] * (static_cast<double>(field[stencil.cell[n]]) - first);
+        return static_cast<float>(first + sum);
+    }
+    std::size_t cell(int x, int y) const { return nearest[index(x, y)]; }
+    // A centroid (longitude, latitude in degrees) as world raster coordinates (cell centres at
+    // whole numbers, y south).
+    std::pair<float, float> worldposition(float longitude, float latitude) const
+    {
+        return { static_cast<float>((longitude + 180.0) / 360.0 * (width + 1) - 0.5),
+                 static_cast<float>((90.0 - latitude) / 180.0 * (height + 1) - 0.5) };
+    }
+};
+
+void applynativeheightmap(planet& world, worldgrid<bool>& shelves, const float* outputheightmap, std::size_t cellcount,
+    const HandOff& handoff, uint16_t sealevelmeters)
 {
     if (outputheightmap == nullptr || cellcount == 0)
         return;
 
     const int width = world.width();
     const int height = world.height();
-    const tectonics::WorldGrid grid(simwidth, simheight, width + 1, height + 1);
     const int sealevel = sealevelmeters;
     const int maxelevation = int(TopographyCodec::kMaxHeightMeters) + 1;
 
     world.setsealevel(sealevel);
     world.setmaxelevation(maxelevation);
 
+    // Metres per engine cell, then sampled at the world's centres.
+    std::vector<float> metres(cellcount);
+    for (std::size_t c = 0; c < cellcount; c++)
+        metres[c] = nativeheightmetres(outputheightmap[c], sealevelmeters);
     parallelforrows(0, height, [&](int startrow, int endrow)
     {
         for (int y = startrow; y <= endrow; y++)
         {
             for (int x = 0; x <= width; x++)
             {
-                world.setnomfloat(x, y, nativeheightmetres(grid.height(outputheightmap, x, y), sealevelmeters));
+                world.setnomfloat(x, y, handoff.bilinear(metres.data(), x, y));
                 shelves[x][y] = false;
             }
         }
@@ -178,14 +239,22 @@ float normalizeboundaryhistory(const tectonics::contract::BoundarySegment* segme
 
 }
 
+// The mineral frame's width of the id-order view (N columns): N cell spacings, so its cell
+// size is the cube's spacing.
+double frameviewwidthkm(const tectonics::scenario::Scenario& scenario)
+{
+    return scenario.radius_km * std::sqrt(2.0 * 3.14159265358979323846 / 3.0);
+}
+
 struct GeologySolverState
 {
     explicit GeologySolverState(const tectonics::scenario::Scenario& created)
-        : scenario(created), mineralframes(created.world_width_km) {}
+        : scenario(created), mineralframes(frameviewwidthkm(created)) {}
     GeologySolverState(const GeologySolverState&) = delete;
     GeologySolverState& operator=(const GeologySolverState&) = delete;
 
     tectonics::scenario::Scenario scenario;
+    std::optional<HandOff> handoff;
     PlateTectonicsHandle simulation;
     mineralsystems::TectonicFrameReader mineralframes;
     std::optional<mineralsystems::MineralHistory> minerals;
@@ -204,11 +273,11 @@ std::shared_ptr<GeologySolverState> createsolverstate(const planet& world, const
 {
     auto scenario = options.scenario ? *options.scenario : tectonics::scenario::baseline();
     scenario.seed = world.seed();
+    // The engine's cube on the world's sphere: N = W / 4 on the world grid (an equatorial cell
+    // of the world's size), the body's radius.
     if (options.worldGrid)
-    {
-        scenario.width = static_cast<uint32_t>(world.width() + 1);
-        scenario.height = static_cast<uint32_t>(world.height() + 1);
-    }
+        scenario.sphere_face_cells = static_cast<uint32_t>(std::max(2, (world.width() + 1) / 4));
+    scenario.radius_km = world.radius() / 1000.0;
     if (options.durationMyr > 0) scenario.evolution_duration_myr = options.durationMyr;
     if (options.plateCount > 0) scenario.plate_count = static_cast<uint32_t>(options.plateCount);
     if (options.deltaTimeMyr > 0) scenario.delta_time_myr = options.deltaTimeMyr;
@@ -223,6 +292,7 @@ std::shared_ptr<GeologySolverState> createsolverstate(const planet& world, const
     state->width = world.width();
     state->height = world.height();
     state->options = options;
+    state->handoff.emplace(world, static_cast<int>(scenario.sphere_face_cells), scenario.radius_km * 1000.0);
 
     if (options.mineralHistory)
     {
@@ -246,20 +316,18 @@ bool madefor(const GeologySolverState& state, const planet& world, const WorldTe
 // Geosphere, at every checkpoint and at the end.
 void writegeosphere(planet& world, worldgrid<bool>& shelves, GeologySolverState& state, const std::string& label)
 {
-    const auto& scenario = state.scenario;
     PlateTectonicsHandle& simulation = state.simulation;
     const int width = world.width(), height = world.height();
-    const int simwidth = static_cast<int>(scenario.width), simheight = static_cast<int>(scenario.height);
-    const std::size_t cellcount = static_cast<std::size_t>(simwidth) * simheight;
-    const tectonics::WorldGrid grid(simwidth, simheight, width + 1, height + 1);
-    const auto scale = static_cast<float>(grid.scale());
+    const HandOff& handoff = *state.handoff;
+    const std::size_t cellcount = handoff.cube->cellcount();
+    const auto scale = static_cast<float>(handoff.scale);
 
     float* outputheightmap = tectonics_get_heightmap(simulation.pointer);
 
     if (outputheightmap == nullptr)
         return;
 
-    applynativeheightmap(world, shelves, outputheightmap, cellcount, simwidth, simheight,
+    applynativeheightmap(world, shelves, outputheightmap, cellcount, handoff,
         tectonics_get_sea_level_m(simulation.pointer));
 
     const std::uint8_t* convergencemap = tectonics_get_convergence_map(simulation.pointer);
@@ -308,8 +376,9 @@ void writegeosphere(planet& world, worldgrid<bool>& shelves, GeologySolverState&
         boundarysegmentobjects.assign(boundarysegments, boundarysegments + boundarysegmentcount);
     for (auto& segment : boundarysegmentobjects)
     {
-        segment.centroid_x = grid.worldCoordinate(segment.centroid_x);
-        segment.centroid_y = grid.worldCoordinate(segment.centroid_y);
+        const auto position = handoff.worldposition(segment.centroid_x, segment.centroid_y);
+        segment.centroid_x = position.first;
+        segment.centroid_y = position.second;
         segment.length_cells *= scale;
         segment.average_normal_motion *= scale;
         segment.average_shear_motion *= scale;
@@ -324,10 +393,12 @@ void writegeosphere(planet& world, worldgrid<bool>& shelves, GeologySolverState&
         deformingregionobjects.assign(deformingregions, deformingregions + deformingregioncount);
     for (auto& region : deformingregionobjects)
     {
-        region.centroid_x = grid.worldCoordinate(region.centroid_x);
-        region.centroid_y = grid.worldCoordinate(region.centroid_y);
+        const auto position = handoff.worldposition(region.centroid_x, region.centroid_y);
+        region.centroid_x = position.first;
+        region.centroid_y = position.second;
+        // (east, north) to the world's (x east, y south).
         region.average_interpolated_velocity_x *= scale;
-        region.average_interpolated_velocity_y *= scale;
+        region.average_interpolated_velocity_y *= -scale;
         region.average_normal_motion *= scale;
         region.average_shear_motion *= scale;
         region.cell_count = static_cast<std::uint32_t>(std::lround(region.cell_count * scale * scale));
@@ -350,7 +421,7 @@ void writegeosphere(planet& world, worldgrid<bool>& shelves, GeologySolverState&
     {
         for (int x = 0; x <= width; x++)
         {
-            const std::size_t index = grid.nativeIndex(x, y);
+            const std::size_t index = handoff.cell(x, y);
             const int convergencescore = static_cast<int>(convergencemap[index]);
             const int divergencescore = static_cast<int>(divergencemap[index]);
             const int shearscore = static_cast<int>(shearmap[index]);
@@ -372,7 +443,7 @@ void writegeosphere(planet& world, worldgrid<bool>& shelves, GeologySolverState&
             world.settectoniccrustclass(x, y, crustclass);
             world.settectonicuplifttendency(x, y, uplifttendencymap[index]);
             // A rate of elevation change: sampled bilinearly as the heights are, no length scale.
-            world.settectonicrockupliftrate(x, y, grid.height(rockupliftratemap, x, y));
+            world.settectonicrockupliftrate(x, y, handoff.bilinear(rockupliftratemap, x, y));
             // An axis wraps at pi, so the nearest engine cell, never a bilinear mean; the
             // shortening with it, so the pair stays one cell's.
             world.settectonicshortening(x, y, shorteningmap[index]);
@@ -387,8 +458,9 @@ void writegeosphere(planet& world, worldgrid<bool>& shelves, GeologySolverState&
             world.settectonicdeformingregionid(x, y, static_cast<int>(deformingregionidmap[index]));
             world.settectonicdeformingregiontype(x, y, regiontype);
             world.settectonicdeformationrate(x, y, deformationratemap[index]);
+            // (east, north) to the world's (x east, y south).
             world.settectonicdeformationvelocityx(x, y, deformationvelocityxmap[index] * scale);
-            world.settectonicdeformationvelocityy(x, y, deformationvelocityymap[index] * scale);
+            world.settectonicdeformationvelocityy(x, y, -deformationvelocityymap[index] * scale);
         }
     }
 
@@ -402,7 +474,7 @@ void writegeosphere(planet& world, worldgrid<bool>& shelves, GeologySolverState&
     {
         for (int x = 0; x <= width; x++)
         {
-            const std::size_t index = grid.nativeIndex(x, y);
+            const std::size_t index = handoff.cell(x, y);
             world.settectonicsnapshotcell(x, y, snapshot.heightmap[index], static_cast<int>(snapshot.plate_id[index]),
                 static_cast<int>(snapshot.crust_age_steps[index]), cellvalue(snapshot.continental_crust_m, index),
                 cellvalue(snapshot.continental_area, index), cellvalue(snapshot.oceanic_crust_m, index), cellvalue(snapshot.sediment_m, index),
@@ -464,12 +536,10 @@ void evolvegeosphere(planet& world, worldgrid<bool>& shelves, const WorldTectoni
         if (state == nullptr)
             return;
     }
-    const auto& scenario = state->scenario;
     PlateTectonicsHandle& simulation = state->simulation;
     mineralsystems::TectonicFrameReader& mineralframes = state->mineralframes;
     std::optional<mineralsystems::MineralHistory>& minerals = state->minerals;
-    const int simwidth = static_cast<int>(scenario.width), simheight = static_cast<int>(scenario.height);
-    const std::size_t cellcount = static_cast<std::size_t>(simwidth) * simheight;
+    const std::size_t cellcount = state->handoff->cube->cellcount();
 
     const double deltatimemyr = tectonics_get_delta_time_myr(simulation.pointer);
     const std::uint32_t checkpointevery = options.checkpointEveryMyr > 0.0 ?
@@ -504,7 +574,7 @@ void evolvegeosphere(planet& world, worldgrid<bool>& shelves, const WorldTectoni
 
         if (previewheightmap != nullptr)
         {
-            applynativeheightmap(world, shelves, previewheightmap, cellcount, simwidth, simheight,
+            applynativeheightmap(world, shelves, previewheightmap, cellcount, *state->handoff,
                 tectonics_get_sea_level_m(simulation.pointer));
             requestworldgenvisualization();
         }

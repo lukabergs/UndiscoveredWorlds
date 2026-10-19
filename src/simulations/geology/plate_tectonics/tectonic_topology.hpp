@@ -1,8 +1,8 @@
 #ifndef TECTONIC_TOPOLOGY_HPP
 #define TECTONIC_TOPOLOGY_HPP
-#include "simulations/geology/plate_tectonics/tectonic_transport.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_dynamics.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_grid.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_sphere_transport.hpp"
 #include <memory>
 #include <cstdint>
 #include <map>
@@ -41,26 +41,28 @@ struct Diagnostics {
     double max_tension_n_m = 0;
     uint32_t damaged_rift_cells = 0;
 };
-// Keeps subcell plate coverage between updates. Ownership is separate from
-// material columns: resolving a boundary must never erase or flatten terrain.
+// Keeps each plate's fractional coverage of the cells between updates (moved by the plate's
+// rotation with the sphere transport's per-plate kernel, so a boundary keeps its position
+// inside a cell). Ownership is separate from material columns: resolving a boundary must
+// never erase or flatten terrain. Neighbourhoods, connectivity and contacts on the engine's
+// cell table.
 class Model {
 public:
-    // Neighbourhoods, connectivity and contacts on the engine's cell table (W2-E); the rift
-    // geometry and the coverage transport are still planar (E2).
     void initialize(std::shared_ptr<const grid::TectonicGrid> grid, uint32_t plates,
                     const std::vector<uint32_t>& owners);
-    // The same on a planar scaffold of width x height (unit tests).
-    void initialize(uint32_t width, uint32_t height, uint32_t plates, const std::vector<uint32_t>& owners);
-    std::vector<uint32_t> advance(const std::vector<transport::Displacement>& plate_displacement);
+    // rotation: per plate the update's rotation (axis times angle, radians).
+    std::vector<uint32_t> advance(const std::vector<mesh::Vec3>& rotation);
     // Changes ownership only. No height, rock, sediment or age input can be modified.
+    // mantle_m_s: the mantle flow per cell (tangent, m/s); rotation_rad_s: per plate.
     std::vector<Change> evolve(std::vector<uint32_t>& owners,
-        const std::vector<dynamics::Vector>& mantle_m_s,
-        const std::vector<dynamics::Vector>& velocity_m_s,
+        const std::vector<mesh::Vec3>& mantle_m_s,
+        const std::vector<mesh::Vec3>& rotation_rad_s,
         const std::vector<double>& continental_fraction,
-        double cell_m, double dt_myr, double time_myr,
+        double dt_myr, double time_myr,
         const Parameters& parameters = {}, const std::vector<double>& strength = {});
-    // Incipient rifting deforms material before a new rigid plate identity exists.
-    std::vector<transport::Displacement> riftDisplacement(const std::vector<uint32_t>& owners,
+    // Incipient rifting deforms material before a new rigid plate identity exists: per cell
+    // the opening offset of the update, a tangent vector in metres.
+    std::vector<mesh::Vec3> riftDisplacement(const std::vector<uint32_t>& owners,
         double dt_myr, const Parameters& parameters) const;
     std::vector<double> damageField(const std::vector<uint32_t>& owners) const;
     void removePlate(uint32_t index); // Same swap-with-last convention as lithosphere.
@@ -68,10 +70,10 @@ public:
 private:
     void connect(std::vector<uint32_t>& owners);
     std::vector<uint32_t> partition(uint32_t plate, const std::vector<uint32_t>& owners,
-        const std::vector<dynamics::Vector>& mantle, const std::vector<double>& strength = {}) const;
+        const std::vector<mesh::Vec3>& mantle, const std::vector<double>& strength = {}) const;
     struct Rift { std::vector<double> side, cracks; double damage = 0, duration = 0, cooldown = 0; };
     std::shared_ptr<const grid::TectonicGrid> grid_;
-    uint32_t width_ = 0, height_ = 0;
+    std::shared_ptr<const sphere_transport::Lattice> lattice_;  // one subcell per cell
     std::vector<std::vector<double>> coverage_;
     std::vector<Rift> rifts_;
     std::map<std::pair<uint32_t, uint32_t>, double> welding_;

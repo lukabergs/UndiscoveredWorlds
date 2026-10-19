@@ -1,11 +1,10 @@
 #ifndef TECTONIC_GRID_HPP
 #define TECTONIC_GRID_HPP
 
-// The engine's own cell table (W2-E, step E1; docs/architecture/terrain-roadmap.md, "W2-E").
-// One table, two builders: the cube over mesh::CellGrid (the engine's target grid) and a
-// planar scaffold that reproduces today's torus exactly (ids y W + x, the stencils' order,
-// one cell edge in metres). The scaffold is a transitional fixture: the default torus path
-// and the tests use it until E3 switches the engine to the cube and deletes it.
+// The engine's cell table on the cube (W2-E; docs/architecture/terrain-roadmap.md, "W2-E"):
+// the equiangular cubed sphere over mesh::CellGrid (N = sphere_face_cells), its cardinal
+// steps across face edges, the table of unique edges, rings, discs in km, Dijkstra,
+// area-weighted quantiles and centroids. Since E3 the engine runs on it alone.
 
 #include "core/mesh/cell_grid.hpp"
 
@@ -14,8 +13,6 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
-#include <stdexcept>
-#include <string>
 #include <vector>
 
 namespace tectonics::grid {
@@ -24,22 +21,26 @@ using CellId = mesh::CellId;
 using mesh::Vec3;
 constexpr CellId nocell = mesh::nocell;
 
-// Cardinal directions in the cell's own frame, in the order of the planar stencils
-// (x - 1, x + 1, y - 1, y + 1). On the cube, north is toward the face's v (row j - 1) and
-// east toward u (column i + 1), also across face edges (mesh slots 7, 3, 1, 5).
+// Cardinal directions in the cell's own frame: north toward the face's v (row j - 1), east
+// toward u (column i + 1), also across face edges (mesh slots 7, 3, 1, 5).
 enum Direction : std::uint8_t { west = 0, east = 1, north = 2, south = 3 };
 constexpr int directioncount = 4;
 constexpr std::uint8_t opposite(std::uint8_t k) { return static_cast<std::uint8_t>(k ^ 1U); }
 
-// A unique cardinal edge. Planar: edge 2 i + 0 is (i, east of i), 2 i + 1 is (i, south of i),
-// so edge ids are today's face ids 2 index + axis. Cube: each adjacent pair once, from the
-// lower id, in the order (cell, east, south, west, north).
+// A unique cardinal edge: each adjacent pair once, from the lower id, in the order (cell,
+// east, south, west, north).
 struct Edge {
     CellId a = 0, b = 0;
     std::uint8_t direction = east;  // b is a's neighbour in this direction (a's frame)
-    std::uint8_t axis = 0;          // 0 across x or u (east, west), 1 across y or v (north, south)
-    Vec3 normal;                    // unit normal from a toward b (planar: +x or +y)
-    double length_m = 0;            // arc length of the shared face
+    std::uint8_t axis = 0;          // 0 across u (east, west), 1 across v (north, south)
+    // The shared edge's perpendicular from a toward b: the normalised cross product of the
+    // edge's two vertices, tangent at its midpoint (contact forces and fluxes act across it).
+    Vec3 normal;
+    // The unit tangent of the line between the two centres at their midpoint, from a toward b
+    // (the two-point difference's direction; up to 30 degrees off the normal near corners).
+    Vec3 centreline;
+    Vec3 midpoint;                  // the unit vector of the shared edge's middle
+    double length_m = 0;            // arc length of the shared edge
     double distance_m = 0;          // centre to centre
 };
 
@@ -57,22 +58,19 @@ struct Distances {
 
 class TectonicGrid {
 public:
-    enum class Kind { planar, cube };
-
     // The cube over a mesh cube grid (throws std::invalid_argument for a lat-lon or sub grid).
     static std::shared_ptr<const TectonicGrid> cube(std::shared_ptr<const mesh::CellGrid> mesh);
     static std::shared_ptr<const TectonicGrid> cube(int facecells, double radius_km);
-    // Today's torus: width x height cells, each width_km / width wide (square cells).
-    static std::shared_ptr<const TectonicGrid> planar(std::uint32_t width, std::uint32_t height,
-                                                      double width_km);
 
-    Kind kind() const { return kind_; }
     std::size_t cellcount() const { return cellcount_; }
-    std::uint32_t width() const { return width_; }    // planar columns (0 on the cube)
-    std::uint32_t height() const { return height_; }  // planar rows (0 on the cube)
-    int facecells() const { return facecells_; }      // cube N (0 on the scaffold)
-    const mesh::CellGrid* mesh() const { return mesh_.get(); }  // the cube's mesh (null on the scaffold)
-    double cell_m() const { return cell_m_; }         // the scaffold's cell edge (0 on the cube)
+    int facecells() const { return facecells_; }      // N
+    const mesh::CellGrid* mesh() const { return mesh_.get(); }
+    const std::shared_ptr<const mesh::CellGrid>& sharedmesh() const { return mesh_; }
+    double radius_m() const { return mesh_->radius_m(); }
+    // The unit of length of thresholds counted in cells: sqrt(total area / cells).
+    double cellspacing_m() const { return cellspacing_m_; }
+    // The shortest of a cell's four shared edges (the displacement limit's scale).
+    double smallestedge_m(CellId c) const { return smallestedge_[c]; }
 
     CellId neighbour(CellId c, std::uint8_t k) const { return neighbours_[4 * static_cast<std::size_t>(c) + k]; }
     // west, east, north, south
@@ -84,18 +82,17 @@ public:
         const std::size_t slot = 4 * static_cast<std::size_t>(c) + k;
         return {neighbours_[slot], continuing_[slot]};
     }
+    // The edge between c and its neighbour in direction k (an index of edges()).
+    std::uint32_t edge(CellId c, std::uint8_t k) const { return edgeof_[4 * static_cast<std::size_t>(c) + k]; }
 
     const std::vector<Edge>& edges() const { return edges_; }
-    double area_m2(CellId c) const { return area_.empty() ? cell_area_m2_ : area_[c]; }
+    double area_m2(CellId c) const { return area_[c]; }
     double totalarea_m2() const { return totalarea_m2_; }
-    // Planar: (x, y, 0), the cell's column and row (the mass-centre convention of the torus).
-    // Cube: the centre's unit vector.
-    Vec3 position(CellId c) const;
+    Vec3 position(CellId c) const { return mesh_->centre(c); }  // the centre's unit vector
 
     // rings[d]: the cells d cardinal steps from c (d = 0 .. radius), ascending id.
     std::vector<std::vector<CellId>> rings(CellId c, int radius) const;
-    // The cells whose centres lie within radius_km of c's centre (shortest torus offset on the
-    // scaffold, great circle on the cube), ascending id.
+    // The cells whose centres lie within radius_km (great circle) of c's centre, ascending id.
     std::vector<CellId> withinkm(CellId c, double radius_km) const;
     // Shortest paths over the cardinal edges' centre distances from every source (distance 0);
     // a cell with passable[c] == 0 is never entered (empty: all passable); paths stop at limit_m.
@@ -103,40 +100,82 @@ public:
     Distances dijkstra(const std::vector<CellId>& sources, const std::vector<std::uint8_t>& passable = {},
                        double limit_m = std::numeric_limits<double>::infinity()) const;
     // The area-weighted quantile of one value per cell: the sorted value at which the area
-    // below reaches q of the total less the last cell's area. On the scaffold (equal areas) it
-    // is today's quantile_threshold: sorted[floor(q (n - 1))] in float.
+    // below reaches q of the total less the last cell's area.
     float quantile(const std::vector<float>& values, float q) const;
-    // Per owner 0 .. count - 1, the area-weighted centroid of its cells. Planar: the circular
-    // mean of columns and rows, in [0, width) and [0, height), z 0. Cube: the normalised mean of
-    // the centres. An owner without cells gets (0, 0, 0).
+    // Per owner 0 .. count - 1, the area-weighted mean direction of its centres
+    // (boundary_cube::meandirection: a vanishing sum takes the member cell nearest it);
+    // (0, 0, 0) for an owner without cells.
     std::vector<Vec3> centroids(const std::vector<std::uint32_t>& owners, std::uint32_t count) const;
-    // c's centre in the tangent plane at origin (a position as returned above), metres.
-    // Planar: the shortest torus offset (x, y) times the cell edge. Cube: gnomonic (east, north);
-    // NaN on the far hemisphere.
+    // c's centre in the tangent plane at origin (a unit vector), gnomonic (east, north) in
+    // metres; NaN on the far hemisphere.
     std::array<double, 2> tangentoffset_m(const Vec3& origin, CellId c) const;
 
 private:
     TectonicGrid() = default;
     void buildedges();
 
-    Kind kind_ = Kind::planar;
     std::size_t cellcount_ = 0;
-    std::uint32_t width_ = 0, height_ = 0;
     int facecells_ = 0;
-    double cell_m_ = 0, cell_area_m2_ = 0, totalarea_m2_ = 0;
+    double totalarea_m2_ = 0, cellspacing_m_ = 0;
     std::shared_ptr<const mesh::CellGrid> mesh_;
     std::vector<CellId> neighbours_;            // 4 per cell
     std::vector<std::uint8_t> continuing_;      // 4 per cell
-    std::vector<double> area_;                  // cube only
+    std::vector<std::uint32_t> edgeof_;         // 4 per cell
+    std::vector<double> area_, smallestedge_;
     std::vector<Edge> edges_;
 };
 
-// The guard of a module not yet ported to the cube (E2 removes each module's call):
-// a null table (unit tests) or the planar scaffold passes, the cube throws std::logic_error.
-inline void requireplanar(const TectonicGrid* grid, const char* module) {
-    if (grid && grid->kind() != TectonicGrid::Kind::planar)
-        throw std::logic_error(std::string(module) + ": not on the cube yet");
-}
+// E4: replace. The temporary 4N x 2N latitude-longitude proxy of the position-placed
+// processes (ocean relief, process variation, the noise pass, the seeding noise, the
+// deformation peak, margin multipliers): a cell's position is its centre's longitude and
+// latitude read as a point of a cell-centred 4N x 2N torus of cells cell_m() = 2 pi R / 4N
+// wide, so the torus formulas run unchanged on the sphere (with the seam at the date line
+// and the poles' rows squeezed). E4 moves each process onto the sphere and deletes it.
+class LatLonProxy {
+public:
+    LatLonProxy() = default;
+    explicit LatLonProxy(const TectonicGrid& grid);
+    std::uint32_t width() const { return width_; }    // 4N
+    std::uint32_t height() const { return height_; }  // 2N
+    double cell_m() const { return cell_m_; }
+    std::array<double, 2> extent_km() const;          // 2 pi R, pi R
+    // ((longitude + pi) / 2 pi, (pi / 2 - latitude) / pi), each in [0, 1).
+    std::array<double, 2> unitposition(CellId c) const;
+    // The same in proxy cells: unitposition times (width, height).
+    std::array<double, 2> cellposition(CellId c) const;
+
+private:
+    const mesh::CellGrid* mesh_ = nullptr;
+    std::uint32_t width_ = 0, height_ = 0;
+    double cell_m_ = 0;
+};
 
 } // namespace tectonics::grid
+
+// Helpers of the boundary products on the cube (W2-E, E2A), shared by provenance, the
+// boundary graph, junctions, their coupling and the deforming regions.
+namespace tectonics::boundary_cube {
+
+// The cube's unit of length for thresholds counted in cells (TectonicGrid::cellspacing_m).
+double cellspacing_m(const grid::TectonicGrid& grid);
+// A centroid on the cube goes into the contract's centroid_x and centroid_y as longitude and
+// latitude in degrees (the unit vector's), until contract schema 8 names them (E5).
+std::array<float, 2> encodecentroid(const mesh::Vec3& unit);
+mesh::Vec3 decodecentroid(float x, float y);
+// omega x p at the unit vector p in cells per update (radius / cellspacing), as 3-D tangent
+// components (x, y, z); a null rotation table or a plate past it is at rest. rotation: per
+// plate, radians per update.
+std::array<double, 3> velocity3(const grid::TectonicGrid& grid, const mesh::Vec3* rotation,
+                                uint32_t plate, uint32_t plate_count, const mesh::Vec3& p);
+// The same velocity as (east, north) at p.
+std::array<float, 2> velocity(const grid::TectonicGrid& grid, const mesh::Vec3* rotation,
+                              uint32_t plate, uint32_t plate_count, const mesh::Vec3& p);
+// A 3-D tangent vector at p as (east, north).
+std::array<double, 2> eastnorth(const mesh::Vec3& p, const mesh::Vec3& vector);
+// The mean direction of weighted unit vectors: sum / |sum|, or, when |sum| is below 1e-6 of
+// the total weight (points spread around a great circle), the member nearest the sum's
+// direction (ties and an exactly zero sum: the first member); (0, 0, 0) without members.
+mesh::Vec3 meandirection(const mesh::Vec3& sum, double weight, const std::vector<mesh::Vec3>& members);
+
+} // namespace tectonics::boundary_cube
 #endif

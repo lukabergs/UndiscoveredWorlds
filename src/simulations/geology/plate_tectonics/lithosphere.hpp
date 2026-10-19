@@ -44,29 +44,22 @@ using namespace std;
 
 namespace tectonics {
 
-// One plate (W2-E, E1): its identity, rotation, centroid, area and continental share. On the
-// planar scaffold the motion is the torus engine's: a translation in cells per update kept as a
-// unit direction and a speed (so the published velocities are unchanged); the rotation vector
-// stays zero until the spherical kinematics (E2C).
+// One plate (W2-E): its identity, rotation, centroid, area and continental share.
 struct PlateState {
     uint32_t stable_id = 0;
-    mesh::Vec3 rotation_rad_s;   // omega
-    mesh::Vec3 centroid;         // grid::TectonicGrid::centroids
+    mesh::Vec3 rotation_rad_s;   // omega: the plate moves omega x R c at the unit vector c
+    mesh::Vec3 centroid;         // grid::TectonicGrid::centroids (a unit vector)
     double area_m2 = 0;
     // Owned cells with crust whose owner material is continental, over owned cells with crust
     // (the torus engine's continentalAreaRatio).
     float continental_share = 0;
     // The share at the plate's creation (crust above 0), kept for a plate without crust cells.
     float creation_continental_share = 0;
-    float direction_x = 1, direction_y = 0;  // planar unit direction
-    float speed = 0;                         // planar speed, cells per update
 
-    // A new plate's motion drawn from its seed: speed 1 in a uniform direction (as the torus).
-    static PlateState fromSeed(uint32_t seed);
-    float velocityX() const { return direction_x * speed; }
-    float velocityY() const { return direction_y * speed; }
-    // Speed and unit direction of (x, y); below 1e-6 the plate stops facing +x.
-    void setVelocity(float x, float y);
+    // A new plate's motion drawn from its seed: a rotation about a pole uniform on the sphere
+    // whose equator moves one cell spacing per update (the torus engine's speed 1 in a uniform
+    // direction), until the first force balance.
+    static PlateState fromSeed(uint32_t seed, double spacing_m, double radius_m, double dt_s);
     bool isOceanic() const { return continental_share <= 0.10f; }
 };
 
@@ -127,6 +120,9 @@ class lithosphere {
     const tectonics::PhaseTimings& getPhaseTimings() const noexcept {
         return phase_timings;
     }
+    const tectonics::columns::TransportDiagnostics& getTransportDiagnostics() const noexcept {
+        return column_model.transportDiagnostics();
+    }
     uint32_t getPlateCount() const noexcept;    ///< Return number of plates.
     uint32_t getProvenancePlateCount() const noexcept;
     const uint32_t* getAgeMap() const noexcept; ///< Return surface age map.
@@ -137,8 +133,9 @@ class lithosphere {
     const float* getUpliftTendencyMap() const noexcept;
     /// Rock uplift rate, m/Myr, signed (columns::Model::upliftRate), republished each update.
     const float* getRockUpliftRateMap() const noexcept;
-    /// Cumulative shortening, m across one native cell width, and its axis, radians in [0, pi)
-    /// from x toward y (columns::Model::strain, shortening_m, shortening_direction), republished each update.
+    /// Cumulative shortening, m across one cell spacing, and its axis, radians in [0, pi) from
+    /// east toward south (columns::Model::strain, shortening_m, shortening_direction, the cell's
+    /// axes turned to geographic east), republished each update.
     const float* getShorteningMap() const noexcept;
     const float* getShorteningDirectionMap() const noexcept;
     const float* getSubsidenceTendencyMap() const noexcept;
@@ -177,13 +174,14 @@ class lithosphere {
     void importMetricHeightMap(const uint16_t* heightmap_m, uint16_t sea_level_m);
     void update();                              ///< Simulate one step of plate tectonics.
     const tectonics::columns::Model& getColumnModel() const { return column_model; }
-    /// Per-cell material displacement (cells/update) applied by the latest column update;
-    /// empty before the first physical update.
-    const std::vector<tectonics::columns::Displacement>& getMaterialDisplacement() const { return material_displacement; }
+    /// Per-cell material displacement of the latest column update, (east, north) in cell
+    /// spacings per update; empty before the first physical update.
+    const std::vector<tectonics::transport::Displacement>& getMaterialDisplacement() const { return material_displacement; }
     const tectonics::topology::Diagnostics& getTopologyDiagnostics() const { return topology_model.diagnostics(); }
     std::vector<double> getRiftDamage() const {
         return topology_model.damageField(imap);
     }
+    /// The id-order view of the cube's 6 N^2 cells as N columns x 6 N rows.
     uint32_t getWidth() const;
     uint32_t getHeight() const;
     bool isFinished() const;
@@ -216,6 +214,12 @@ class lithosphere {
     void updateColumns();
     void updateTensionMagnitudeMap() noexcept;
     void growPlates(std::vector<std::vector<uint32_t>>& borders);
+    // The mantle flow at every cell at a time (the cube's cell centres).
+    std::vector<tectonics::dynamics::MantleSample> mantleSamples(double time_myr) const;
+    // Each cell's rigid displacement this update, metres (omega x R c dt of its owner).
+    std::vector<mesh::Vec3> rigidDisplacement() const;
+    // Each plate's rotation over one update, radians.
+    std::vector<mesh::Vec3> plateRotations() const;
     void removeEmptyPlates();
     float internalToPhysicalMeters(float internal_height) const noexcept;
     float metersToInternalDelta(float delta_m) const noexcept;
@@ -227,8 +231,12 @@ class lithosphere {
     struct MotionSample { uint32_t a=UINT32_MAX,b=UINT32_MAX; double closing=0,ridge=0,slab=0; };
     std::vector<MotionSample> motion_history;
     double motion_history_time = -1;
+    std::shared_ptr<const tectonics::dynamics::SphereMantleFlow> mantle_flow;
+    mutable std::vector<tectonics::dynamics::MantleSample> mantle_cache; // the latest mantleSamples
+    mutable double mantle_cache_time = -1;
+    std::vector<mesh::Vec3> plate_rotation_update; // per plate, radians per update (boundary products)
     tectonics::columns::Model column_model;
-    std::vector<tectonics::columns::Displacement> material_displacement;
+    std::vector<tectonics::transport::Displacement> material_displacement;
     tectonics::topology::Model topology_model;
     tectonics::margins::Polarity subduction_polarity;
     std::vector<float> hmap;              ///< Physical topography used by the simulation.

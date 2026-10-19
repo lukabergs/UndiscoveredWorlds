@@ -11,7 +11,7 @@
 
 namespace tectonics::scenario {
 
-inline constexpr uint32_t kScenarioVersion = 3;
+inline constexpr uint32_t kScenarioVersion = 4;
 inline constexpr double kDefaultDeltaTimeMyr = 1.0;
 inline constexpr float kDefaultGravityMps2 = 9.80665f;
 inline constexpr int32_t kAutoCrustTypeBoundaryMeters = -1;
@@ -20,8 +20,9 @@ inline constexpr uint16_t kDefaultCrustTypeBoundaryOffsetMeters = 1200;
 struct Scenario {
     uint32_t version = kScenarioVersion;
     long seed = 0;
-    uint32_t width = 64;
-    uint32_t height = 32;
+    // The engine's cube: N cells per face edge (6 N^2 cells), on a sphere of radius_km.
+    uint32_t sphere_face_cells = 16;
+    double radius_km = 6371.0;
     float sea_level = 0.65f;
     uint32_t plate_count = 4;
     float erosion_strength = 1.0f;
@@ -73,8 +74,16 @@ struct Scenario {
     double continental_root_delamination_width_m = 0;
     bool sediment_load_feedback = false; // Include continental sediment in GPE and weak-crust redistribution.
     bool thermal_force_feedback = false; // Slab buoyancy follows advected thermal age, not chronological age.
-    double world_width_km = 40000.0;
     double mantle_flow_speed_cm_yr = 4.0;
+    // The mantle flow's shape (dynamics::MantleFlowShape): the noise's lattice spacing and
+    // octaves, the divergent pattern's wobble (radians of its cycle), the rotational pattern's
+    // drift (patterns per 600 Myr) and the rotational part's amplitude relative to the
+    // divergent one (mean square speeds 0.5 : ratio^2).
+    double mantle_flow_wavelength_km = 6371.0;
+    uint32_t mantle_flow_octaves = 2;
+    double mantle_flow_wobble = 0.3;
+    double mantle_flow_drift = 1.0;
+    double mantle_flow_shear_ratio = 0.35;
     uint32_t transport_subdivision = 2;
     double deformation_peak_km = 300.0;
     double deformation_variation = .2;

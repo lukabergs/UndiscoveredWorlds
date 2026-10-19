@@ -1,6 +1,5 @@
 #include "simulations/geology/plate_tectonics/tectonic_boundary_graph.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_grid.hpp"
-#include "simulations/geology/plate_tectonics/tectonic_provenance.hpp"
 
 #include "core/mesh/mesh_geometry.hpp"
 
@@ -10,7 +9,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
-#include <memory>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -25,34 +23,16 @@ using tectonics::contract::CrustClass;
 using tectonics::contract::GeologicRegime;
 using tectonics::grid::TectonicGrid;
 
-constexpr double kTwoPi = 6.28318530717958647692;
-
 uint8_t average_score(uint8_t a, uint8_t b) {
     return static_cast<uint8_t>((static_cast<uint32_t>(a) + static_cast<uint32_t>(b) + 1U) / 2U);
 }
 
-float wrapped_distance(float a, float b, float period) {
-    float delta = a - b;
-    const float half_period = period * 0.5f;
-    if (delta > half_period) {
-        delta -= period;
-    } else if (delta < -half_period) {
-        delta += period;
-    }
-    return delta;
-}
-
-// Between two segment centroids in cells: the wrapped offset on the scaffold, the great circle
-// over the cube's cell spacing on the cube (centroids as longitude and latitude).
+// Between two segment centroids (longitude and latitude) in cells: the great circle over the
+// cell spacing.
 float centroid_distance(const TectonicGrid& grid, float x0, float y0, float x1, float y1) {
-    if (grid.kind() == TectonicGrid::Kind::cube) {
-        const double arc = mesh::greatcircle_rad(boundary_cube::decodecentroid(x0, y0),
-                                                 boundary_cube::decodecentroid(x1, y1));
-        return static_cast<float>(arc * grid.mesh()->radius_m() / boundary_cube::cellspacing_m(grid));
-    }
-    const float dx = wrapped_distance(x0, x1, static_cast<float>(grid.width()));
-    const float dy = wrapped_distance(y0, y1, static_cast<float>(grid.height()));
-    return std::sqrt(dx * dx + dy * dy);
+    const double arc = mesh::greatcircle_rad(boundary_cube::decodecentroid(x0, y0),
+                                             boundary_cube::decodecentroid(x1, y1));
+    return static_cast<float>(arc * grid.radius_m() / grid.cellspacing_m());
 }
 
 GeologicRegime regime_from_byte(const uint8_t value) {
@@ -187,7 +167,7 @@ struct CellSeed {
 CellSeed build_seed_for_cell(const Inputs& inputs, const TectonicGrid& grid, size_t index) {
     CellSeed best;
     const uint32_t plate = inputs.plate_id[index];
-    // West, east, north, south: the torus stencil's x - 1, x + 1, y - 1, y + 1.
+    // West, east, north, south.
     const auto neighbours = grid.neighbours(static_cast<grid::CellId>(index));
 
     for (size_t i = 0; i < 4; ++i) {
@@ -311,16 +291,10 @@ Outputs build(const Inputs& inputs) {
     Outputs outputs;
     outputs.next_boundary_id = inputs.next_boundary_id;
 
-    std::shared_ptr<const TectonicGrid> owned;
     const TectonicGrid* grid = inputs.grid;
-    if (grid == nullptr && inputs.width != 0U && inputs.height != 0U) {
-        owned = TectonicGrid::planar(inputs.width, inputs.height, static_cast<double>(inputs.width));
-        grid = owned.get();
-    }
     if (grid == nullptr) {
         return outputs;
     }
-    const bool cube = grid->kind() == TectonicGrid::Kind::cube;
 
     const size_t cell_count = grid->cellcount();
     outputs.boundary_segment_id.assign(cell_count, contract::kNoBoundaryId);
@@ -366,13 +340,9 @@ Outputs build(const Inputs& inputs) {
         uint64_t shear_total = 0U;
         double normal_total = 0.0;
         double shear_total_f = 0.0;
-        // The scaffold's circular means of columns and rows; the cube's area-weighted sum of
-        // centre unit vectors.
-        double x_sin_sum = 0.0;
-        double x_cos_sum = 0.0;
-        double y_sin_sum = 0.0;
-        double y_cos_sum = 0.0;
+        // The area-weighted sum of centre unit vectors and its weight.
         mesh::Vec3 unit_sum;
+        double area_sum = 0.0;
 
         while (!frontier.empty()) {
             const uint32_t current = frontier.back();
@@ -396,20 +366,8 @@ Outputs build(const Inputs& inputs) {
             normal_total += static_cast<double>(current_seed.normal_motion);
             shear_total_f += static_cast<double>(current_seed.shear_motion);
 
-            if (cube) {
-                unit_sum = unit_sum + grid->area_m2(current) * grid->mesh()->centre(current);
-            } else {
-                const uint32_t cx = static_cast<uint32_t>(current % grid->width());
-                const uint32_t cy = static_cast<uint32_t>(current / grid->width());
-                const double x_angle =
-                    kTwoPi * (static_cast<double>(cx) / static_cast<double>(grid->width()));
-                const double y_angle =
-                    kTwoPi * (static_cast<double>(cy) / static_cast<double>(grid->height()));
-                x_sin_sum += std::sin(x_angle);
-                x_cos_sum += std::cos(x_angle);
-                y_sin_sum += std::sin(y_angle);
-                y_cos_sum += std::cos(y_angle);
-            }
+            unit_sum = unit_sum + grid->area_m2(current) * grid->position(current);
+            area_sum += grid->area_m2(current);
 
             const GeologicRegime hint = current_seed.regime_hint;
             const size_t regime_index = static_cast<size_t>(hint);
@@ -433,22 +391,13 @@ Outputs build(const Inputs& inputs) {
             continue;
         }
 
-        float centroid_x = 0.0f;
-        float centroid_y = 0.0f;
-        if (cube) {
-            const auto centroid = boundary_cube::encodecentroid(mesh::normalise(unit_sum));
-            centroid_x = centroid[0];
-            centroid_y = centroid[1];
-        } else {
-            const double x_angle = std::atan2(x_sin_sum, x_cos_sum);
-            const double y_angle = std::atan2(y_sin_sum, y_cos_sum);
-            centroid_x = static_cast<float>(
-                (x_angle < 0.0 ? x_angle + kTwoPi : x_angle) / kTwoPi *
-                static_cast<double>(grid->width()));
-            centroid_y = static_cast<float>(
-                (y_angle < 0.0 ? y_angle + kTwoPi : y_angle) / kTwoPi *
-                static_cast<double>(grid->height()));
-        }
+        // A component around a great circle (a vanishing sum) takes its cell nearest the sum.
+        std::vector<mesh::Vec3> members;
+        if (mesh::length(unit_sum) < 1e-6 * area_sum)
+            for (const uint32_t cell : component_cells) members.push_back(grid->position(cell));
+        const auto centroid = boundary_cube::encodecentroid(boundary_cube::meandirection(unit_sum, area_sum, members));
+        const float centroid_x = centroid[0];
+        const float centroid_y = centroid[1];
         const uint32_t matched_id = choose_persistent_id(
             inputs, *grid, previous_by_id, component_cells, start_seed.boundary_type, centroid_x,
             centroid_y, claimed_previous_ids);

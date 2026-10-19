@@ -2,53 +2,9 @@
 #include "simulations/geology/plate_tectonics/tectonic_grid.hpp"
 
 #include "simulations/geology/plate_tectonics/topography_codec.hpp"
-#include "simulations/geology/plate_tectonics/tectonic_kinematics.hpp"
 
 #include <algorithm>
 #include <cmath>
-#include <memory>
-
-namespace tectonics::boundary_cube {
-
-namespace {
-constexpr double kDegrees = 57.295779513082320876798154814105;
-} // namespace
-
-double cellspacing_m(const grid::TectonicGrid& grid) {
-    return std::sqrt(grid.totalarea_m2() / static_cast<double>(grid.cellcount()));
-}
-
-std::array<float, 2> encodecentroid(const mesh::Vec3& unit) {
-    return {static_cast<float>(mesh::longitudeof(unit) * kDegrees),
-            static_cast<float>(mesh::latitudeof(unit) * kDegrees)};
-}
-
-mesh::Vec3 decodecentroid(float x, float y) {
-    return mesh::unitvector(static_cast<double>(y) / kDegrees, static_cast<double>(x) / kDegrees);
-}
-
-std::array<double, 3> velocity3(const grid::TectonicGrid& grid, const mesh::Vec3* rotation,
-                                uint32_t plate, uint32_t plate_count, const mesh::Vec3& p) {
-    if (rotation == nullptr || plate >= plate_count || grid.mesh() == nullptr) return {0.0, 0.0, 0.0};
-    const double scale = grid.mesh()->radius_m() / cellspacing_m(grid);
-    const mesh::Vec3 v = scale * mesh::cross(rotation[plate], p);
-    return {v.x, v.y, v.z};
-}
-
-std::array<double, 2> eastnorth(const mesh::Vec3& p, const mesh::Vec3& vector) {
-    const double latitude = mesh::latitudeof(p), longitude = mesh::longitudeof(p);
-    return {mesh::dot(vector, mesh::eastof(latitude, longitude)),
-            mesh::dot(vector, mesh::northof(latitude, longitude))};
-}
-
-std::array<float, 2> velocity(const grid::TectonicGrid& grid, const mesh::Vec3* rotation,
-                              uint32_t plate, uint32_t plate_count, const mesh::Vec3& p) {
-    const auto v = velocity3(grid, rotation, plate, plate_count, p);
-    const auto en = eastnorth(p, {v[0], v[1], v[2]});
-    return {static_cast<float>(en[0]), static_cast<float>(en[1])};
-}
-
-} // namespace tectonics::boundary_cube
 
 namespace tectonics::provenance {
 
@@ -73,31 +29,12 @@ bool is_continental(const Inputs& inputs, size_t index) {
            crust == contract::CrustClass::Transitional;
 }
 
-// Any of the eight neighbours (the 3 x 3 stencil on the scaffold, the mesh's slots 1..8 on the
-// cube, where a corner cell has seven) is sea (want_sea) or land.
+// Any of the eight neighbours (the mesh's slots 1..8; a cube corner cell has seven) is sea
+// (want_sea) or land.
 bool has_adjacent(const Inputs& inputs, const TectonicGrid& grid, size_t index, bool want_sea) {
-    if (grid.kind() == TectonicGrid::Kind::cube) {
-        for (int slot = 1; slot <= mesh::slotcount; ++slot) {
-            const std::int32_t n = grid.mesh()->neighbour(static_cast<grid::CellId>(index), slot);
-            if (n >= 0 && is_sea(inputs, static_cast<size_t>(n)) == want_sea) return true;
-        }
-        return false;
-    }
-    const int width = static_cast<int>(grid.width());
-    const int height = static_cast<int>(grid.height());
-    const int x = static_cast<int>(index % grid.width());
-    const int y = static_cast<int>(index / grid.width());
-    for (int dy = -1; dy <= 1; ++dy) {
-        for (int dx = -1; dx <= 1; ++dx) {
-            if (dx == 0 && dy == 0) {
-                continue;
-            }
-            const int ny = (y + dy + height) % height;
-            const int nx = (x + dx + width) % width;
-            if (is_sea(inputs, static_cast<size_t>(ny) * grid.width() + static_cast<size_t>(nx)) == want_sea) {
-                return true;
-            }
-        }
+    for (int slot = 1; slot <= mesh::slotcount; ++slot) {
+        const std::int32_t n = grid.mesh()->neighbour(static_cast<grid::CellId>(index), slot);
+        if (n >= 0 && is_sea(inputs, static_cast<size_t>(n)) == want_sea) return true;
     }
     return false;
 }
@@ -196,38 +133,12 @@ bool is_contact(const Inputs& inputs, size_t index, size_t neighbor_index) {
            neighbor_plate < inputs.plate_count;
 }
 
-// The scaffold: the torus engine's float arithmetic at the shared face's centre in cells.
-void record_planar_edge(const Inputs& inputs, const TectonicGrid& grid, const grid::Edge& edge,
-                        Signals& signals) {
+// Both plates' omega x p at the shared edge's midpoint, against the edge's normal.
+void record_edge(const Inputs& inputs, const TectonicGrid& grid, const grid::Edge& edge, Signals& signals) {
     const size_t index = edge.a;
     const size_t neighbor_index = edge.b;
     if (!is_contact(inputs, index, neighbor_index)) return;
-    const float normal_x = edge.axis == 0 ? 1.0f : 0.0f;
-    const float normal_y = edge.axis == 0 ? 0.0f : 1.0f;
-    const uint32_t x = static_cast<uint32_t>(index % grid.width());
-    const uint32_t y = static_cast<uint32_t>(index / grid.width());
-    const float boundary_x = static_cast<float>(x) + 0.5f * normal_x;
-    const float boundary_y = static_cast<float>(y) + 0.5f * normal_y;
-    const auto first = kinematics::local_velocity(inputs.plates[inputs.plate_id[index]], boundary_x,
-                                                 boundary_y, grid.width(), grid.height());
-    const auto second = kinematics::local_velocity(inputs.plates[inputs.plate_id[neighbor_index]],
-                                                  boundary_x, boundary_y, grid.width(), grid.height());
-    const float relative_x = first.x - second.x;
-    const float relative_y = first.y - second.y;
-    if (!std::isfinite(relative_x) || !std::isfinite(relative_y)) return;
-    const float boundary_motion = relative_x * normal_x + relative_y * normal_y;
-    const float tangential_motion =
-        std::fabs(relative_x * (-normal_y) + relative_y * normal_x);
-    record_motion(inputs, index, neighbor_index, boundary_motion, tangential_motion, signals);
-}
-
-// The cube: both plates' omega x p at the shared edge's midpoint, against the edge's normal.
-void record_cube_edge(const Inputs& inputs, const TectonicGrid& grid, const grid::Edge& edge,
-                      Signals& signals) {
-    const size_t index = edge.a;
-    const size_t neighbor_index = edge.b;
-    if (!is_contact(inputs, index, neighbor_index)) return;
-    const mesh::Vec3 p = mesh::normalise(grid.mesh()->centre(edge.a) + grid.mesh()->centre(edge.b));
+    const mesh::Vec3 p = edge.midpoint;
     const auto first = boundary_cube::velocity3(grid, inputs.plate_rotation, inputs.plate_id[index],
                                                 inputs.plate_count, p);
     const auto second = boundary_cube::velocity3(grid, inputs.plate_rotation,
@@ -245,12 +156,7 @@ void record_cube_edge(const Inputs& inputs, const TectonicGrid& grid, const grid
 void compute_maps(const Inputs& inputs, uint8_t* convergence_score,
                   uint8_t* divergence_score, uint8_t* shear_score,
                   uint8_t* geologic_regime) {
-    std::shared_ptr<const TectonicGrid> owned;
     const TectonicGrid* grid = inputs.grid;
-    if (grid == nullptr && inputs.width != 0 && inputs.height != 0) {
-        owned = TectonicGrid::planar(inputs.width, inputs.height, static_cast<double>(inputs.width));
-        grid = owned.get();
-    }
     if (grid == nullptr || inputs.heightmap == nullptr ||
         inputs.plate_id == nullptr || convergence_score == nullptr ||
         divergence_score == nullptr || shear_score == nullptr ||
@@ -265,7 +171,7 @@ void compute_maps(const Inputs& inputs, uint8_t* convergence_score,
     std::fill(geologic_regime, geologic_regime + cell_count,
               static_cast<uint8_t>(contract::GeologicRegime::Stable));
 
-    if (inputs.plate_count == 0 || inputs.plates == nullptr) {
+    if (inputs.plate_count == 0) {
         return;
     }
 
@@ -274,12 +180,8 @@ void compute_maps(const Inputs& inputs, uint8_t* convergence_score,
     signals.divergence.assign(cell_count, 0.0f);
     signals.shear.assign(cell_count, 0.0f);
     signals.convergent_regime.assign(cell_count, contract::GeologicRegime::Stable);
-    // Every contact once: on the scaffold edge 2 i is (i, east), 2 i + 1 is (i, south).
-    const bool cube = grid->kind() == TectonicGrid::Kind::cube;
-    for (const grid::Edge& edge : grid->edges()) {
-        if (cube) record_cube_edge(inputs, *grid, edge, signals);
-        else record_planar_edge(inputs, *grid, edge, signals);
-    }
+    // Every contact once.
+    for (const grid::Edge& edge : grid->edges()) record_edge(inputs, *grid, edge, signals);
 
     for (size_t index = 0; index < cell_count; ++index) {
         convergence_score[index] = normalize_tectonic_signal(signals.convergence[index], inputs.velocity_to_cm_yr);

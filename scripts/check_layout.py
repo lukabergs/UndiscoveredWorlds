@@ -16,7 +16,7 @@ ROOT_DIRECTORIES = {
 TECTONICS_ENGINE = ROOT / "src/simulations/geology/plate_tectonics"
 TECTONICS_PUBLIC_HEADERS = {
     "tectonic_api.hpp", "tectonic_contract.hpp", "tectonic_recipe.hpp", "tectonic_scenario.hpp",
-    "tectonic_world_grid.hpp", "topography_codec.hpp", "material.hpp", "utils.hpp",
+    "topography_codec.hpp", "material.hpp", "utils.hpp",
 }
 SOURCE_SUFFIXES = {".cpp", ".hpp", ".h", ".inc", ".cu"}
 # Written into the build directory by tectonic_recipe.cmake.

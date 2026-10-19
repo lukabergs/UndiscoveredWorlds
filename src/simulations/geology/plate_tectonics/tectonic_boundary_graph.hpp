@@ -10,8 +10,6 @@ namespace tectonics::grid { class TectonicGrid; }
 namespace tectonics::boundary_graph {
 
 struct Inputs {
-    uint32_t width = 0;
-    uint32_t height = 0;
     const uint32_t* plate_id = nullptr;
     const uint8_t* convergence_score = nullptr;
     const uint8_t* divergence_score = nullptr;
@@ -24,7 +22,8 @@ struct Inputs {
     uint32_t previous_segment_count = 0;
     uint32_t next_boundary_id = contract::kNoBoundaryId + 1U;
     double delta_time_myr = 0.0;
-    // The engine's cell table (W2-E); null for synthetic inputs, which use width x height.
+    // The engine's cell table (required: empty outputs without it). Segment centroids are
+    // longitude and latitude in degrees (boundary_cube::encodecentroid).
     const grid::TectonicGrid* grid = nullptr;
 };
 

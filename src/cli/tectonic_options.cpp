@@ -77,10 +77,8 @@ bool parse_scenario_arg(tectonics::scenario::Scenario& scenario, const std::stri
                         const char* value) {
     if (arg == "--seed") {
         scenario.seed = parse_long("--seed", value);
-    } else if (arg == "--width") {
-        scenario.width = parse_u32("--width", value);
-    } else if (arg == "--height") {
-        scenario.height = parse_u32("--height", value);
+    } else if (arg == "--sphere-face-cells") {
+        scenario.sphere_face_cells = parse_u32("--sphere-face-cells", value);
     } else if (arg == "--sea-level") {
         scenario.sea_level = parse_float("--sea-level", value);
     } else if (arg == "--plates") {
@@ -97,10 +95,20 @@ bool parse_scenario_arg(tectonics::scenario::Scenario& scenario, const std::stri
         scenario.initial_land_relief_m = parse_u16("--initial-land-relief-m", value);
     } else if (arg == "--evolution-duration-myr") {
         scenario.evolution_duration_myr = parse_double("--evolution-duration-myr", value);
-    } else if (arg == "--world-width-km") {
-        scenario.world_width_km = parse_double("--world-width-km", value);
+    } else if (arg == "--radius-km") {
+        scenario.radius_km = parse_double("--radius-km", value);
     } else if (arg == "--mantle-flow-speed-cm-yr") {
         scenario.mantle_flow_speed_cm_yr = parse_double("--mantle-flow-speed-cm-yr", value);
+    } else if (arg == "--mantle-flow-wavelength-km") {
+        scenario.mantle_flow_wavelength_km = parse_double(arg.c_str(), value);
+    } else if (arg == "--mantle-flow-octaves") {
+        scenario.mantle_flow_octaves = parse_u32(arg.c_str(), value);
+    } else if (arg == "--mantle-flow-wobble") {
+        scenario.mantle_flow_wobble = parse_double(arg.c_str(), value);
+    } else if (arg == "--mantle-flow-drift") {
+        scenario.mantle_flow_drift = parse_double(arg.c_str(), value);
+    } else if (arg == "--mantle-flow-shear-ratio") {
+        scenario.mantle_flow_shear_ratio = parse_double(arg.c_str(), value);
     } else if (arg == "--transport-subdivision") {
         scenario.transport_subdivision = parse_u32("--transport-subdivision", value);
     } else if (arg == "--deformation-peak-km") {
@@ -280,8 +288,10 @@ bool parse_scenario_arg(tectonics::scenario::Scenario& scenario, const std::stri
 
 bool parsetectonicoption(tectonics::scenario::Scenario& scenario, const std::string& argument, const std::string& value)
 {
-    // The grid and the seed belong to the run (--resolution, --seed), not to the scenario.
-    if (argument == "--seed" || argument == "--width" || argument == "--height")
+    // The seed belongs to the run (--seed), not to the scenario. On the world grid (the
+    // tectonics recipe) the run also sets the cube (N = W / 4) and every run the radius (the
+    // world's body); --sphere-face-cells and --radius-km act on the engine's own grid only.
+    if (argument == "--seed")
         return false;
     return parse_scenario_arg(scenario, argument, value.c_str());
 }
@@ -298,8 +308,14 @@ void printtectonicoptionsusage(std::ostream& out)
         "--initial-ocean-depth-m",
         "--initial-land-relief-m",
         "--evolution-duration-myr",
-        "--world-width-km",
+        "--sphere-face-cells",
+        "--radius-km",
         "--mantle-flow-speed-cm-yr",
+        "--mantle-flow-wavelength-km",
+        "--mantle-flow-octaves",
+        "--mantle-flow-wobble",
+        "--mantle-flow-drift",
+        "--mantle-flow-shear-ratio",
         "--transport-subdivision",
         "--deformation-peak-km",
         "--deformation-variation",

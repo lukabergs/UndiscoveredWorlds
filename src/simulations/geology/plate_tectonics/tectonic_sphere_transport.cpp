@@ -475,7 +475,7 @@ std::vector<PlateLayer> Stencil::transport(const std::vector<const std::vector<d
                 reference[group.domain[j]] = step == 0 ? 1 : group.history[(step - 1) * span + j];
             for (const CellId c : group.reach) {
                 const double cov = current[0][c], r = reference[c];
-                full[c] = cov > 0 && std::abs(cov - r) <= 1e-12 * r;
+                full[c] = cov > 0 && cov == r;  // bit-equal: an intact interior
             }
             substep(l, group.reach, entryof, layout, &mark, true, &reference, &full, current, next);
         }

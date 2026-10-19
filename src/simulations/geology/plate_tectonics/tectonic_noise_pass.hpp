@@ -14,11 +14,10 @@ struct Parameters {
 void validate(const Parameters& parameters);
 // Conservative face transfers driven by the change in a bounded, continuous
 // noise potential. No new material, per-step RNG draws, or initialization pass.
-// The transfers run over the cell table (metric; null: the planar scaffold of width x
-// height); the noise itself is planar until E4 (a cube metric with amplitude > 0 throws).
-double apply(uint32_t width,uint32_t height,double cell_m,std::vector<columns::Cell>& cells,
+// The transfers run over the cell table with the non-orthogonal correction. E4: replace. The
+// noise potential is the torus pattern read at the 4N x 2N lat-lon proxy position.
+double apply(const columns::Metric& metric,std::vector<columns::Cell>& cells,
              long seed,double start_myr,double end_myr,const Parameters& parameters,double thermal_strength = 1,
-             double root_kg_m3 = 0, double root_max_thickness_m = 0, double root_delamination_width_m = 0,
-             const columns::Metric* metric = nullptr);
+             double root_kg_m3 = 0, double root_max_thickness_m = 0, double root_delamination_width_m = 0);
 }
 #endif

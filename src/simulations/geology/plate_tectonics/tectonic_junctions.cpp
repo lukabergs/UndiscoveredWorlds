@@ -1,7 +1,5 @@
 #include "simulations/geology/plate_tectonics/tectonic_junctions.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_grid.hpp"
-#include "simulations/geology/plate_tectonics/tectonic_kinematics.hpp"
-#include "simulations/geology/plate_tectonics/tectonic_provenance.hpp"
 
 #include "core/mesh/mesh_geometry.hpp"
 
@@ -11,7 +9,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
-#include <memory>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -22,53 +19,21 @@ using tectonics::contract::BoundarySegment;
 using tectonics::contract::BoundaryType;
 using tectonics::contract::JunctionArmType;
 using tectonics::contract::JunctionStability;
-using tectonics::contract::PlateKinematics;
 using tectonics::contract::TectonicJunction;
 using tectonics::grid::TectonicGrid;
 
-constexpr double kTwoPi = 6.28318530717958647692;
 constexpr double kPi = 3.14159265358979323846;
 constexpr int kProbePadding = 2;
 constexpr int kOrientationRadius = 6;
-// The cube's windows: discs of the scaffold windows' areas, (2 kProbePadding + 2)^2 cells
+// The windows: discs of the torus engine's square windows' areas, (2 kProbePadding + 2)^2 cells
 // around a candidate vertex and (2 kOrientationRadius + 1)^2 around a junction, radii in cells.
 const double kCubeProbeRadius = (2.0 * kProbePadding + 2.0) / std::sqrt(kPi);
 const double kCubeOrientationRadius = (2.0 * kOrientationRadius + 1.0) / std::sqrt(kPi);
-
-bool on_cube(const Inputs& inputs) {
-    return inputs.grid != nullptr && inputs.grid->kind() == TectonicGrid::Kind::cube;
-}
 constexpr float kMinStabilityOrientationQuality = 0.25f;
 constexpr float kStableConstraintError = 0.25f;
 
-size_t map_index(uint32_t x, uint32_t y, uint32_t width) {
-    return static_cast<size_t>(y) * static_cast<size_t>(width) + static_cast<size_t>(x);
-}
-
-uint32_t wrapped_add(uint32_t value, int offset, uint32_t limit) {
-    int64_t shifted = static_cast<int64_t>(value) + static_cast<int64_t>(offset);
-    const int64_t period = static_cast<int64_t>(limit);
-    shifted %= period;
-    if (shifted < 0) {
-        shifted += period;
-    }
-    return static_cast<uint32_t>(shifted);
-}
-
 float clamp_unit(float value) {
     return std::max(0.0f, std::min(1.0f, value));
-}
-
-float wrapped_delta(float value, float center, uint32_t period) {
-    float delta = value - center;
-    const float period_f = static_cast<float>(period);
-    const float half_period = period_f * 0.5f;
-    if (delta > half_period) {
-        delta -= period_f;
-    } else if (delta < -half_period) {
-        delta += period_f;
-    }
-    return delta;
 }
 
 bool add_unique_plate(std::array<uint32_t, 4>& plates, uint32_t& count, uint32_t plate_id) {
@@ -143,11 +108,8 @@ struct JunctionKey {
 
 struct JunctionAccumulator {
     uint32_t candidate_count = 0;
-    double x_sin_sum = 0.0;
-    double x_cos_sum = 0.0;
-    double y_sin_sum = 0.0;
-    double y_cos_sum = 0.0;
-    mesh::Vec3 unit_sum;  // the cube: the candidate vertices' unit vectors
+    mesh::Vec3 unit_sum;  // the candidate vertices' unit vectors
+    std::vector<mesh::Vec3> members;
 };
 
 struct OrientationEstimate {
@@ -204,39 +166,12 @@ Vec2 normalized(Vec2 value) {
     return Vec2{value.x / magnitude, value.y / magnitude};
 }
 
-Vec2 local_plate_velocity(const PlateKinematics& plate, float x, float y,
-                          uint32_t width, uint32_t height) {
-    const auto velocity = kinematics::local_velocity(plate, x, y, width, height);
-    return Vec2{velocity.x, velocity.y};
-}
-
 Vec2 subtract(Vec2 a, Vec2 b) {
     return Vec2{a.x - b.x, a.y - b.y};
 }
 
 Vec2 midpoint(Vec2 a, Vec2 b) {
     return Vec2{(a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f};
-}
-
-void add_candidate_position(JunctionAccumulator& accumulator, uint32_t x, uint32_t y,
-                            uint32_t width, uint32_t height) {
-    const double x_angle =
-        kTwoPi * ((static_cast<double>(x) + 0.5) / static_cast<double>(width));
-    const double y_angle =
-        kTwoPi * ((static_cast<double>(y) + 0.5) / static_cast<double>(height));
-    accumulator.x_sin_sum += std::sin(x_angle);
-    accumulator.x_cos_sum += std::cos(x_angle);
-    accumulator.y_sin_sum += std::sin(y_angle);
-    accumulator.y_cos_sum += std::cos(y_angle);
-    ++accumulator.candidate_count;
-}
-
-float circular_centroid(double sin_sum, double cos_sum, uint32_t period) {
-    double angle = std::atan2(sin_sum, cos_sum);
-    if (angle < 0.0) {
-        angle += kTwoPi;
-    }
-    return static_cast<float>((angle / kTwoPi) * static_cast<double>(period));
 }
 
 OrientationEstimate estimate_orientation(const Inputs& inputs, uint32_t segment_id,
@@ -261,38 +196,18 @@ OrientationEstimate estimate_orientation(const Inputs& inputs, uint32_t segment_
         ++sample_count;
     };
 
-    if (on_cube(inputs)) {
-        // The segment's cells within the disc, as (east, north) offsets in cells in the tangent
-        // plane at the junction.
-        const TectonicGrid& grid = *inputs.grid;
-        const double spacing = boundary_cube::cellspacing_m(grid);
-        const mesh::Vec3 origin = boundary_cube::decodecentroid(centroid_x, centroid_y);
-        for (const grid::CellId c :
-             mesh::cellswithin(*grid.mesh(), origin, kCubeOrientationRadius * spacing)) {
-            if (inputs.boundary_segment_id[c] != segment_id) {
-                continue;
-            }
-            const auto offset = grid.tangentoffset_m(origin, c);
-            if (std::isfinite(offset[0]) && std::isfinite(offset[1])) {
-                add_sample(offset[0] / spacing, offset[1] / spacing);
-            }
+    // The segment's cells within the disc, as (east, north) offsets in cells in the tangent
+    // plane at the junction.
+    const TectonicGrid& grid = *inputs.grid;
+    const double spacing = grid.cellspacing_m();
+    const mesh::Vec3 origin = boundary_cube::decodecentroid(centroid_x, centroid_y);
+    for (const grid::CellId c : mesh::cellswithin(*grid.mesh(), origin, kCubeOrientationRadius * spacing)) {
+        if (inputs.boundary_segment_id[c] != segment_id) {
+            continue;
         }
-    } else {
-        const auto center_x = static_cast<int>(std::floor(centroid_x));
-        const auto center_y = static_cast<int>(std::floor(centroid_y));
-        for (int oy = -kOrientationRadius; oy <= kOrientationRadius; ++oy) {
-            for (int ox = -kOrientationRadius; ox <= kOrientationRadius; ++ox) {
-                const uint32_t x = wrapped_add(static_cast<uint32_t>(center_x), ox, inputs.width);
-                const uint32_t y = wrapped_add(static_cast<uint32_t>(center_y), oy, inputs.height);
-                if (inputs.boundary_segment_id[map_index(x, y, inputs.width)] != segment_id) {
-                    continue;
-                }
-
-                add_sample(static_cast<double>(wrapped_delta(static_cast<float>(x) + 0.5f,
-                                                             centroid_x, inputs.width)),
-                           static_cast<double>(wrapped_delta(static_cast<float>(y) + 0.5f,
-                                                             centroid_y, inputs.height)));
-            }
+        const auto offset = grid.tangentoffset_m(origin, c);
+        if (std::isfinite(offset[0]) && std::isfinite(offset[1])) {
+            add_sample(offset[0] / spacing, offset[1] / spacing);
         }
     }
 
@@ -331,26 +246,17 @@ OrientationEstimate estimate_orientation(const Inputs& inputs, uint32_t segment_
     return estimate;
 }
 
-bool gather_plate_kinematics(const Inputs& inputs, const TectonicJunction& junction,
-                             std::array<const PlateKinematics*, 3>& plates) {
-    if (inputs.plates == nullptr || inputs.plate_count == 0U) {
+// The junction's three plates exist and their rotations (when given) are finite.
+bool plates_valid(const Inputs& inputs, const TectonicJunction& junction) {
+    if (inputs.plate_count == 0U) {
         return false;
     }
-
-    for (size_t i = 0; i < plates.size(); ++i) {
-        if (junction.plate_ids[i] >= inputs.plate_count) {
+    for (const uint32_t plate : junction.plate_ids) {
+        if (plate >= inputs.plate_count) {
             return false;
         }
-        plates[i] = &inputs.plates[junction.plate_ids[i]];
-        if (!std::isfinite(plates[i]->linear_velocity_x) ||
-            !std::isfinite(plates[i]->linear_velocity_y) ||
-            !std::isfinite(plates[i]->angular_velocity) ||
-            !std::isfinite(plates[i]->mass_center_x) ||
-            !std::isfinite(plates[i]->mass_center_y)) {
-            return false;
-        }
-        if (on_cube(inputs) && inputs.plate_rotation != nullptr) {
-            const mesh::Vec3& rotation = inputs.plate_rotation[junction.plate_ids[i]];
+        if (inputs.plate_rotation != nullptr) {
+            const mesh::Vec3& rotation = inputs.plate_rotation[plate];
             if (!std::isfinite(rotation.x) || !std::isfinite(rotation.y) || !std::isfinite(rotation.z)) {
                 return false;
             }
@@ -359,24 +265,14 @@ bool gather_plate_kinematics(const Inputs& inputs, const TectonicJunction& junct
     return true;
 }
 
-std::array<Vec2, 3> local_plate_velocities(
-    const Inputs& inputs, const TectonicJunction& junction,
-    const std::array<const PlateKinematics*, 3>& plates) {
+// omega x p at the junction, (east, north) in cells per update.
+std::array<Vec2, 3> local_plate_velocities(const Inputs& inputs, const TectonicJunction& junction) {
     std::array<Vec2, 3> velocities{};
-    if (on_cube(inputs)) {
-        // omega x p at the junction, (east, north) in cells per update.
-        const mesh::Vec3 p = boundary_cube::decodecentroid(junction.centroid_x, junction.centroid_y);
-        for (size_t i = 0; i < velocities.size(); ++i) {
-            const auto v = boundary_cube::velocity(*inputs.grid, inputs.plate_rotation,
-                                                   junction.plate_ids[i], inputs.plate_count, p);
-            velocities[i] = Vec2{v[0], v[1]};
-        }
-        return velocities;
-    }
+    const mesh::Vec3 p = boundary_cube::decodecentroid(junction.centroid_x, junction.centroid_y);
     for (size_t i = 0; i < velocities.size(); ++i) {
-        velocities[i] =
-            local_plate_velocity(*plates[i], junction.centroid_x, junction.centroid_y,
-                                 inputs.width, inputs.height);
+        const auto v = boundary_cube::velocity(*inputs.grid, inputs.plate_rotation,
+                                               junction.plate_ids[i], inputs.plate_count, p);
+        velocities[i] = Vec2{v[0], v[1]};
     }
     return velocities;
 }
@@ -432,13 +328,11 @@ float arm_mode_residual(const TectonicJunction& junction, const ArmKinematics& a
 }
 
 void populate_velocity_metrics(const Inputs& inputs, TectonicJunction& junction) {
-    std::array<const PlateKinematics*, 3> plates{};
-    if (!gather_plate_kinematics(inputs, junction, plates)) {
+    if (!plates_valid(inputs, junction)) {
         return;
     }
 
-    const std::array<Vec2, 3> local_velocities =
-        local_plate_velocities(inputs, junction, plates);
+    const std::array<Vec2, 3> local_velocities = local_plate_velocities(inputs, junction);
     junction.junction_velocity_x =
         (local_velocities[0].x + local_velocities[1].x + local_velocities[2].x) / 3.0f;
     junction.junction_velocity_y =
@@ -601,15 +495,13 @@ void populate_stability_diagnostics(const Inputs& inputs, TectonicJunction& junc
         return;
     }
 
-    std::array<const PlateKinematics*, 3> plates{};
-    if (!gather_plate_kinematics(inputs, junction, plates) ||
+    if (!plates_valid(inputs, junction) ||
         minimum_orientation_quality(junction) < kMinStabilityOrientationQuality) {
         junction.stability = JunctionStability::Indeterminate;
         return;
     }
 
-    const std::array<Vec2, 3> local_velocities =
-        local_plate_velocities(inputs, junction, plates);
+    const std::array<Vec2, 3> local_velocities = local_plate_velocities(inputs, junction);
     std::array<ConstraintLine, 3> lines{};
     float velocity_scale = 1.0f;
     for (size_t i = 0; i < lines.size(); ++i) {
@@ -654,14 +546,10 @@ void populate_stability_diagnostics(const Inputs& inputs, TectonicJunction& junc
     }
 }
 
-// The cells around one mesh vertex: four, or three at a cube corner (nocell last).
-struct Vertex {
-    std::array<grid::CellId, 4> cells{grid::nocell, grid::nocell, grid::nocell, grid::nocell};
-    uint32_t count = 0U;
-};
+} // namespace
 
-// The cube's vertices, each once: cell c's corner k (NE, SE, SW, NW in c's frame) is taken
-// from the smallest id among the cells that share it.
+// Cell c's corner k (NE, SE, SW, NW in c's frame) is taken from the smallest id among the
+// cells that share it.
 std::vector<Vertex> cube_vertices(const TectonicGrid& grid) {
     static constexpr std::array<std::array<uint8_t, 2>, 4> kCornerSides{{
         {grid::north, grid::east}, {grid::east, grid::south},
@@ -686,23 +574,14 @@ std::vector<Vertex> cube_vertices(const TectonicGrid& grid) {
     return vertices;
 }
 
-} // namespace
-
-Outputs build(const Inputs& given) {
+Outputs build(const Inputs& inputs) {
     Outputs outputs;
-    std::shared_ptr<const TectonicGrid> owned;
-    Inputs inputs = given;
-    if (inputs.grid == nullptr && inputs.width != 0U && inputs.height != 0U) {
-        owned = TectonicGrid::planar(inputs.width, inputs.height, static_cast<double>(inputs.width));
-        inputs.grid = owned.get();
-    }
     if (inputs.grid == nullptr || inputs.plate_id == nullptr ||
         inputs.boundary_segment_id == nullptr || inputs.boundary_segments == nullptr ||
         inputs.boundary_segment_count == 0U) {
         return outputs;
     }
     const TectonicGrid& grid = *inputs.grid;
-    const bool cube = on_cube(inputs);
 
     std::unordered_map<uint32_t, const BoundarySegment*> segments_by_id;
     std::map<std::pair<uint32_t, uint32_t>, uint32_t> unique_pair_segments;
@@ -727,20 +606,9 @@ Outputs build(const Inputs& given) {
         }
     }
 
-    // The candidate vertices: the scaffold's south-east corner of every cell (x, y), (x + 1, y),
-    // (x, y + 1), (x + 1, y + 1); the cube's vertices, three cells at a cube corner.
-    std::vector<Vertex> vertices;
-    if (cube) {
-        vertices = cube_vertices(grid);
-    } else {
-        vertices.resize(cell_count);
-        for (grid::CellId c = 0; c < cell_count; ++c) {
-            const grid::CellId south = grid.neighbour(c, grid::south);
-            vertices[c].cells = {c, grid.neighbour(c, grid::east), south, grid.neighbour(south, grid::east)};
-            vertices[c].count = 4U;
-        }
-    }
-    const double spacing = cube ? boundary_cube::cellspacing_m(grid) : 0.0;
+    // The candidate vertices: the cube's mesh vertices, three cells at a cube corner.
+    const std::vector<Vertex> vertices = cube_vertices(grid);
+    const double spacing = grid.cellspacing_m();
 
     std::map<JunctionKey, JunctionAccumulator> candidates;
     for (const Vertex& vertex : vertices) {
@@ -779,24 +647,12 @@ Outputs build(const Inputs& given) {
             }
         };
         mesh::Vec3 point;
-        if (cube) {
-            for (uint32_t i = 0; i < vertex.count; ++i) {
-                point = point + grid.mesh()->centre(vertex.cells[i]);
-            }
-            point = mesh::normalise(point);
-            for (const grid::CellId c : mesh::cellswithin(*grid.mesh(), point, kCubeProbeRadius * spacing)) {
-                vote(c);
-            }
-        } else {
-            const uint32_t x = vertex.cells[0] % grid.width();
-            const uint32_t y = vertex.cells[0] / grid.width();
-            for (int oy = -kProbePadding; oy <= kProbePadding + 1; ++oy) {
-                for (int ox = -kProbePadding; ox <= kProbePadding + 1; ++ox) {
-                    const uint32_t sx = wrapped_add(x, ox, inputs.width);
-                    const uint32_t sy = wrapped_add(y, oy, inputs.height);
-                    vote(map_index(sx, sy, inputs.width));
-                }
-            }
+        for (uint32_t i = 0; i < vertex.count; ++i) {
+            point = point + grid.position(vertex.cells[i]);
+        }
+        point = mesh::normalise(point);
+        for (const grid::CellId c : mesh::cellswithin(*grid.mesh(), point, kCubeProbeRadius * spacing)) {
+            vote(c);
         }
 
         JunctionKey key;
@@ -829,13 +685,9 @@ Outputs build(const Inputs& given) {
         }
 
         JunctionAccumulator& accumulator = candidates[key];
-        if (cube) {
-            accumulator.unit_sum = accumulator.unit_sum + point;
-            ++accumulator.candidate_count;
-        } else {
-            add_candidate_position(accumulator, vertex.cells[0] % grid.width(),
-                                   vertex.cells[0] / grid.width(), inputs.width, inputs.height);
-        }
+        accumulator.unit_sum = accumulator.unit_sum + point;
+        accumulator.members.push_back(point);
+        ++accumulator.candidate_count;
     }
 
     outputs.junctions.reserve(candidates.size());
@@ -844,16 +696,11 @@ Outputs build(const Inputs& given) {
         TectonicJunction junction;
         junction.id = next_id++;
         junction.candidate_cell_count = candidate.second.candidate_count;
-        if (cube) {
-            const auto centroid = boundary_cube::encodecentroid(mesh::normalise(candidate.second.unit_sum));
-            junction.centroid_x = centroid[0];
-            junction.centroid_y = centroid[1];
-        } else {
-            junction.centroid_x =
-                circular_centroid(candidate.second.x_sin_sum, candidate.second.x_cos_sum, inputs.width);
-            junction.centroid_y =
-                circular_centroid(candidate.second.y_sin_sum, candidate.second.y_cos_sum, inputs.height);
-        }
+        // Candidates around a great circle (a vanishing sum) take the one nearest the sum.
+        const auto centroid = boundary_cube::encodecentroid(boundary_cube::meandirection(
+            candidate.second.unit_sum, static_cast<double>(candidate.second.candidate_count), candidate.second.members));
+        junction.centroid_x = centroid[0];
+        junction.centroid_y = centroid[1];
         junction.quality_score =
             std::min(1.0f, static_cast<float>(candidate.second.candidate_count) / 4.0f);
 

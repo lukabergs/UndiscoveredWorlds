@@ -681,7 +681,7 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
         // A world draws its planet body from the seed; the tectonics module keeps the default body.
         if (!tectonicsmodule)
             changeworldproperties(*world);
-        const int defaultwidth = tectonicsmodule ? static_cast<int>(options.tectonicScenario.width) : world->width() + 1;
+        const int defaultwidth = tectonicsmodule ? static_cast<int>(4 * options.tectonicScenario.sphere_face_cells) : world->width() + 1;
         world->setwidth(std::clamp(options.hasResolution ? options.resolution :
             (options.hasWorldWidth ? options.worldWidth : defaultwidth), 2, ARRAYWIDTH) - 1);
     }

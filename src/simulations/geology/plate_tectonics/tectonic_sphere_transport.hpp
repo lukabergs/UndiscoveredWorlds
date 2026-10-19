@@ -1,8 +1,8 @@
 #ifndef TECTONIC_SPHERE_TRANSPORT_HPP
 #define TECTONIC_SPHERE_TRANSPORT_HPP
 
-// The rock transport on the cube (W2-E, step E2D; docs/architecture/terrain-roadmap.md,
-// "W2-E"). Not wired into the lithosphere yet (E3).
+// The rock transport on the cube (W2-E, steps E2D and E3; docs/architecture/terrain-roadmap.md,
+// "W2-E"): the column model moves its rock with transport, one plate at a time.
 //
 // The subcell lattice is the cube of s N cells per face edge (uw-cube-1 ids at s N,
 // docs/architecture/sphere-mesh.md section 2): subcell (f, I, J) has the parent cell
@@ -11,7 +11,7 @@
 // map on the sphere) and then by the rotation exp([w]x) of its parent's plate, the
 // destination is located in extended face coordinates of the source face, and the index
 // displacement D gives ceil(max |D| / 0.95) substeps (max over subcells and both axes). Per
-// substep the kernel is the torus kernel's (tectonic_transport.cpp): the piecewise-parabolic
+// substep the kernel is a dimensionally split remap: the piecewise-parabolic
 // profiles along the face axes (neighbours ahead, across face edges in the neighbour's frame),
 // the limiter, a 2 x 2 splat in the source face's index space with the targets beyond the face
 // from the neighbour table; at a cube corner the missing diagonal's amount goes to the other
@@ -28,11 +28,12 @@
 // A cell's amount of a field is value x coverage x area. The plate's rigid reference is the
 // transport of 1 everywhere under the plate's rotation alone (kept after every substep). A
 // source subcell whose coverage equals the reference on itself, its eight neighbours and its
-// profile cells (an intact interior) moves the coverage and each field by its own profile, as
-// the torus does (resolved relief is kept; a smooth extremum may exceed its donors slightly);
-// any other source (a margin, a deforming or overlapping region) moves every field by the
-// reference's transfer fractions, each in proportion to its share of the reference there, so
-// a value is a convex combination of donor values and a rigid plate's coverage never exceeds
+// profile cells (an intact interior, the coverage bit-equal to the reference) moves the
+// coverage and each field by its own profile (resolved relief is kept; a smooth extremum may
+// exceed its donors slightly); any other source (a margin, a deforming or overlapping region)
+// moves every field by the reference's transfer fractions, each in proportion to its share of
+// the reference there, so a value whose sources are all margins is a convex combination of
+// donor values (up to the per-field scale below), and a rigid plate's coverage never exceeds
 // its reference. The transported value is the transported amount over the transported
 // coverage, and the coverage is divided by the reference: a rigid interior keeps coverage 1
 // and a uniform field uniform exactly. Summed over plates, coverage above 1 is the overlap of
@@ -143,8 +144,10 @@ public:
     // The engine's transport: every plate's rock moved separately (the header comment). fields:
     // densities on the subcells (amount per area), each subcell's rock belonging to its
     // parent's plate. momentof: empty, or per field the index of the rock field whose transfer
-    // fractions it uses inside a plate (a material moment such as thickness x age; its specific
-    // value stays within its donors' range) or -1 for a field of its own. Layers in ascending
+    // fractions it uses inside a plate (a material moment such as thickness x age) or -1 for a
+    // field of its own. Every field, a moment included, is then scaled by its own factor to
+    // restore its transported total (PlateLayer::scale; a moment with its rock's factor drifted);
+    // a moment's specific value stays within its donors' range up to that factor. Layers in ascending
     // plate order, noplate last; a plate without cells has none. Values finite and non-negative,
     // a moment zero where its rock is (std::invalid_argument otherwise).
     std::vector<PlateLayer> transport(const std::vector<const std::vector<double>*>& fields,

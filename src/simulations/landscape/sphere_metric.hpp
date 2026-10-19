@@ -1,8 +1,8 @@
 #pragma once
 
 // The metric the landscape kernels walk: a view of a mesh::CellGrid
-// (docs/architecture/sphere-mesh.md, section 3), or, without one, the planar
-// torus of the tectonics grid and the hand-built window metrics.
+// (docs/architecture/sphere-mesh.md, section 3), or, without one, the hand-built
+// window metrics.
 //
 // - A grid-backed metric (`grid` set) reads every per-cell quantity from the
 //   grid's tables: size, area_m2, neighbour, neighbourid, reverse, distance_m,
@@ -27,11 +27,6 @@
 //   pi R / (2N), the equatorial cell's (equal to a W = 4N lat-lon grid's dy).
 //   A gridless metric whose row fields are changed after construction keeps the
 //   change; a grid-backed one reads the grid and does not see it.
-// - A torus metric (torusmetric, erosion plan step D2a: the tectonics grid) is a
-//   planar W x H grid of square cells that wraps rows too (no pole), without a grid:
-//   every cell has area cell^2, dx = dy = cell, latitude 0 and radius 0, so a
-//   diagonal is cell sqrt(2) and totalarea_m2 is W H cell^2. It stays until the
-//   engine drops its torus.
 // Planet-free: no world class, no tuning header.
 
 #include <cassert>
@@ -135,10 +130,4 @@ struct SphereMetric
     // neighbour does not exist.
     TangentOffset tangentoffset(std::size_t cell, int direction) const;
 };
-
-// A planar torus of width x height square cells of side cell_m, wrapping in both
-// directions (see the header comment). Throws std::invalid_argument unless the
-// grid and the cell size are positive. Grids narrower than 3 cells in either
-// direction make opposite neighbours coincide and are not supported.
-SphereMetric torusmetric(int width, int height, double cell_m);
 }

@@ -7,102 +7,91 @@
 #include <memory>
 #include <vector>
 #include "simulations/geology/plate_tectonics/tectonic_grid.hpp"
-#include "simulations/geology/plate_tectonics/tectonic_transport.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_sphere_transport.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_ocean_relief.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_margins.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_noise_pass.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_plumes.hpp"
 
 namespace tectonics::columns {
-using Displacement = transport::Displacement;
+// A displacement per update: a 3-D tangent vector in metres at the cell's centre.
+using Displacement = mesh::Vec3;
 
 // The engine's cell table as the column processes read it (W2-E, E2B): true cell areas,
-// finite-volume face weights (shared length / centre distance), the eight-neighbour stencils
-// and the displacement adapter. On the planar scaffold every weight and area ratio is
-// exactly 1, every area cell_m², every distance cell_m, so the processes reproduce the
-// torus bit for bit; E3 deletes the planar branch.
+// finite-volume face weights (shared length / centre distance) with the non-orthogonal
+// correction, the eight-neighbour stencils and the displacement adapter.
 class Metric {
 public:
     struct Neighbour { grid::CellId cell = grid::nocell; double distance_m = 0; };
     Metric() = default;
-    // A null grid builds the planar scaffold of width x height cells of cell_m (unit tests);
-    // a planar grid must have that size; on the cube the three are ignored.
-    Metric(const grid::TectonicGrid* grid, uint32_t width, uint32_t height, double cell_m);
+    // The grid must outlive the metric.
+    explicit Metric(const grid::TectonicGrid& grid);
 
     const grid::TectonicGrid& grid() const { return *grid_; }
-    bool planar() const { return planar_; }
     size_t cellcount() const { return grid_ ? grid_->cellcount() : 0; }
-    double area_m2(grid::CellId c) const { return planar_ ? cell_area_m2_ : area_[c]; }
-    // The finite-volume reference area: planar cell_m²; on the cube the least area / weight
-    // over every cell and face, so an explicit coefficient per reference area bounds the
-    // coefficient of every face in its source cell's thickness.
+    double area_m2(grid::CellId c) const { return area_[c]; }
+    // The finite-volume reference area: the least area / weight over every cell and face, so
+    // an explicit coefficient per reference area bounds the coefficient of every face in its
+    // source cell's thickness.
     double reference_area_m2() const { return reference_area_m2_; }
-    double scale(grid::CellId c) const { return planar_ ? 1.0 : scale_[c]; } // reference area / area
+    double scale(grid::CellId c) const { return scale_[c]; } // reference area / area
     // The edge between c and its neighbour in direction k (an index of grid().edges()).
-    size_t edge(grid::CellId c, uint8_t k) const;
-    double weight(size_t e) const { return planar_ ? 1.0 : weight_[e]; }   // length / distance
-    double distance_m(size_t e) const { return planar_ ? cell_m_ : grid_->edges()[e].distance_m; }
-    double width_m(grid::CellId c) const { return planar_ ? cell_m_ : width_[c]; } // planar cell_m, cube sqrt(area)
-    // A per-area quantity times the cell's area (planar: the torus' x cell_m cell_m).
-    double mass(double per_area, grid::CellId c) const {
-        return planar_ ? per_area * cell_m_ * cell_m_ : per_area * area_[c];
-    }
+    size_t edge(grid::CellId c, uint8_t k) const { return grid_->edge(c, k); }
+    double weight(size_t e) const { return weight_[e]; }   // length / distance
+    double distance_m(size_t e) const { return grid_->edges()[e].distance_m; }
+    double width_m(grid::CellId c) const { return width_[c]; } // sqrt(area)
+    // A per-area quantity times the cell's area.
+    double mass(double per_area, grid::CellId c) const { return per_area * area_[c]; }
     // A per-reference-area quantity times the reference area.
-    double referencemass(double per_area) const {
-        return planar_ ? per_area * cell_m_ * cell_m_ : per_area * reference_area_m2_;
-    }
-    // The eight neighbours in the planar stencils' (dy, dx) order: NW, N, NE, W, E, SW, S, SE
-    // (mesh slots 8, 1, 2, 7, 3, 6, 5, 4); nocell for the diagonal at a cube corner.
+    double referencemass(double per_area) const { return per_area * reference_area_m2_; }
+    // The eight neighbours in the order NW, N, NE, W, E, SW, S, SE (mesh slots 8, 1, 2, 7, 3, 6,
+    // 5, 4); nocell for the diagonal at a cube corner.
     std::array<Neighbour, 8> eight(grid::CellId c) const;
 
-    // The displacement adapter. Planar: today's cells per update (x along +x, y along +y,
-    // unit cell_m). Cube: metres per update as 3-D tangent vectors (E2D's convention, unit 1),
-    // projected onto the stencil directions: the edge normals (closing) and the cell's two
-    // stencil axes (axis 0 the unit tangent toward the east neighbour, axis 1 orthogonal to
-    // it toward the south one).
-    double displacementunit_m() const { return planar_ ? cell_m_ : 1.0; }
-    // An edge's centre distance in displacement units (planar 1).
-    double displacementdistance(size_t e) const { return planar_ ? 1.0 : grid_->edges()[e].distance_m; }
-    double component(grid::CellId, const Displacement& d, uint8_t axis) const { return axis == 0 ? d.x : d.y; }
+    // The displacement adapter: displacements per update are 3-D tangent vectors in metres
+    // (E2D's convention), projected onto the stencil directions: the edge normals (closing)
+    // and the cell's two stencil axes (axis 0 the unit tangent toward the east neighbour,
+    // axis 1 orthogonal to it toward the south one).
     double component(grid::CellId c, const mesh::Vec3& v, uint8_t axis) const {
         return mesh::dot(v, axis == 0 ? east_[c] : south_[c]);
     }
-    mesh::Vec3 axis(grid::CellId c, uint8_t axis) const { return axis == 0 ? east_[c] : south_[c]; } // cube
-    // A displacement of another cell on the tangent plane of `to` (planar: unchanged).
-    const Displacement& inframe(grid::CellId, const Displacement& d) const { return d; }
+    mesh::Vec3 axis(grid::CellId c, uint8_t axis) const { return axis == 0 ? east_[c] : south_[c]; }
+    // A displacement of another cell on the tangent plane of `to`.
     mesh::Vec3 inframe(grid::CellId to, const mesh::Vec3& v) const;
-    // The closing motion across edge e, displacement units: (d_a - d_b) along the normal from
-    // a to b (planar: the axis component's difference).
-    double closing(size_t e, const Displacement& a, const Displacement& b) const;
+    // The closing motion across edge e, metres: (d_a - d_b) along the face normal from a to b.
     double closing(size_t e, const mesh::Vec3& a, const mesh::Vec3& b) const;
-    // Throws unless the displacement type matches the grid (2-D planar, 3-D on the cube).
-    void requiredisplacement(bool tangent, const char* module) const;
+    // The least-squares gradient weights of cell c (buildcorrection): grad phi = sum over the
+    // four cardinal neighbours k of g_k (phi_k - phi_c), g_k as (axis 0, axis 1) components
+    // in metres^-1.
+    const std::array<std::array<double, 2>, 4>& gradientweights(grid::CellId c) const { return gradient_[c]; }
 
-    // The difference phi_a - phi_b across edge e as the two-point flux reads it. Cube: with the
-    // non-orthogonal correction (minimum correction from least-squares cell gradients), so
-    // the flux (length / distance) x difference is consistent where the grid lines are skew:
+    // The difference phi_a - phi_b across edge e as the two-point flux reads it, with the
+    // non-orthogonal correction (minimum correction from least-squares cell gradients), so the
+    // flux (length / distance) x difference is consistent where the grid lines are skew:
     // (n . t)(phi_a - phi_b) - distance k . (grad_a + grad_b) / 2, n the face normal, t the
-    // centre line, k = n - (n . t) t. Planar: phi_a - phi_b (the grid is orthogonal).
+    // centre line, k = n - (n . t) t.
     double difference(size_t e, const std::vector<double>& phi) const;
+    // The largest (n . t + sum |k . a| + sum |k . b|) / (n . t) over the edges: a corrected
+    // flux reads its two cells and their eight neighbours with these weights, so an explicit
+    // limit set for the two-point flux holds with the correction once divided by it.
+    double correctionfactor() const { return correctionfactor_; }
 
-    // Position of a cell for position-placed variation, in [0, 1)²: planar the cell centre's
-    // fraction of the torus; cube a lat-lon proxy ((longitude + pi) / 2 pi, (pi / 2 -
-    // latitude) / pi) until E4. extent_km: the proxy's size (planar width and height in km,
-    // cube 2 pi R and pi R).
-    std::array<double, 2> unitposition(grid::CellId c) const;
-    std::array<double, 2> extent_km() const;
+    // E4: replace. Position of a cell for position-placed variation, in [0, 1)^2: the
+    // 4N x 2N lat-lon proxy's ((longitude + pi) / 2 pi, (pi / 2 - latitude) / pi), and the
+    // proxy's size in km (2 pi R, pi R); grid::LatLonProxy.
+    std::array<double, 2> unitposition(grid::CellId c) const { return proxy_.unitposition(c); }
+    std::array<double, 2> extent_km() const { return proxy_.extent_km(); }
+    const grid::LatLonProxy& proxy() const { return proxy_; }
 
 private:
     void buildcorrection();
-    std::shared_ptr<const grid::TectonicGrid> owned_;
     const grid::TectonicGrid* grid_ = nullptr;
-    bool planar_ = true;
-    uint32_t width_cells_ = 0, height_cells_ = 0;
-    double cell_m_ = 0, cell_area_m2_ = 0, reference_area_m2_ = 0;
+    grid::LatLonProxy proxy_{};
+    double reference_area_m2_ = 0, correctionfactor_ = 1;
     std::vector<double> area_, scale_, width_, weight_;
-    std::vector<uint32_t> edges_;          // 4 per cell (cube)
-    std::vector<mesh::Vec3> east_, south_; // the stencil axes (cube)
-    struct Correction { double orthogonal = 1; std::array<double, 4> a{}, b{}; }; // per edge (cube)
+    std::vector<mesh::Vec3> east_, south_; // the stencil axes
+    std::vector<std::array<std::array<double, 2>, 4>> gradient_;
+    struct Correction { double orthogonal = 1; std::array<double, 4> a{}, b{}; }; // per edge
     std::vector<Correction> correction_;
 };
 
@@ -126,6 +115,8 @@ inline constexpr double ridge_crust_m = 7000;
 inline constexpr double ridge_depth_m = 2500;
 // Coarse regional sediment transport, m²/Myr. Not a resolved river model.
 inline constexpr double transport_diffusivity = 2e8;
+// The largest displacement per update, as a share of each cell's smallest edge.
+inline constexpr double displacement_limit = 0.95;
 
 struct Cell {
     double continent = 0, ocean = 0, sediment = 0; // volume / cell area, metres
@@ -172,13 +163,25 @@ struct Budget {
     double continental_growth_shortfall_kg = 0; // Arc continent the controller asked for beyond the arc melt.
     double arc_continent_fraction = 0; // Share of arc melt made continent in the last update.
 };
-// Cumulative horizontal strain of the rock: a symmetric 2D tensor on the grid's axes
-// (x east, y the row direction), dimensionless, the sum of the per-update strains
-// (negative is shortening). Measurement only.
+// The transport of the latest update, measurement only (W2-E, E3 checklist item 9).
+struct TransportDiagnostics {
+    uint32_t substeps = 0;                // the stencil's substeps
+    double max_lattice_displacement = 0;  // lattice cells per update (the stencil's maximum)
+    double max_displacement_edges = 0;    // max over cells of |displacement| / smallest edge
+    // |1 - coverage| (the plates' summed coverage after the transport) over rigid interiors:
+    // cells whose cell, eight neighbours and two cardinal rings share one plate and have no
+    // offsets; by class: face interiors, cells along a face edge, the 24 cube-corner cells.
+    double coverage_interior_max = 0, coverage_edge_max = 0, coverage_corner_max = 0;
+    double coverage_interior_mean = 0, coverage_edge_mean = 0, coverage_corner_mean = 0;
+    uint32_t interior_cells = 0, edge_cells = 0, corner_cells = 0;
+};
+// Cumulative horizontal strain of the rock: a symmetric 2D tensor on the cell's stencil axes
+// (Metric::axis: x toward the east neighbour, y orthogonal toward the south one),
+// dimensionless, the sum of the per-update strains (negative is shortening). Measurement only.
 struct Strain { double xx = 0, yy = 0, xy = 0; };
 // Shortening, m: minus the most compressive principal component of the strain, times
-// cell_m (the length lost across one native cell width, so it scales with the
-// resolution; strain = shortening / cell_m); 0 where no axis shortens.
+// cell_m (the length lost across one cell spacing, so it scales with the resolution;
+// strain = shortening / cell_m); 0 where no axis shortens.
 double shortening_m(const Strain& s, double cell_m);
 // Axis of the most compressive principal component, radians in [0, pi), from the x
 // axis toward the y axis; 0 where the two principal components are equal.
@@ -212,18 +215,20 @@ struct Isostasy {
         return elevation_m(c, thermal_strength, root_kg_m3, root_max_thickness_m, root_delamination_width_m);
     }
 };
-// The column processes on the cell table, in the order Model::advance runs them (exposed
-// so the cube is tested before E3 runs the whole update there). Each conserves the mass it
-// moves in true areas and books it in the budget.
+// The column processes on the cell table, in the order Model::advance runs them. Each
+// conserves the mass it moves in true areas and books it in the budget.
 // Lower-crust root flow (n = 3 creep), sub-stepped below the explicit limit of the smallest
-// reference face; dt_myr already scaled by margins::Parameters::root_mobility.
+// reference face divided by Metric::correctionfactor; dt_myr already scaled by
+// margins::Parameters::root_mobility.
 void spread_roots(const Metric& metric, std::vector<Cell>& cells, double dt_myr, const Isostasy& isostasy,
                   bool sediment_feedback, Budget& budget);
-// Orogenic collapse (margins::Parameters::orogenic_collapse_*), sub-stepped below 0.1 per face.
+// Orogenic collapse (margins::Parameters::orogenic_collapse_*), sub-stepped below 0.1 per face
+// divided by Metric::correctionfactor.
 void collapse_orogens(const Metric& metric, std::vector<Cell>& cells, double dt_myr,
                       const margins::Parameters& parameters, Budget& budget);
 // The surface diffusion's explicit number per reference face, transport_diffusivity x
-// erosion_strength x dt / reference area (Model::advance rejects above 0.2).
+// erosion_strength x dt / reference area (Model::advance rejects above 0.2 divided by
+// Metric::correctionfactor).
 double surface_diffusion_number(const Metric& metric, double erosion_strength, double dt_myr);
 // Conservative downhill transport of the elevation field (one value per cell) at that number.
 void diffuse_surface(const Metric& metric, std::vector<Cell>& cells, const std::vector<double>& elevation,
@@ -231,66 +236,74 @@ void diffuse_surface(const Metric& metric, std::vector<Cell>& cells, const std::
 
 class Model {
 public:
-    void initialize(uint32_t width, uint32_t height, double cell_m, std::vector<Cell> cells,
+    // cells: one column per grid cell (the grid is kept); subdivision: the transport lattice's
+    // subcells per cell edge (1, 2 or 4).
+    void initialize(std::shared_ptr<const grid::TectonicGrid> grid, std::vector<Cell> cells,
                     uint32_t transport_subdivision = 1, long seed = 0,
                     const ocean_relief::Parameters& relief = {}, bool preserve_initial = false,
                     double root_kg_m3 = 0, double root_max_thickness_m = 0,
-                    double root_delamination_width_m = 0, const grid::TectonicGrid* grid = nullptr);
-    void advance(const std::vector<Displacement>& velocity, double dt_myr,
+                    double root_delamination_width_m = 0);
+    // motion: the update's motion (sphere_transport::Motion): per plate the rotation of the
+    // update (radians), per cell its plate (noplate: at rest) and its offsets (the distributed
+    // deformation and rift opening, metres; empty: none). A cell's displacement is its
+    // plate's rotation of its centre plus its offset and must stay within displacement_limit
+    // of its smallest edge.
+    void advance(const sphere_transport::Motion& motion, double dt_myr,
                  double erosion_strength, double thermal_strength, double submarine_erosion_ratio = 1,
                  const margins::Forcing* forcing = nullptr, const margins::Parameters& margins = {},
                  const noise_pass::Parameters& noise = {}, bool sediment_feedback = false,
                  const plumes::Source* plume = nullptr, double uplift_rate_window_myr = 10);
     const std::vector<Cell>& cells() const { return cells_; }
+    const Metric& metric() const { return metric_; }
+    // Each cell's displacement of motion (its plate's rotation as w x r R, plus the offset's
+    // tangent part), metres.
+    static std::vector<Displacement> displacement(const grid::TectonicGrid& grid,
+                                                  const sphere_transport::Motion& motion);
     // Rock uplift rate per cell, m/Myr, signed: an exponential mean (e-folding time
     // uplift_rate_window_myr) of the elevation change of the tectonic sub-steps
     // (transport, subduction overlap, rifting, trench flexure, arcs, plumes, roots,
     // thermal subsidence), before the diffusion, rivers and noise. In the plate's frame
     // (semi-Lagrangian: the elevation before the step and the previous mean are carried
-    // with the rock by the engine's own remap, on the subcells with the material's
-    // sub-steps and per-cell displacements), so plate motion over relief is neither
-    // uplift nor subsidence and the mean follows the rock. Exact (to rounding) for a
-    // translation when a single column field varies (land); at plate boundaries, from
-    // the second sub-step on, the remap's limiters can act on the carried amounts and
-    // the carried values are a bounded approximation. The remap smears the carried
-    // mean: at most a(1 - a) subcells^2 of variance per axis and sub-step (a the
-    // fractional subcell displacement; a flattened peak), a(1 - a) n / s^2 cells^2 per
-    // step (n sub-steps, subdivision s), 9.5 times that in steady state at a 10 Myr
-    // window and 1 Myr steps; less for resolved smooth relief. Converging rock mixes;
+    // with the rock by the engine's own transport on the subcells), so plate motion over
+    // relief is neither uplift nor subsidence and the mean follows the rock. Exact (to
+    // rounding) for a rigid motion when a single column field varies (land); at plate
+    // boundaries the transport's margin rule moves every field by the rigid reference's
+    // fractions and the carried values are a bounded approximation. Converging rock mixes;
     // a divergent cell keeps the rock that stayed on its own side; new crust has no
     // history of its own. Zero at start.
     const std::vector<double>& upliftRate() const { return uplift_rate_m_myr_; }
-    // Cumulative strain per cell (multiscale plan S5.1), in the plate's frame. Each
-    // update first rotates the rock's tensor by the local spin and adds the strain of
-    // the update's displacement field u (cells/update): E = sym(grad u), W = (duy/dx -
-    // dux/dy) / 2. Each derivative along an axis uses the cell's two neighbours on that
-    // axis: when only one is on the same plate (forcing owners; one plate without
-    // forcing), the one-sided difference toward it; when both are, the smaller of the two
-    // differences in magnitude (their mean when equal); when neither is, 0. So a velocity
-    // jump to another plate (subduction, ridge, transform) is never strain; a jump inside
-    // a plate (a rotation seam, where the offset from the plate centre wraps) is skipped only where the
-    // other difference on that axis is the smaller one. Distributed deformation and
-    // rift opening inside a plate count. Exact for a velocity linear on both sides of a
-    // cell; a rigid rotation gives E = 0 and W = its angle. The tensor is then carried
-    // with the rock as the uplift rate is (same remap, sub-steps and limits; converging
-    // rock mixes); the ocean floor created in an opening has zero strain, so a divergent
-    // cell keeps the tensor of the rock that stayed on the rest of its area only.
-    // Small-strain sum: valid while the strain is small (it reaches about 1.4 at 256
-    // columns). Cumulative over the run, no decay; zero at start.
+    // Cumulative strain per cell (multiscale plan S5.1), in the plate's frame. Each update
+    // first rotates the rock's tensor by the local spin and adds the strain of the update's
+    // displacement field u (metres per update, on the cell's stencil axes): E = sym(grad u),
+    // W = (duy/dx - dux/dy) / 2, the gradient by least squares over the cardinal neighbours
+    // on the same plate (Metric::gradientweights' offsets restricted to them; along one line
+    // when they are collinear; zero without any), so a velocity jump to another plate
+    // (subduction, ridge, transform) is never strain. Distributed deformation and rift
+    // opening inside a plate count. Exact for a velocity linear around a cell; a rigid
+    // rotation gives E = 0 to the rotation's curvature. The tensor is then carried with the
+    // rock as the uplift rate is, as a 3-D tensor (so its components turn with the frames
+    // across face edges); the ocean floor created in an opening has zero strain, so a
+    // divergent cell keeps the tensor of the rock that stayed on the rest of its area only.
+    // Small-strain sum; cumulative over the run, no decay; zero at start.
     const std::vector<Strain>& strain() const { return strain_; }
     const Budget& budget() const { return budget_; }
+    const TransportDiagnostics& transportDiagnostics() const { return transport_diagnostics_; }
 private:
-    // carried: non-negative fields on the subcells, remapped in place with the material.
-    std::vector<Cell> transportColumns(const std::vector<Displacement>& velocity, double dt_myr,
+    // carried: non-negative fields on the subcells, moved in place with the material.
+    std::vector<Cell> transportColumns(const sphere_transport::Motion& motion, double dt_myr,
                                        std::vector<std::vector<double>>& carried);
     void reconcileTransport(const std::vector<Cell>& evolved);
+    void measureCoverage(const std::vector<Cell>& moved, const sphere_transport::Motion& motion);
     void routeSediment(std::vector<Cell>& cells, double dt_myr, double thermal_strength,
                        const margins::Parameters& parameters, const margins::Forcing* forcing);
     void routeRiversImplicit(std::vector<Cell>& cells, double dt_myr, double thermal_strength,
                              const margins::Parameters& parameters, const margins::Forcing* forcing);
-    uint32_t width_ = 0, height_ = 0;
-    Metric metric_; // the engine's cell table (W2-E); a planar scaffold of its own in unit tests
-    double cell_m_ = 0;
+    std::shared_ptr<const grid::TectonicGrid> grid_;
+    Metric metric_;
+    std::shared_ptr<const sphere_transport::Lattice> lattice_;
+    std::vector<std::vector<grid::CellId>> children_;  // per cell its subcells
+    std::vector<uint8_t> cellclass_;                   // 0 face interior, 1 along a face edge, 2 cube corner
+    std::vector<std::vector<grid::CellId>> neighbourhood_;  // eight neighbours and two cardinal rings
     long seed_ = 0;
     double root_kg_m3_ = 0; // Lithospheric root load in every elevation of the model.
     double root_max_thickness_m_ = 0; // The root's delamination cap (0 none), with root_kg_m3_.
@@ -301,6 +314,7 @@ private:
     std::vector<Cell> transport_cells_; // Persistent rock subcells; never re-seeded between updates.
     std::vector<double> newborn_ocean_crust_; // Fixed mantle-space birth pattern; rock then advects.
     Budget budget_;
+    TransportDiagnostics transport_diagnostics_;
     std::vector<double> uplift_rate_m_myr_; // Measurement only; never feeds back into the columns.
     std::vector<Strain> strain_; // Measurement only; never feeds back into the columns.
 };

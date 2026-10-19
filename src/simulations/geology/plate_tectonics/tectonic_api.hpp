@@ -77,6 +77,9 @@ uint16_t tectonics_get_sea_level_m(void*);
 uint32_t tectonics_get_plate_count(void*);
 uint8_t tectonics_is_oceanic_plate(void*, uint32_t plate_index);
 
+// The published plate kinematics (contract::PlateKinematics): the velocity at the plate's
+// centroid (east, north) in cell spacings per update and its unit direction, the spin about
+// the centroid in radians per update, the centroid's longitude and latitude in degrees.
 float tectonics_velocity_unity_vector_x(void*, uint32_t plate_index);
 float tectonics_velocity_unity_vector_y(void*, uint32_t plate_index);
 float tectonics_velocity_vector_x(void*, uint32_t plate_index);
@@ -86,13 +89,14 @@ float tectonics_mass_center_x(void*, uint32_t plate_index);
 float tectonics_mass_center_y(void*, uint32_t plate_index);
 // Deterministic topology identity survives index changes after plate removal.
 uint64_t tectonics_get_plate_uid(void*, uint32_t plate_index);
-// Per-cell material displacement (cells/update) of the latest isostatic-column update,
-// width x height; null before the first physical update.
+// Per-cell material displacement of the latest isostatic-column update, (east, north) in cell
+// spacings per update, in id order; null before the first physical update.
 const tectonics::transport::Displacement* tectonics_get_material_displacement(void*);
 
+// The id-order view of the cube's 6 N^2 cells: N columns x 6 N rows.
 uint32_t tectonics_get_map_width(void*);
 uint32_t tectonics_get_map_height(void*);
-// Isostatic column state, width x height cells; null before columns exist.
+// Isostatic column state, one per cell in id order; null before columns exist.
 const tectonics::columns::Cell* tectonics_get_column_cells(void*);
 tectonics::contract::Snapshot tectonics_capture_snapshot(void*);
 

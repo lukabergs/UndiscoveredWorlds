@@ -168,20 +168,4 @@ TangentOffset SphereMetric::tangentoffset(std::size_t cell, int direction) const
     const double meandx = 0.5 * (dx + rowdx_m[static_cast<std::size_t>(other)]);
     return { ox * meandx, -oy * dy_m };
 }
-
-SphereMetric torusmetric(int width, int height, double cell_m)
-{
-    if (width < 1 || height < 1 || !(cell_m > 0.0))
-        throw std::invalid_argument("torusmetric needs a positive grid and cell size");
-    SphereMetric metric;
-    metric.width = width;
-    metric.height = height;
-    metric.radius_m = 0.0;
-    metric.dy_m = cell_m;
-    metric.rowarea_m2.assign(static_cast<std::size_t>(height), cell_m * cell_m);
-    metric.rowdx_m.assign(static_cast<std::size_t>(height), cell_m);
-    metric.rowlatitude_rad.assign(static_cast<std::size_t>(height), 0.0);
-    metric.wrapsrows = true;
-    return metric;
-}
 }

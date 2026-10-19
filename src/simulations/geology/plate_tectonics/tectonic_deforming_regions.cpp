@@ -1,6 +1,5 @@
 #include "simulations/geology/plate_tectonics/tectonic_deforming_regions.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_grid.hpp"
-#include "simulations/geology/plate_tectonics/tectonic_provenance.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -19,9 +18,6 @@ using tectonics::contract::CrustClass;
 using tectonics::contract::DeformingRegion;
 using tectonics::contract::DeformingRegionType;
 using tectonics::contract::GeologicRegime;
-using tectonics::contract::PlateKinematics;
-
-constexpr double kTwoPi = 6.28318530717958647692;
 
 float clamp_unit(float value) {
     return std::max(0.0f, std::min(1.0f, value));
@@ -128,32 +124,12 @@ float left_weight_of(const BoundarySegment& segment, uint32_t owner, DeformingRe
     return left_weight;
 }
 
-// The scaffold: the two plates' translations, weighted toward the owner.
-void interpolate_velocity(const BoundarySegment& segment, const PlateKinematics* plates,
-                          uint32_t plate_count, uint32_t owner, DeformingRegionType region_type,
-                          float& velocity_x, float& velocity_y) {
+// The two plates' omega x p at the cell, (east, north), weighted toward the owner.
+void interpolate_velocity(const Inputs& inputs, const BoundarySegment& segment, size_t index,
+                          DeformingRegionType region_type, float& velocity_x, float& velocity_y) {
     velocity_x = 0.0f;
     velocity_y = 0.0f;
-    if (plates == nullptr || segment.left_plate_id >= plate_count ||
-        segment.right_plate_id >= plate_count) {
-        return;
-    }
-
-    const float left_weight = left_weight_of(segment, owner, region_type);
-    const float right_weight = 1.0f - left_weight;
-    velocity_x = plates[segment.left_plate_id].linear_velocity_x * left_weight +
-                 plates[segment.right_plate_id].linear_velocity_x * right_weight;
-    velocity_y = plates[segment.left_plate_id].linear_velocity_y * left_weight +
-                 plates[segment.right_plate_id].linear_velocity_y * right_weight;
-}
-
-// The cube: the two plates' omega x p at the cell, (east, north), weighted toward the owner.
-void interpolate_cube_velocity(const Inputs& inputs, const BoundarySegment& segment, size_t index,
-                               DeformingRegionType region_type, float& velocity_x, float& velocity_y) {
-    velocity_x = 0.0f;
-    velocity_y = 0.0f;
-    if (inputs.plates == nullptr || segment.left_plate_id >= inputs.plate_count ||
-        segment.right_plate_id >= inputs.plate_count) {
+    if (segment.left_plate_id >= inputs.plate_count || segment.right_plate_id >= inputs.plate_count) {
         return;
     }
     const float left_weight = left_weight_of(segment, inputs.plate_id[index], region_type);
@@ -171,9 +147,7 @@ void interpolate_cube_velocity(const Inputs& inputs, const BoundarySegment& segm
 
 Outputs build(const Inputs& inputs) {
     Outputs outputs;
-    const bool cube = inputs.grid != nullptr && inputs.grid->kind() == grid::TectonicGrid::Kind::cube;
-    const size_t cell_count = cube ? inputs.grid->cellcount()
-        : static_cast<size_t>(inputs.width) * static_cast<size_t>(inputs.height);
+    const size_t cell_count = inputs.grid != nullptr ? inputs.grid->cellcount() : 0U;
     outputs.deforming_region_id.assign(cell_count, tectonics::contract::kNoDeformingRegionId);
     outputs.deforming_region_type.assign(
         cell_count, static_cast<uint8_t>(DeformingRegionType::None));
@@ -213,11 +187,9 @@ Outputs build(const Inputs& inputs) {
 
         const uint16_t max_distance = max_region_distance(region_type);
         uint32_t region_cell_count = 0U;
-        double x_sin_sum = 0.0;
-        double x_cos_sum = 0.0;
-        double y_sin_sum = 0.0;
-        double y_cos_sum = 0.0;
-        mesh::Vec3 unit_sum;  // the cube: the area-weighted centre unit vectors
+        mesh::Vec3 unit_sum;  // the area-weighted centre unit vectors
+        double area_sum = 0.0;
+        std::vector<mesh::Vec3> members;
         double deformation_total = 0.0;
         double velocity_x_total = 0.0;
         double velocity_y_total = 0.0;
@@ -242,12 +214,7 @@ Outputs build(const Inputs& inputs) {
 
             float velocity_x = 0.0f;
             float velocity_y = 0.0f;
-            if (cube) {
-                interpolate_cube_velocity(inputs, segment, index, region_type, velocity_x, velocity_y);
-            } else {
-                interpolate_velocity(segment, inputs.plates, inputs.plate_count,
-                                     inputs.plate_id[index], region_type, velocity_x, velocity_y);
-            }
+            interpolate_velocity(inputs, segment, index, region_type, velocity_x, velocity_y);
 
             outputs.deforming_region_id[index] = segment.id;
             outputs.deforming_region_type[index] =
@@ -256,20 +223,9 @@ Outputs build(const Inputs& inputs) {
             outputs.deformation_velocity_x[index] = velocity_x;
             outputs.deformation_velocity_y[index] = velocity_y;
 
-            if (cube) {
-                unit_sum = unit_sum + inputs.grid->area_m2(index) * inputs.grid->mesh()->centre(index);
-            } else {
-                const uint32_t x = index % inputs.width;
-                const uint32_t y = index / inputs.width;
-                const double x_angle =
-                    kTwoPi * (static_cast<double>(x) / static_cast<double>(inputs.width));
-                const double y_angle =
-                    kTwoPi * (static_cast<double>(y) / static_cast<double>(inputs.height));
-                x_sin_sum += std::sin(x_angle);
-                x_cos_sum += std::cos(x_angle);
-                y_sin_sum += std::sin(y_angle);
-                y_cos_sum += std::cos(y_angle);
-            }
+            unit_sum = unit_sum + inputs.grid->area_m2(index) * inputs.grid->position(index);
+            area_sum += inputs.grid->area_m2(index);
+            members.push_back(inputs.grid->position(index));
             deformation_total += deformation_rate;
             velocity_x_total += velocity_x;
             velocity_y_total += velocity_y;
@@ -287,24 +243,10 @@ Outputs build(const Inputs& inputs) {
         region.secondary_plate_id = segment.right_plate_id;
         region.cell_count = region_cell_count;
         region.persistence_steps = segment.persistence_steps;
-        if (cube) {
-            const auto centroid = boundary_cube::encodecentroid(mesh::normalise(unit_sum));
-            region.centroid_x = centroid[0];
-            region.centroid_y = centroid[1];
-        } else {
-            region.centroid_x = static_cast<float>(
-                ((std::atan2(x_sin_sum, x_cos_sum) < 0.0
-                      ? std::atan2(x_sin_sum, x_cos_sum) + kTwoPi
-                      : std::atan2(x_sin_sum, x_cos_sum)) /
-                 kTwoPi) *
-                static_cast<double>(inputs.width));
-            region.centroid_y = static_cast<float>(
-                ((std::atan2(y_sin_sum, y_cos_sum) < 0.0
-                      ? std::atan2(y_sin_sum, y_cos_sum) + kTwoPi
-                      : std::atan2(y_sin_sum, y_cos_sum)) /
-                 kTwoPi) *
-                static_cast<double>(inputs.height));
-        }
+        // A region around a great circle (a vanishing sum) takes its cell nearest the sum.
+        const auto centroid = boundary_cube::encodecentroid(boundary_cube::meandirection(unit_sum, area_sum, members));
+        region.centroid_x = centroid[0];
+        region.centroid_y = centroid[1];
         region.average_deformation_rate =
             static_cast<float>(deformation_total / static_cast<double>(region_cell_count));
         region.average_interpolated_velocity_x =

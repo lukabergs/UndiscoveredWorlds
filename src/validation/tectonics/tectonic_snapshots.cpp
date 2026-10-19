@@ -318,8 +318,8 @@ void append_scenario_json(std::ostream& output, const tectonics::scenario::Scena
     output << indent << "{\n";
     output << indent << "  \"version\": " << scenario.version << ",\n";
     output << indent << "  \"seed\": " << scenario.seed << ",\n";
-    output << indent << "  \"width\": " << scenario.width << ",\n";
-    output << indent << "  \"height\": " << scenario.height << ",\n";
+    output << indent << "  \"sphere_face_cells\": " << scenario.sphere_face_cells << ",\n";
+    output << indent << "  \"radius_km\": " << scenario.radius_km << ",\n";
     output << indent << "  \"sea_level\": " << scenario.sea_level << ",\n";
     output << indent << "  \"plate_count\": " << scenario.plate_count << ",\n";
     output << indent << "  \"erosion_strength\": " << scenario.erosion_strength << ",\n";
@@ -408,7 +408,11 @@ void append_scenario_json(std::ostream& output, const tectonics::scenario::Scena
     output << indent << "  \"continental_growth_control\": " << (scenario.margin_processes.continental_growth_control?"true":"false") << ",\n";
     output << indent << "  \"continental_growth_per_gyr\": " << scenario.margin_processes.continental_growth_per_gyr << ",\n";
     output << indent << "  \"continental_growth_continent_only\": " << (scenario.margin_processes.continental_growth_continent_only?"true":"false") << ",\n";
-    output << indent << "  \"world_width_km\": " << scenario.world_width_km << ",\n";
+    output << indent << "  \"mantle_flow_wavelength_km\": " << scenario.mantle_flow_wavelength_km << ",\n";
+    output << indent << "  \"mantle_flow_octaves\": " << scenario.mantle_flow_octaves << ",\n";
+    output << indent << "  \"mantle_flow_wobble\": " << scenario.mantle_flow_wobble << ",\n";
+    output << indent << "  \"mantle_flow_drift\": " << scenario.mantle_flow_drift << ",\n";
+    output << indent << "  \"mantle_flow_shear_ratio\": " << scenario.mantle_flow_shear_ratio << ",\n";
     output << indent << "  \"mantle_flow_speed_cm_yr\": " << scenario.mantle_flow_speed_cm_yr << ",\n";
     output << indent << "  \"thermal_subsidence_strength\": " << scenario.thermal_subsidence_strength << ",\n";
     output << indent << "  \"delta_time_myr\": " << scenario.delta_time_myr << ",\n";

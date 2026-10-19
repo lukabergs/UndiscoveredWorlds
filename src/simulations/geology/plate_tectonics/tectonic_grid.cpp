@@ -1,5 +1,6 @@
 #include "simulations/geology/plate_tectonics/tectonic_grid.hpp"
 
+#include "core/mesh/cube_geometry.hpp"
 #include "core/mesh/mesh_geometry.hpp"
 
 #include <algorithm>
@@ -12,7 +13,7 @@
 namespace tectonics::grid {
 namespace {
 
-constexpr double kTwoPi = 6.283185307179586476925286766559;
+constexpr double kPi = 3.14159265358979323846;
 // Mesh slots of west, east, north, south (D8 codes 7 W, 3 E, 1 N, 5 S).
 constexpr int kSlot[directioncount] = {7, 3, 1, 5};
 
@@ -26,49 +27,26 @@ std::uint8_t direction_of_slot(int slot) {
     }
 }
 
-} // namespace
+// The unit tangent of v at the unit vector r.
+Vec3 tangent(const Vec3& v, const Vec3& r) { return mesh::normalise(v - mesh::dot(v, r) * r); }
 
-std::shared_ptr<const TectonicGrid> TectonicGrid::planar(std::uint32_t width, std::uint32_t height,
-                                                         double width_km) {
-    if (width == 0 || height == 0 || !std::isfinite(width_km) || width_km <= 0)
-        throw std::invalid_argument("TectonicGrid::planar needs a positive size and width");
-    std::shared_ptr<TectonicGrid> grid(new TectonicGrid());
-    grid->kind_ = Kind::planar;
-    grid->width_ = width;
-    grid->height_ = height;
-    grid->cellcount_ = static_cast<std::size_t>(width) * height;
-    // The engine's cell edge: the same expression as the torus (world_width_km * 1000.0 / width).
-    grid->cell_m_ = width_km * 1000.0 / width;
-    grid->cell_area_m2_ = grid->cell_m_ * grid->cell_m_;
-    grid->totalarea_m2_ = grid->cell_area_m2_ * static_cast<double>(grid->cellcount_);
-    grid->neighbours_.resize(4 * grid->cellcount_);
-    grid->continuing_.resize(4 * grid->cellcount_);
-    for (std::uint32_t y = 0; y < height; ++y)
-        for (std::uint32_t x = 0; x < width; ++x) {
-            const std::size_t base = 4 * (static_cast<std::size_t>(y) * width + x);
-            grid->neighbours_[base + west] = y * width + (x + width - 1) % width;
-            grid->neighbours_[base + east] = y * width + (x + 1) % width;
-            grid->neighbours_[base + north] = ((y + height - 1) % height) * width + x;
-            grid->neighbours_[base + south] = ((y + 1) % height) * width + x;
-            for (std::uint8_t k = 0; k < directioncount; ++k) grid->continuing_[base + k] = k;
-        }
-    grid->buildedges();
-    return grid;
-}
+} // namespace
 
 std::shared_ptr<const TectonicGrid> TectonicGrid::cube(std::shared_ptr<const mesh::CellGrid> mesh) {
     if (!mesh || mesh->kind() != mesh::GridKind::cube || mesh->issubgrid())
         throw std::invalid_argument("TectonicGrid::cube needs a full cube mesh");
     std::shared_ptr<TectonicGrid> grid(new TectonicGrid());
-    grid->kind_ = Kind::cube;
     grid->facecells_ = mesh->facecells();
     grid->cellcount_ = mesh->cellcount();
     grid->totalarea_m2_ = mesh->totalarea_m2();
+    grid->cellspacing_m_ = std::sqrt(grid->totalarea_m2_ / static_cast<double>(grid->cellcount_));
     grid->neighbours_.resize(4 * grid->cellcount_);
     grid->continuing_.resize(4 * grid->cellcount_);
     grid->area_.resize(grid->cellcount_);
+    grid->smallestedge_.resize(grid->cellcount_);
     for (CellId c = 0; c < grid->cellcount_; ++c) {
         grid->area_[c] = mesh->area_m2(c);
+        double smallest = std::numeric_limits<double>::infinity();
         for (std::uint8_t k = 0; k < directioncount; ++k) {
             const std::int32_t n = mesh->neighbour(c, kSlot[k]);
             if (n < 0) throw std::logic_error("TectonicGrid::cube: a cell without a cardinal neighbour");
@@ -76,7 +54,9 @@ std::shared_ptr<const TectonicGrid> TectonicGrid::cube(std::shared_ptr<const mes
             // Straight on at n is the opposite of the slot by which n reaches c.
             grid->neighbours_[4 * static_cast<std::size_t>(c) + k] = static_cast<CellId>(n);
             grid->continuing_[4 * static_cast<std::size_t>(c) + k] = direction_of_slot((back + 3) % 8 + 1);
+            smallest = std::min(smallest, mesh->facelength_m(c, kSlot[k]));
         }
+        grid->smallestedge_[c] = smallest;
     }
     grid->mesh_ = std::move(mesh);
     grid->buildedges();
@@ -91,46 +71,52 @@ std::shared_ptr<const TectonicGrid> TectonicGrid::cube(int facecells, double rad
 
 void TectonicGrid::buildedges() {
     edges_.clear();
-    if (kind_ == Kind::planar) {
-        edges_.resize(2 * cellcount_);
-        for (CellId c = 0; c < cellcount_; ++c) {
-            Edge& across_x = edges_[2 * static_cast<std::size_t>(c)];
-            across_x = {c, neighbour(c, east), east, 0, {1.0, 0.0, 0.0}, cell_m_, cell_m_};
-            Edge& across_y = edges_[2 * static_cast<std::size_t>(c) + 1];
-            across_y = {c, neighbour(c, south), south, 1, {0.0, 1.0, 0.0}, cell_m_, cell_m_};
-        }
-        return;
-    }
     edges_.reserve(2 * cellcount_);
+    edgeof_.assign(4 * cellcount_, UINT32_MAX);
+    const int n = facecells_;
     const std::uint8_t order[directioncount] = {east, south, west, north};
     for (CellId c = 0; c < cellcount_; ++c) {
         const Vec3 pa = mesh_->centre(c);
+        int face = 0, column = 0, row = 0;
+        mesh::cubeindices(n, c, face, column, row);
         for (const std::uint8_t k : order) {
-            const CellId n = neighbour(c, k);
-            if (n <= c) continue;
-            const Vec3 pb = mesh_->centre(n);
-            const Vec3 middle = mesh::normalise(pa + pb);
-            Vec3 tangent = pb - pa;
-            tangent = tangent - mesh::dot(tangent, middle) * middle;
+            const CellId other = neighbour(c, k);
+            if (other <= c) continue;
+            const Vec3 pb = mesh_->centre(other);
+            // The shared edge's vertices in c's face coordinates.
+            Vec3 p0, p1;
+            if (k == east || k == west) {
+                const double a = mesh::cubeedgea(n, k == east ? column + 1 : column);
+                p0 = mesh::cubepoint(face, a, mesh::cubeedgeb(n, row));
+                p1 = mesh::cubepoint(face, a, mesh::cubeedgeb(n, row + 1));
+            } else {
+                const double b = mesh::cubeedgeb(n, k == south ? row + 1 : row);
+                p0 = mesh::cubepoint(face, mesh::cubeedgea(n, column), b);
+                p1 = mesh::cubepoint(face, mesh::cubeedgea(n, column + 1), b);
+            }
             Edge edge;
             edge.a = c;
-            edge.b = n;
+            edge.b = other;
             edge.direction = k;
             edge.axis = (k == east || k == west) ? 0 : 1;
-            edge.normal = mesh::normalise(tangent);
+            edge.normal = mesh::normalise(mesh::cross(p0, p1));
+            if (mesh::dot(edge.normal, pb - pa) < 0) edge.normal = -1.0 * edge.normal;
+            edge.centreline = tangent(pb - pa, mesh::normalise(pa + pb));
+            edge.midpoint = mesh::normalise(p0 + p1);
             edge.length_m = mesh_->facelength_m(c, kSlot[k]);
             edge.distance_m = mesh_->distance_m(c, kSlot[k]);
+            const auto id = static_cast<std::uint32_t>(edges_.size());
+            edgeof_[4 * static_cast<std::size_t>(c) + k] = id;
+            for (std::uint8_t back = 0; back < directioncount; ++back)
+                if (neighbour(other, back) == c) edgeof_[4 * static_cast<std::size_t>(other) + back] = id;
             edges_.push_back(edge);
         }
     }
     // Each adjacent pair shares one edge: 2 per cell on a closed quadrilateral mesh.
     if (edges_.size() != 2 * cellcount_)
         throw std::logic_error("TectonicGrid::cube: the edge table is not 2 edges per cell");
-}
-
-Vec3 TectonicGrid::position(CellId c) const {
-    if (kind_ == Kind::cube) return mesh_->centre(c);
-    return {static_cast<double>(c % width_), static_cast<double>(c / width_), 0.0};
+    for (const std::uint32_t e : edgeof_)
+        if (e == UINT32_MAX) throw std::logic_error("TectonicGrid::cube: a cell face without an edge");
 }
 
 std::vector<std::vector<CellId>> TectonicGrid::rings(CellId c, int radius) const {
@@ -152,25 +138,8 @@ std::vector<std::vector<CellId>> TectonicGrid::rings(CellId c, int radius) const
 }
 
 std::vector<CellId> TectonicGrid::withinkm(CellId c, double radius_km) const {
-    std::vector<CellId> result;
-    if (c >= cellcount_ || !(radius_km >= 0)) return result;
-    if (kind_ == Kind::cube) return mesh::cellswithin(*mesh_, mesh_->centre(c), radius_km * 1000.0);
-    const double radius_m = radius_km * 1000.0;
-    const auto reach = static_cast<std::int64_t>(std::ceil(radius_m / cell_m_));
-    const std::int64_t reach_x = std::min<std::int64_t>(reach, width_), reach_y = std::min<std::int64_t>(reach, height_);
-    const std::int64_t x0 = c % width_, y0 = c / width_;
-    const Vec3 origin = position(c);
-    for (std::int64_t dy = -reach_y; dy <= reach_y; ++dy)
-        for (std::int64_t dx = -reach_x; dx <= reach_x; ++dx) {
-            const auto x = static_cast<std::uint32_t>(((x0 + dx) % width_ + width_) % width_);
-            const auto y = static_cast<std::uint32_t>(((y0 + dy) % height_ + height_) % height_);
-            const CellId n = y * width_ + x;
-            const auto offset = tangentoffset_m(origin, n);
-            if (std::hypot(offset[0], offset[1]) <= radius_m) result.push_back(n);
-        }
-    std::sort(result.begin(), result.end());
-    result.erase(std::unique(result.begin(), result.end()), result.end());
-    return result;
+    if (c >= cellcount_ || !(radius_km >= 0)) return {};
+    return mesh::cellswithin(*mesh_, mesh_->centre(c), radius_km * 1000.0);
 }
 
 Distances TectonicGrid::dijkstra(const std::vector<CellId>& sources, const std::vector<std::uint8_t>& passable,
@@ -199,8 +168,7 @@ Distances TectonicGrid::dijkstra(const std::vector<CellId>& sources, const std::
         for (std::uint8_t k = 0; k < directioncount; ++k) {
             const CellId n = neighbour(c, k);
             if (settled[n] || (!passable.empty() && !passable[n])) continue;
-            const double step = kind_ == Kind::cube ? mesh_->distance_m(c, kSlot[k]) : cell_m_;
-            const double next = distance + step;
+            const double next = distance + edges_[edge(c, k)].distance_m;
             if (next > limit_m) continue;
             if (next < result.distance_m[n] || (next == result.distance_m[n] && source < result.source[n])) {
                 result.distance_m[n] = next;
@@ -214,16 +182,9 @@ Distances TectonicGrid::dijkstra(const std::vector<CellId>& sources, const std::
 
 float TectonicGrid::quantile(const std::vector<float>& values, float q) const {
     if (values.empty()) return 0.0f;
-    const float clamped = std::max(0.0f, std::min(1.0f, q));
-    if (kind_ == Kind::planar) {
-        // Equal areas: today's quantile_threshold, float arithmetic included.
-        std::vector<float> sorted = values;
-        std::sort(sorted.begin(), sorted.end());
-        const size_t index = static_cast<size_t>(std::floor(clamped * static_cast<float>(sorted.size() - 1)));
-        return sorted[index];
-    }
     if (values.size() != cellcount_)
         throw std::invalid_argument("TectonicGrid::quantile needs one value per cell");
+    const float clamped = std::max(0.0f, std::min(1.0f, q));
     std::vector<CellId> order(values.size());
     std::iota(order.begin(), order.end(), 0U);
     std::stable_sort(order.begin(), order.end(), [&](CellId l, CellId r) { return values[l] < values[r]; });
@@ -244,50 +205,32 @@ std::vector<Vec3> TectonicGrid::centroids(const std::vector<std::uint32_t>& owne
     if (owners.size() != cellcount_) throw std::invalid_argument("TectonicGrid::centroids needs one owner per cell");
     std::vector<Vec3> sum(count);
     std::vector<double> weight(count, 0.0);
-    if (kind_ == Kind::cube) {
-        for (CellId c = 0; c < cellcount_; ++c) {
-            const std::uint32_t owner = owners[c];
-            if (owner >= count) continue;
-            sum[owner] = sum[owner] + area_[c] * mesh_->centre(c);
-            weight[owner] += area_[c];
-        }
-        for (std::uint32_t p = 0; p < count; ++p) {
-            const double length = mesh::length(sum[p]);
-            sum[p] = weight[p] > 0 && length > 0 ? (1.0 / length) * sum[p] : Vec3{};
-        }
-        return sum;
-    }
-    // Circular means per axis: sum stores (cos x, sin x, cos y) and the sin y sum separately.
-    std::vector<double> sin_y(count, 0.0);
     for (CellId c = 0; c < cellcount_; ++c) {
         const std::uint32_t owner = owners[c];
         if (owner >= count) continue;
-        const double ax = kTwoPi * static_cast<double>(c % width_) / width_;
-        const double ay = kTwoPi * static_cast<double>(c / width_) / height_;
-        sum[owner].x += std::cos(ax);
-        sum[owner].y += std::sin(ax);
-        sum[owner].z += std::cos(ay);
-        sin_y[owner] += std::sin(ay);
-        weight[owner] += 1;
+        sum[owner] = sum[owner] + area_[c] * mesh_->centre(c);
+        weight[owner] += area_[c];
     }
     std::vector<Vec3> result(count);
+    std::vector<std::uint32_t> vanishing;
     for (std::uint32_t p = 0; p < count; ++p) {
-        if (weight[p] <= 0) continue;
-        double x = std::atan2(sum[p].y, sum[p].x) / kTwoPi * width_;
-        double y = std::atan2(sin_y[p], sum[p].z) / kTwoPi * height_;
-        if (x < 0) x += width_;
-        if (y < 0) y += height_;
-        result[p] = {x >= width_ ? 0.0 : x, y >= height_ ? 0.0 : y, 0.0};
+        if (!(weight[p] > 0)) continue;
+        if (mesh::length(sum[p]) >= 1e-6 * weight[p]) result[p] = mesh::normalise(sum[p]);
+        else vanishing.push_back(p);
+    }
+    if (!vanishing.empty()) {
+        // Rare: collect the members of the plates whose sums vanish.
+        std::vector<std::vector<Vec3>> members(count);
+        for (CellId c = 0; c < cellcount_; ++c)
+            if (owners[c] < count && std::binary_search(vanishing.begin(), vanishing.end(), owners[c]))
+                members[owners[c]].push_back(mesh_->centre(c));
+        for (const std::uint32_t p : vanishing)
+            result[p] = boundary_cube::meandirection(sum[p], weight[p], members[p]);
     }
     return result;
 }
 
 std::array<double, 2> TectonicGrid::tangentoffset_m(const Vec3& origin, CellId c) const {
-    if (kind_ == Kind::planar) {
-        const Vec3 p = position(c);
-        return {std::remainder(p.x - origin.x, static_cast<double>(width_)) * cell_m_,
-                std::remainder(p.y - origin.y, static_cast<double>(height_)) * cell_m_};
-    }
     const Vec3 o = mesh::normalise(origin);
     const Vec3 p = mesh_->centre(c);
     const double along = mesh::dot(p, o);
@@ -297,4 +240,76 @@ std::array<double, 2> TectonicGrid::tangentoffset_m(const Vec3& origin, CellId c
     return {mesh::dot(q, frame.east) * mesh_->radius_m(), mesh::dot(q, frame.north) * mesh_->radius_m()};
 }
 
+LatLonProxy::LatLonProxy(const TectonicGrid& grid)
+    : mesh_(grid.mesh()), width_(4U * static_cast<std::uint32_t>(grid.facecells())),
+      height_(2U * static_cast<std::uint32_t>(grid.facecells())),
+      cell_m_(2 * kPi * grid.radius_m() / (4.0 * grid.facecells())) {}
+
+std::array<double, 2> LatLonProxy::extent_km() const {
+    return {width_ * cell_m_ / 1000, height_ * cell_m_ / 1000};
+}
+
+std::array<double, 2> LatLonProxy::unitposition(CellId c) const {
+    const double u = (mesh_->longitude_rad(c) + kPi) / (2 * kPi), v = (kPi / 2 - mesh_->latitude_rad(c)) / kPi;
+    return {std::clamp(u, 0.0, std::nextafter(1.0, 0.0)), std::clamp(v, 0.0, std::nextafter(1.0, 0.0))};
+}
+
+std::array<double, 2> LatLonProxy::cellposition(CellId c) const {
+    const auto unit = unitposition(c);
+    return {unit[0] * width_, unit[1] * height_};
+}
+
 } // namespace tectonics::grid
+
+namespace tectonics::boundary_cube {
+
+namespace {
+constexpr double kDegrees = 57.295779513082320876798154814105;
+} // namespace
+
+double cellspacing_m(const grid::TectonicGrid& grid) { return grid.cellspacing_m(); }
+
+std::array<float, 2> encodecentroid(const mesh::Vec3& unit) {
+    return {static_cast<float>(mesh::longitudeof(unit) * kDegrees),
+            static_cast<float>(mesh::latitudeof(unit) * kDegrees)};
+}
+
+mesh::Vec3 decodecentroid(float x, float y) {
+    return mesh::unitvector(static_cast<double>(y) / kDegrees, static_cast<double>(x) / kDegrees);
+}
+
+std::array<double, 3> velocity3(const grid::TectonicGrid& grid, const mesh::Vec3* rotation,
+                                uint32_t plate, uint32_t plate_count, const mesh::Vec3& p) {
+    if (rotation == nullptr || plate >= plate_count) return {0.0, 0.0, 0.0};
+    const double scale = grid.radius_m() / grid.cellspacing_m();
+    const mesh::Vec3 v = scale * mesh::cross(rotation[plate], p);
+    return {v.x, v.y, v.z};
+}
+
+std::array<double, 2> eastnorth(const mesh::Vec3& p, const mesh::Vec3& vector) {
+    const double latitude = mesh::latitudeof(p), longitude = mesh::longitudeof(p);
+    return {mesh::dot(vector, mesh::eastof(latitude, longitude)),
+            mesh::dot(vector, mesh::northof(latitude, longitude))};
+}
+
+std::array<float, 2> velocity(const grid::TectonicGrid& grid, const mesh::Vec3* rotation,
+                              uint32_t plate, uint32_t plate_count, const mesh::Vec3& p) {
+    const auto v = velocity3(grid, rotation, plate, plate_count, p);
+    const auto en = eastnorth(p, {v[0], v[1], v[2]});
+    return {static_cast<float>(en[0]), static_cast<float>(en[1])};
+}
+
+mesh::Vec3 meandirection(const mesh::Vec3& sum, double weight, const std::vector<mesh::Vec3>& members) {
+    const double length = mesh::length(sum);
+    if (length > 0 && length >= 1e-6 * weight) return (1.0 / length) * sum;
+    if (members.empty()) return {};
+    std::size_t best = 0;
+    double nearest = -std::numeric_limits<double>::infinity();
+    for (std::size_t k = 0; k < members.size(); ++k) {
+        const double along = mesh::dot(members[k], sum);
+        if (along > nearest) { nearest = along; best = k; }
+    }
+    return members[best];
+}
+
+} // namespace tectonics::boundary_cube

@@ -11,8 +11,6 @@ namespace tectonics::grid { class TectonicGrid; }
 namespace tectonics::deforming_regions {
 
 struct Inputs {
-    uint32_t width = 0;
-    uint32_t height = 0;
     const uint32_t* plate_id = nullptr;
     const uint8_t* crust_class = nullptr;
     const uint8_t* convergence_score = nullptr;
@@ -24,13 +22,12 @@ struct Inputs {
     const uint32_t* nearest_boundary_id = nullptr;
     const contract::BoundarySegment* boundary_segments = nullptr;
     uint32_t boundary_segment_count = 0;
-    const contract::PlateKinematics* plates = nullptr;
     uint32_t plate_count = 0;
-    // The engine's cell table (W2-E); null for synthetic inputs, which use width x height.
+    // The engine's cell table (required: empty outputs without it).
     const grid::TectonicGrid* grid = nullptr;
-    // Cube only: per plate the rotation vector in radians per update (null: every plate at
-    // rest). On the cube a cell's velocity is omega x p, (east, north) in cells per update, and
-    // a region's centroid longitude and latitude in degrees.
+    // Per plate the rotation vector in radians per update (null: every plate at rest). A
+    // cell's velocity is omega x p, (east, north) in cells per update, and a region's centroid
+    // longitude and latitude in degrees.
     const mesh::Vec3* plate_rotation = nullptr;
 };
 
