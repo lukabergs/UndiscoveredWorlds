@@ -4,7 +4,8 @@
 // docs/architecture/sphere-mesh.md §11): the seeding noise, the ocean relief, the noise pass and
 // the process variation. Every value is a pure function of a unit vector, the seed and lengths
 // in km, so it is continuous across the cube's face edges and corners and independent of the
-// grid, its resolution and the visiting order.
+// grid's layout and the visiting order. Fields that leave out octaves shorter than a few cell
+// spacings (Octaves' shortest_km) depend on the resolution through that cut-off only.
 #include "core/mesh/cell_grid.hpp"
 #include "simulations/landscape/spherical_noise.hpp"
 #include <array>

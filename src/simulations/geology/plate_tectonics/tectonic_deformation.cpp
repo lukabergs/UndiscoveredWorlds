@@ -97,7 +97,9 @@ std::vector<mesh::Vec3> distribute(const columns::Metric& metric, const std::vec
     const double phase=2*pi*bits/4294967296.0;
     // The peak's variation on the sphere: two plane waves through the globe with the torus
     // pattern's wave vectors (2 pi / L) (e1 + e2) and (2 pi / L) (e1 / 2 - 3 e2 / 2), L the
-    // variation's wavelength, in a frame seeded by the seed.
+    // variation's wavelength, in a frame seeded by the seed. Two plane waves are mirror-symmetric
+    // about the plane normal to both wave vectors whatever their directions; the product with
+    // the process multiplier below (three non-coplanar waves in another frame) is not (E6).
     const double radius_km=metric.grid().radius_m()/1000;
     const double wavenumber=2*pi*radius_km/p.distance_variation_wavelength_km;
     const auto axes=sphere_noise::frame(bits);

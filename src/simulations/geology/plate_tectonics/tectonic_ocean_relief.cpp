@@ -47,7 +47,9 @@ std::vector<double> crust(const mesh::CellGrid& grid, long seed, const Parameter
         const int n=std::max(1,static_cast<int>(std::lround(face_km/p.seamount_spacing_km)));
         const auto coarse=mesh::makecubegrid(n,grid.radius_m());
         const auto salt=key^0x27d4eb2fU;
-        const double reach_m=3*p.seamount_radius_km*1.25*1000;
+        // The support ends at 3 in the scaled radius; the longer semi-axis is
+        // seamount_radius_km / aspect, at most seamount_radius_km / 0.75.
+        const double reach_m=3*p.seamount_radius_km/.75*1000;
         for (mesh::CellId k=0;k<coarse->cellcount();++k) {
             const double width_km=std::sqrt(coarse->area_m2(k))/1000;
             const auto cell=mesh::tangentframe(coarse->centre(k),grid.radius_m());
