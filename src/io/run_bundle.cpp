@@ -1,5 +1,6 @@
 #include "io/run_bundle.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <ctime>
@@ -187,12 +188,24 @@ void Writer::finish(const Metadata& metadata)
         out << "  \"grid\": {\"kind\": \"cube\", \"face_cells\": " << grid.facecells
             << ", \"orientation\": \"uw-cube-1\", \"layout\": \"face, row (top first), column\"";
     }
+    else if (grid.kind == "cube-window")
+    {
+        const bool ids = std::any_of(cells_.begin(), cells_.end(), [](const WrittenArray& array) { return array.entry.id == "cell_ids"; });
+        if (grid.facecells < 1 || grid.basefacecells < 1 || grid.level < 0 || grid.facecells % grid.basefacecells != 0 || !ids ||
+            metadata.columns < 1 || metadata.rows < 1)
+            throw std::logic_error("A cube-window bundle needs N_L a multiple of N >= 1, a level, its cell_ids and a lat-lon export box");
+        out << "  \"grid\": {\"kind\": \"cube-window\", \"face_cells\": " << grid.facecells << ", \"level\": " << grid.level
+            << ", \"base_face_cells\": " << grid.basefacecells
+            << ", \"orientation\": \"uw-cube-1\", \"layout\": \"cell list, ascending id\", \"cell_count\": " << grid.cellcount;
+    }
     else
         throw std::logic_error("Unsupported bundle grid kind: " + grid.kind);
     if (grid.radiuskm > 0.0)
         out << ", \"radius_km\": " << grid.radiuskm;
     if (grid.kind == "cube")
         out << ", \"export_columns\": " << metadata.columns;
+    if (grid.kind == "cube-window")
+        out << ", \"export_columns\": " << metadata.columns << ", \"export_rows\": " << metadata.rows;
     out << "},\n";
     out << "  \"recipe\": " << jsonstring(metadata.recipe) << ",\n";
     out << "  \"command\": [";
@@ -487,6 +500,17 @@ Reader::Reader(std::filesystem::path directory) : directory_(std::move(directory
         grid_.facecells = static_cast<int>(grid.at("face_cells").number);
         columns_ = static_cast<int>(grid.at("export_columns").number);
         rows_ = columns_ / 2;
+    }
+    else if (grid_.kind == "cube-window")
+    {
+        if (grid.at("orientation").text != "uw-cube-1")
+            throw std::runtime_error(manifestpath.string() + ": unknown cube orientation " + grid.at("orientation").text);
+        grid_.facecells = static_cast<int>(grid.at("face_cells").number);
+        grid_.level = static_cast<int>(grid.at("level").number);
+        grid_.basefacecells = static_cast<int>(grid.at("base_face_cells").number);
+        grid_.cellcount = static_cast<std::size_t>(grid.at("cell_count").number);
+        columns_ = static_cast<int>(grid.at("export_columns").number);
+        rows_ = static_cast<int>(grid.at("export_rows").number);
     }
     else
         throw std::runtime_error(manifestpath.string() + ": unsupported grid kind " + grid_.kind);

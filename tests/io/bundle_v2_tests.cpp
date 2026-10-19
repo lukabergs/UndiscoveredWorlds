@@ -4,12 +4,14 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <memory>
 #include <random>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -18,7 +20,11 @@
 
 #include "core/climate_seasons.hpp"
 #include "core/mesh/cell_grid.hpp"
+#include "core/mesh/cube_geometry.hpp"
+#include "io/regional_bundle.hpp"
 #include "io/run_bundle.hpp"
+#include "simulations/landscape/refinement_grid.hpp"
+#include "simulations/landscape/regional_grid.hpp"
 #include "world/planet.hpp"
 #include "world/planet_bundle.hpp"
 #include "world/planet_export.hpp"
@@ -293,4 +299,158 @@ TEST(BundleV2, V1BundleStillLoads)
         EXPECT_TRUE(before.bytes == after.bytes) << worldmodel::qualifiedname(id);
     }
     std::filesystem::remove_all(directory);
+}
+
+// A cube-window bundle (sphere-mesh.md section 7, T8 W2-W1c): written from synthetic fields on
+// the level-1 cells of a box across the face 0|1 edge, read back bit for bit with its keys, its
+// cell table and its lat-lon export of the box. Kept for the Python round trip (uwtools.bundle)
+// when UW_CUBE_WINDOW_BUNDLE names a fresh directory.
+TEST(BundleV2, CubeWindowRoundTrips)
+{
+    const int n = 8, scale = 4, level = 1, columns = 4 * n;
+    const double radius = 6371000.0;
+    const landscape::RegionalWindow window = landscape::regionalwindow(columns, scale, 2, 22.5, -11.25, 67.5, 33.75);
+    ASSERT_EQ(window.column0, 18);
+    ASSERT_EQ(window.row0, 5);
+    const auto base = mesh::makecubegrid(n, radius);
+    landscape::KeyLevelWindow keyed;
+    keyed.kind = mesh::GridKind::cube;
+    keyed.basecells = n;
+    keyed.factor = scale;
+    keyed.level = level;
+    keyed.keptglobal = landscape::cellsinpixelbox(*base, columns, window.column0, window.row0,
+                                                  window.column0 + window.columns - 1, window.row0 + window.rows - 1);
+    const auto kept = mesh::cubewindowgrid(n * scale, radius, keyed.keptkeys(), true);
+    const std::size_t count = kept->cellcount();
+    ASSERT_GT(count, 0u);
+    std::set<int> faces;
+
+    landscape::RegionalFields fields;
+    fields.window = window;
+    const auto fill = [count](auto& values, auto value) { values.assign(count, value); };
+    fill(fields.elevation_m, 0.0f);
+    fill(fields.sea, std::uint8_t{ 0 });
+    fill(fields.riverdirection, std::uint8_t{ 0 });
+    fill(fields.discharge_m3s, 1.5f);
+    fill(fields.januaryflow, 0);
+    fill(fields.julyflow, 0);
+    fill(fields.lakesurface_m, 0.0f);
+    fill(fields.januarytemperature_c, 0.0f);
+    fill(fields.julytemperature_c, 0.0f);
+    fill(fields.januaryprecipitation_mm, 7.0f);
+    fill(fields.julyprecipitation_mm, 7.0f);
+    fill(fields.icethickness_m, 0.0f);
+    fill(fields.climate, std::int16_t{ 0 });
+    for (mesh::CellId c = 0; c < count; c++)
+    {
+        const mesh::Vec3 p = kept->centre(c);
+        const mesh::LevelKey key = kept->globalkey(c);
+        faces.insert(mesh::cubecell(n * scale, key).face);
+        fields.elevation_m[c] = static_cast<float>(1000.0 * p.z + 200.0 * p.x);
+        fields.sea[c] = fields.elevation_m[c] < 0.0f ? 1 : 0;
+        fields.riverdirection[c] = static_cast<std::uint8_t>(key % 9);
+        fields.januaryflow[c] = static_cast<std::int32_t>(key % 1000);
+        fields.julyflow[c] = static_cast<std::int32_t>(key % 997);
+        fields.januarytemperature_c[c] = static_cast<float>(kept->latitude_rad(c));
+        fields.climate[c] = static_cast<std::int16_t>(key % 30);
+    }
+    EXPECT_EQ(faces, (std::set<int>{ 0, 1 }));
+
+    regionalbundle::Metadata metadata;
+    metadata.run.seed = 1;
+    metadata.run.recipe = "region";
+    metadata.sourcebundle = "synthetic";
+    metadata.sourcemanifestsha256 = std::string(64, 'a');
+    metadata.sourceseed = 1;
+    metadata.level = level;
+    metadata.factor = scale;
+    const char* keep = std::getenv("UW_CUBE_WINDOW_BUNDLE");
+    const std::filesystem::path directory = keep != nullptr && *keep ? std::filesystem::path(keep) : freshdirectory("cube-window");
+    regionalbundle::writecubewindowbundle(directory, fields, *kept, n, level, metadata);
+
+    const runbundle::Reader reader(directory);
+    EXPECT_EQ(reader.grid().kind, "cube-window");
+    EXPECT_EQ(reader.grid().facecells, n * scale);
+    EXPECT_EQ(reader.grid().level, level);
+    EXPECT_EQ(reader.grid().basefacecells, n);
+    EXPECT_EQ(reader.grid().cellcount, count);
+    EXPECT_DOUBLE_EQ(reader.grid().radiuskm, 6371.0);
+    EXPECT_EQ(reader.columns(), window.finewidth());
+    EXPECT_EQ(reader.rows(), window.fineheight());
+    const std::vector<mesh::LevelKey> keys = regionalbundle::cubewindowkeys(reader);
+    ASSERT_EQ(keys.size(), count);
+    for (mesh::CellId c = 0; c < count; c++)
+        EXPECT_EQ(keys[c], kept->globalkey(c));
+
+    const auto bytesof = [](const auto& values) {
+        std::vector<unsigned char> bytes(values.size() * sizeof(values[0]));
+        std::memcpy(bytes.data(), values.data(), bytes.size());
+        return bytes;
+    };
+    std::size_t checked = 0;
+    for (const runbundle::ManifestEntry& entry : reader.fields())
+    {
+        if (entry.id == "geosphere.sea_level")
+            continue;
+        EXPECT_EQ(entry.shape, (std::vector<std::size_t>{ count })) << entry.id;
+        if (entry.id == "geosphere.base_elevation")
+        {
+            EXPECT_TRUE(reader.fielddata(entry) == bytesof(fields.elevation_m));
+            checked++;
+        }
+        if (entry.id == "hydrosphere.river_flow_january")
+        {
+            EXPECT_TRUE(reader.fielddata(entry) == bytesof(fields.januaryflow));
+            checked++;
+        }
+    }
+    EXPECT_EQ(checked, 2u);
+    for (const runbundle::ManifestEntry& entry : reader.cells())
+        if (entry.id == "neighbours")
+        {
+            const std::vector<unsigned char> bytes = reader.fielddata(entry);
+            std::vector<std::int32_t> neighbours(bytes.size() / sizeof(std::int32_t));
+            std::memcpy(neighbours.data(), bytes.data(), bytes.size());
+            for (mesh::CellId c = 0; c < count; c++)
+                for (int k = 1; k <= mesh::slotcount; k++)
+                    EXPECT_EQ(neighbours[mesh::slotcount * c + (k - 1)], kept->neighbour(c, k));
+        }
+
+    // The export: every grid field on the box's level lat-lon grid; a constant mean exact where
+    // the window covers the export cell, the elevation near its formula there.
+    mesh::LatLonWindowBox box;
+    box.column0 = static_cast<std::int64_t>(window.column0) * scale;
+    box.columns = window.finewidth();
+    box.row0 = window.row0 * scale;
+    box.rows = window.fineheight();
+    const auto exportgrid = mesh::latlonwindowgrid(columns * scale, radius, box);
+    EXPECT_EQ(reader.exports().size(), reader.fields().size() - 1);
+    std::size_t covered = 0;
+    for (const runbundle::ManifestEntry& entry : reader.exports())
+    {
+        EXPECT_EQ(entry.shape, (std::vector<std::size_t>{ static_cast<std::size_t>(box.rows), static_cast<std::size_t>(box.columns) }))
+            << entry.id;
+        if (entry.id != "atmosphere.precipitation_july" && entry.id != "geosphere.base_elevation")
+            continue;
+        EXPECT_EQ(entry.rule, "mean");
+        const std::vector<unsigned char> bytes = reader.fielddata(entry);
+        std::vector<float> values(bytes.size() / sizeof(float));
+        std::memcpy(values.data(), bytes.data(), bytes.size());
+        for (mesh::CellId d = 0; d < exportgrid->cellcount(); d++)
+        {
+            const mesh::Vec3 p = exportgrid->centre(d);
+            if (kept->locate(p) == mesh::nocell)
+                continue;
+            if (entry.id == "atmosphere.precipitation_july")
+            {
+                EXPECT_EQ(values[d], 7.0f);
+                covered++;
+            }
+            else
+                EXPECT_NEAR(values[d], 1000.0 * p.z + 200.0 * p.x, 60.0);
+        }
+    }
+    EXPECT_GT(covered, exportgrid->cellcount() / 2);
+    if (keep == nullptr || !*keep)
+        std::filesystem::remove_all(directory);
 }

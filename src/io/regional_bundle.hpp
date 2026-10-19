@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 
+#include "core/mesh/cell_grid.hpp"
 #include "io/run_bundle.hpp"
 #include "simulations/landscape/refinement_levels.hpp"
 #include "simulations/landscape/regional_pass.hpp"
@@ -61,6 +62,25 @@ struct Metadata
 // runbundle::Writer (an existing non-empty directory is refused).
 void writeregionalbundle(const std::filesystem::path& directory, const landscape::RegionalFields& fields,
                          const Metadata& metadata);
+
+// A cube window's regional bundle (docs/architecture/sphere-mesh.md section 7, grid kind
+// cube-window; T8 W2-W1c): the fields on the kept level cells of `kept` (a
+// mesh::cubewindowgrid; every field holds kept.cellcount() values in its local order, ascending
+// level keys), shape [n]; the cell table under grid/ (cell_ids: the u8 level keys; centre,
+// latitude_deg, longitude_deg, area_m2, neighbours as local ids with -1 outside the kept cells,
+// reverse); and every grid field's lat-lon export of the window's box (fields.window's kept box
+// at its scale k: finewidth x fineheight cells of the level's lat-lon grid, kW x kH) by the field's
+// remap rule through mesh::makeremap on the window itself, a direction field as 0 (not
+// recomputed). The window block is the lat-lon one's (fields.window on the export grid W = 4 N).
+// Throws std::invalid_argument when kept is not a cube window of N_L = basefacecells x scale,
+// fields.window.worldwidth is not 4 basefacecells, a pixel grid is set, or a field's size is not
+// kept.cellcount(); and as runbundle::Writer.
+void writecubewindowbundle(const std::filesystem::path& directory, const landscape::RegionalFields& fields,
+                           const mesh::CellGrid& kept, int basefacecells, int level, const Metadata& metadata);
+
+// The ascending level keys of a cube-window bundle (grid/cell_ids.npy). Throws
+// std::runtime_error for another grid kind or a table that does not hold cell_count keys.
+std::vector<mesh::LevelKey> cubewindowkeys(const runbundle::Reader& reader);
 
 // The window block of a manifest: scale, world grid, the kept box in global cells, the
 // absolute fine origin of the kept grid on the kW x kH grid, the box's edges in degrees

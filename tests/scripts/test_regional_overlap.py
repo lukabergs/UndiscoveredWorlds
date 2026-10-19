@@ -68,6 +68,43 @@ def write_regional(directory, column0, columns, row0, rows, scale=2, source="a" 
     return directory
 
 
+def write_cube_window(directory, keys, level=1, change=None, source="a" * 64):
+    """A cube-window bundle (grid kind cube-window) of the level keys `keys`, its fields functions of the
+    key (a [2, n] layered one too); change = (field, key) adds 1 to that cell."""
+    directory = Path(directory)
+    keys = np.asarray(sorted(keys), dtype=np.uint64)
+    fields = {"geosphere.base_elevation": (keys * 0.5 + 1).astype(np.float32),
+              "hydrosphere.channel_direction": (keys % 9).astype(np.int16),
+              "atmosphere.temperature": np.stack([keys * 0.25, keys * 0.75]).astype(np.float32)}
+    entries = []
+    for identifier, values in fields.items():
+        values = values.copy()
+        if change and change[0] == identifier:
+            values[..., int(np.searchsorted(keys, change[1]))] += 1
+        component, name = identifier.split(".")
+        relative = f"fields/{component}/{name}.npy"
+        (directory / "fields" / component).mkdir(parents=True, exist_ok=True)
+        np.save(directory / relative, values)
+        entries.append({"id": identifier, "component": component, "layout": "grid", "dtype": values.dtype.str,
+                        "shape": list(values.shape), "units": "", "file": relative, "hash": "0",
+                        "written_by": "test", "description": ""})
+    (directory / "grid").mkdir(parents=True, exist_ok=True)
+    np.save(directory / "grid/cell_ids.npy", keys)
+    manifest = {"schema": SCHEMA, "seed": 1, "recipe": "region",
+                "grid": {"kind": "cube-window", "face_cells": 8 * 4 ** level, "level": level, "base_face_cells": 8,
+                         "orientation": "uw-cube-1", "layout": "cell list, ascending id", "cell_count": int(keys.size),
+                         "radius_km": 6371.0, "export_columns": 8, "export_rows": 8},
+                "window": {"scale": 4, "world_columns": 32, "world_rows": 16, "column0": 0, "columns": 2,
+                           "row0": 0, "rows": 2, "fine_column0": 0, "fine_row0": 0, "halo": 2},
+                "source": {"bundle": "world", "manifest_sha256": source, "seed": 1},
+                "parameters": {"landscape.regional.elapsed_myr": 1.0},
+                "fields": entries, "cells": [{"id": "cell_ids", "dtype": "<u8", "shape": [int(keys.size)],
+                                              "file": "grid/cell_ids.npy", "hash": "0"}],
+                "tables": []}
+    (directory / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    return directory
+
+
 def run(*arguments):
     output = io.StringIO()
     with contextlib.redirect_stdout(output), contextlib.redirect_stderr(io.StringIO()):
@@ -139,6 +176,29 @@ class RegionalOverlapTest(unittest.TestCase):
         self.assertEqual(run(a, other)[0], 2)
         with self.assertRaisesRegex(regional_overlap.Refused, "elapsed_myr"):
             regional_overlap.overlap(a, other)
+
+    def test_cube_windows_align_by_cell_ids(self):
+        # Keys 0..99 and 50..149 (an N_L 32 level; 1024 cells per face, so keys 0..149 lie on face 0): 50 shared cells.
+        a = write_cube_window(self.root / "a", range(0, 100))
+        b = write_cube_window(self.root / "b", range(50, 150))
+        code, text = run(a, b)
+        self.assertEqual(code, 0, text)
+        self.assertIn("Overlap: 50 level cells", text)
+        result = regional_overlap.overlap(a, b)
+        self.assertEqual(result["cells"], 50)
+        self.assertEqual(result["fields"]["geosphere.base_elevation"]["cells"], 50)
+        self.assertEqual(result["fields"]["atmosphere.temperature"]["cells"], 100)  # two layers
+        changed = write_cube_window(self.root / "c", range(50, 150), change=("atmosphere.temperature", 60))
+        outcome = regional_overlap.overlap(a, changed)["fields"]["atmosphere.temperature"]
+        self.assertEqual((outcome["status"], outcome["differing"]), ("different", 2))
+        outside = write_cube_window(self.root / "d", range(50, 150), change=("geosphere.base_elevation", 120))
+        self.assertEqual(run(a, outside)[0], 0)
+
+    def test_cube_window_refusals(self):
+        a = write_cube_window(self.root / "a", range(0, 100))
+        self.assertEqual(run(a, write_cube_window(self.root / "level", range(0, 100), level=2))[0], 2)
+        self.assertEqual(run(a, write_cube_window(self.root / "apart", range(200, 300)))[0], 2)
+        self.assertEqual(run(a, write_regional(self.root / "latlon", 1, 4, 0, 3, scale=4))[0], 2)
 
     def test_refuses_a_resampled_bundle(self):
         a = write_regional(self.root / "a", 1, 4, 0, 3)

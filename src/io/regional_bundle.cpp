@@ -3,7 +3,10 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
+#include <memory>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <iterator>
 #include <limits>
@@ -11,12 +14,17 @@
 #include <stdexcept>
 #include <vector>
 
+#include "core/mesh/cube_geometry.hpp"
+#include "core/mesh/mesh_remap.hpp"
 #include "core/world/world_fields.hpp"
 
 namespace regionalbundle
 {
 namespace
 {
+// Sees a field right after it is written, with its remap rule (a cube window's lat-lon export).
+using ExportHook = std::function<void(const runbundle::FieldEntry&, worldmodel::RemapRule)>;
+
 std::string jsonnumber(double value)
 {
     if (!std::isfinite(value))
@@ -31,7 +39,7 @@ std::string jsonnumber(double value)
 template<typename T>
 void addcataloguefield(runbundle::Writer& writer, std::vector<std::string>& written, const std::string& id,
                        const std::vector<T>& values, const char* dtype, const std::vector<std::size_t>& shape,
-                       const std::string& description, const std::string& writtenby)
+                       const std::string& description, const std::string& writtenby, const ExportHook* hook = nullptr)
 {
     worldmodel::FieldId field{};
     if (!worldmodel::findfield(id, field))
@@ -53,6 +61,8 @@ void addcataloguefield(runbundle::Writer& writer, std::vector<std::string>& writ
     entry.bytes = values.size() * sizeof(T);
     entry.writtenby = writtenby;
     writer.addfield(entry);
+    if (hook)
+        (*hook)(entry, spec.rule);
 }
 
 // SHA-256 (FIPS 180-4).
@@ -182,22 +192,14 @@ std::string windowjson(const landscape::RegionalWindow& window)
     return out.str();
 }
 
-void writeregionalbundle(const std::filesystem::path& directory, const landscape::RegionalFields& fields,
-                         const Metadata& metadata)
+namespace
 {
-    const landscape::RegionalWindow& window = fields.window;
-    const bool pixelgrid = metadata.pixelcolumns.has_value();
-    if (pixelgrid != metadata.pixelrows.has_value() || pixelgrid != metadata.pixelcells.has_value() ||
-        (pixelgrid && (*metadata.pixelcolumns < 1 || *metadata.pixelrows < 1)))
-        throw std::invalid_argument("writeregionalbundle: the pixel grid needs its columns, rows and cells, all positive");
-    const std::size_t columns = static_cast<std::size_t>(pixelgrid ? *metadata.pixelcolumns : window.finewidth());
-    const std::size_t rows = static_cast<std::size_t>(pixelgrid ? *metadata.pixelrows : window.fineheight());
-    const std::size_t size = columns * rows;
+void checkfieldsizes(const landscape::RegionalFields& fields, std::size_t size, const char* what)
+{
     const auto checksize = [&](std::size_t count, const char* name)
     {
         if (count != size)
-            throw std::invalid_argument(std::string("writeregionalbundle: ") + name +
-                                    (pixelgrid ? " is not the pixel grid's size" : " is not the kept window's size"));
+            throw std::invalid_argument(std::string("writeregionalbundle: ") + name + what);
     };
     checksize(fields.elevation_m.size(), "elevation");
     checksize(fields.sea.size(), "sea");
@@ -212,14 +214,19 @@ void writeregionalbundle(const std::filesystem::path& directory, const landscape
     checksize(fields.julyprecipitation_mm.size(), "July precipitation");
     checksize(fields.icethickness_m.size(), "ice thickness");
     checksize(fields.climate.size(), "climate class");
+}
 
-    runbundle::Writer writer(directory);
-    const std::vector<std::size_t> grid = {rows, columns};
+// The regional fields on a grid of shape `grid` (size cells), in the order of every regional
+// bundle; the hook, when set, sees each grid field right after it is written, with its remap rule.
+std::vector<std::string> addregionalfields(runbundle::Writer& writer, const landscape::RegionalFields& fields,
+                                           const std::vector<std::size_t>& grid, std::size_t size, const Metadata& metadata,
+                                           const ExportHook* hook)
+{
     const std::string& by = metadata.writtenby;
     std::vector<std::string> written;
 
     addcataloguefield(writer, written, "geosphere.base_elevation", fields.elevation_m, "<f4", grid,
-                      "Regional terrain: the upsampled global base elevation with noise, carved by the analytical relief on the pinned channels", by);
+                      "Regional terrain: the upsampled global base elevation with noise, carved by the analytical relief on the pinned channels", by, hook);
     // The sea mask: no catalogue grid holds it (geosphere.sea_cells is a count).
     runbundle::FieldEntry sea;
     sea.id = "geosphere.sea";
@@ -233,6 +240,8 @@ void writeregionalbundle(const std::filesystem::path& directory, const landscape
     sea.bytes = fields.sea.size();
     sea.writtenby = by;
     writer.addfield(sea);
+    if (hook)
+        (*hook)(sea, worldmodel::RemapRule::nearest);
     written.push_back(sea.id);
     const std::vector<std::int32_t> sealevel = {static_cast<std::int32_t>(metadata.sealevel)};
     addcataloguefield(writer, written, "geosphere.sea_level", sealevel, "<i4", {}, "Sea level of the world bundle on the elevation datum", by);
@@ -254,32 +263,44 @@ void writeregionalbundle(const std::filesystem::path& directory, const landscape
     channel.bytes = direction.size() * sizeof(std::int16_t);
     channel.writtenby = by;
     writer.addfield(channel);
+    if (hook)
+        (*hook)(channel, worldmodel::RemapRule::direction);
     written.push_back(channel.id);
     addcataloguefield(writer, written, "hydrosphere.discharge", fields.discharge_m3s, "<f4", grid,
-                      "Discharge: the global discharge on pinned channels, the fine accumulation elsewhere", by);
+                      "Discharge: the global discharge on pinned channels, the fine accumulation elsewhere", by, hook);
     addcataloguefield(writer, written, "hydrosphere.river_flow_january", fields.januaryflow, "<i4", grid,
-                      "January river flow of the global network on pinned channels, 0 elsewhere", by);
+                      "January river flow of the global network on pinned channels, 0 elsewhere", by, hook);
     addcataloguefield(writer, written, "hydrosphere.river_flow_july", fields.julyflow, "<i4", grid,
-                      "July river flow of the global network on pinned channels, 0 elsewhere", by);
+                      "July river flow of the global network on pinned channels, 0 elsewhere", by, hook);
     addcataloguefield(writer, written, "hydrosphere.lake_surface", fields.lakesurface_m, "<f4", grid,
-                      "Lake surface of the global lake where the fine bed lies below it, 0 elsewhere", by);
+                      "Lake surface of the global lake where the fine bed lies below it, 0 elsewhere", by, hook);
     addcataloguefield(writer, written, "cryosphere.ice_thickness", fields.icethickness_m, "<f4", grid,
                       "Present-day ice thickness: the global ice upsampled where the global cell or a neighbour "
                       "has ice; with regional.ice_ela_thickness_fraction above 0, at least that fraction of the "
                       "height above the present climate's equilibrium line (1 m to ice_ela_thickness_max_m) on "
                       "fine land and lake cells above it (plus an edge noise); 0 elsewhere",
-                      by);
+                      by, hook);
     addcataloguefield(writer, written, "atmosphere.temperature_january", fields.januarytemperature_c, "<f4", grid,
-                      "January temperature, interpolated and corrected by the lapse rate for the fine elevation", by);
+                      "January temperature, interpolated and corrected by the lapse rate for the fine elevation", by, hook);
     addcataloguefield(writer, written, "atmosphere.temperature_july", fields.julytemperature_c, "<f4", grid,
-                      "July temperature, interpolated and corrected by the lapse rate for the fine elevation", by);
+                      "July temperature, interpolated and corrected by the lapse rate for the fine elevation", by, hook);
     addcataloguefield(writer, written, "atmosphere.precipitation_january", fields.januaryprecipitation_mm, "<f4", grid,
-                      "January precipitation, interpolated and clamped at zero", by);
+                      "January precipitation, interpolated and clamped at zero", by, hook);
     addcataloguefield(writer, written, "atmosphere.precipitation_july", fields.julyprecipitation_mm, "<f4", grid,
-                      "July precipitation, interpolated and clamped at zero", by);
+                      "July precipitation, interpolated and clamped at zero", by, hook);
     addcataloguefield(writer, written, "atmosphere.climate_class", fields.climate, "<i2", grid,
-                      "Climate class of the global cell", by);
+                      "Climate class of the global cell", by, hook);
 
+    return written;
+}
+
+// The manifest of a regional bundle of columns x rows (the fine grid, the pixel grid or a
+// cube window's export box): the steps' writes, the window, source and diagnostics blocks.
+runbundle::Metadata regionalmanifest(const landscape::RegionalFields& fields, const Metadata& metadata, std::size_t columns,
+                                     std::size_t rows, const std::vector<std::string>& written)
+{
+    const landscape::RegionalWindow& window = fields.window;
+    const bool pixelgrid = metadata.pixelcolumns.has_value();
     runbundle::Metadata manifest = metadata.run;
     manifest.columns = static_cast<int>(columns);
     manifest.rows = static_cast<int>(rows);
@@ -402,6 +423,168 @@ void writeregionalbundle(const std::filesystem::path& directory, const landscape
     }
     diagnostics << "}";
     manifest.blocks.push_back({"diagnostics", diagnostics.str()});
+    return manifest;
+}
+}
+
+void writeregionalbundle(const std::filesystem::path& directory, const landscape::RegionalFields& fields,
+                         const Metadata& metadata)
+{
+    const bool pixelgrid = metadata.pixelcolumns.has_value();
+    if (pixelgrid != metadata.pixelrows.has_value() || pixelgrid != metadata.pixelcells.has_value() ||
+        (pixelgrid && (*metadata.pixelcolumns < 1 || *metadata.pixelrows < 1)))
+        throw std::invalid_argument("writeregionalbundle: the pixel grid needs its columns, rows and cells, all positive");
+    const std::size_t columns = static_cast<std::size_t>(pixelgrid ? *metadata.pixelcolumns : fields.window.finewidth());
+    const std::size_t rows = static_cast<std::size_t>(pixelgrid ? *metadata.pixelrows : fields.window.fineheight());
+    const std::size_t size = columns * rows;
+    checkfieldsizes(fields, size, pixelgrid ? " is not the pixel grid's size" : " is not the kept window's size");
+    runbundle::Writer writer(directory);
+    const std::vector<std::string> written = addregionalfields(writer, fields, {rows, columns}, size, metadata, nullptr);
+    writer.finish(regionalmanifest(fields, metadata, columns, rows, written));
+}
+
+namespace
+{
+template<typename T>
+void addarray(runbundle::Writer& writer, const char* id, const char* dtype, std::vector<std::size_t> shape, const std::vector<T>& values)
+{
+    runbundle::ArrayEntry entry;
+    entry.id = id;
+    entry.dtype = dtype;
+    entry.shape = std::move(shape);
+    entry.data = values.data();
+    entry.bytes = values.size() * sizeof(T);
+    writer.addcells(entry);
+}
+
+// The cell table of a cube window (planet_bundle.cpp's for a cube world, plus the level keys).
+void writewindowcells(runbundle::Writer& writer, const mesh::CellGrid& grid)
+{
+    const std::size_t count = grid.cellcount();
+    constexpr double degrees = 180.0 / 3.14159265358979323846;
+    std::vector<std::uint64_t> keys(count);
+    std::vector<double> centre(3 * count), latitude(count), longitude(count), area(count);
+    std::vector<std::int32_t> neighbours(mesh::slotcount * count);
+    std::vector<std::int8_t> reverse(mesh::slotcount * count);
+    for (mesh::CellId c = 0; c < count; c++)
+    {
+        keys[c] = grid.globalkey(c);
+        const mesh::Vec3 p = grid.centre(c);
+        centre[3 * c] = p.x;
+        centre[3 * c + 1] = p.y;
+        centre[3 * c + 2] = p.z;
+        latitude[c] = grid.latitude_rad(c) * degrees;
+        longitude[c] = grid.longitude_rad(c) * degrees;
+        area[c] = grid.area_m2(c);
+        for (int k = 1; k <= mesh::slotcount; k++)
+        {
+            neighbours[mesh::slotcount * c + (k - 1)] = grid.neighbour(c, k);
+            reverse[mesh::slotcount * c + (k - 1)] = static_cast<std::int8_t>(grid.reverse(c, k));
+        }
+    }
+    const std::size_t slots = static_cast<std::size_t>(mesh::slotcount);
+    addarray(writer, "cell_ids", "<u8", {count}, keys);
+    addarray(writer, "centre", "<f8", {count, 3}, centre);
+    addarray(writer, "latitude_deg", "<f8", {count}, latitude);
+    addarray(writer, "longitude_deg", "<f8", {count}, longitude);
+    addarray(writer, "area_m2", "<f8", {count}, area);
+    addarray(writer, "neighbours", "<i4", {count, slots}, neighbours);
+    addarray(writer, "reverse", "|i1", {count, slots}, reverse);
+}
+
+// A field's values remapped to the export box by its rule; a direction field as 0.
+template<typename T>
+std::vector<unsigned char> exportvalues(const runbundle::FieldEntry& entry, worldmodel::RemapRule rule, const mesh::RemapWeights& weights,
+                                        const mesh::CellGrid& source, const mesh::CellGrid& destination)
+{
+    const T* data = static_cast<const T*>(entry.data);
+    const std::vector<T> values(data, data + entry.bytes / sizeof(T));
+    std::vector<T> out;
+    switch (rule)
+    {
+    case worldmodel::RemapRule::mean: out = mesh::remapmean(weights, source, destination, values); break;
+    case worldmodel::RemapRule::total: out = mesh::remaptotal(weights, values); break;
+    case worldmodel::RemapRule::nearest: out = mesh::remapnearest(source, destination, values); break;
+    case worldmodel::RemapRule::direction: out.assign(destination.cellcount(), T{}); break;
+    }
+    std::vector<unsigned char> bytes(out.size() * sizeof(T));
+    if (!bytes.empty())
+        std::memcpy(bytes.data(), out.data(), bytes.size());
+    return bytes;
+}
+}
+
+void writecubewindowbundle(const std::filesystem::path& directory, const landscape::RegionalFields& fields,
+                           const mesh::CellGrid& kept, int basefacecells, int level, const Metadata& metadata)
+{
+    const landscape::RegionalWindow& window = fields.window;
+    if (kept.kind() != mesh::GridKind::cube || !kept.issubgrid() || basefacecells < 1 ||
+        static_cast<std::int64_t>(kept.facecells()) != static_cast<std::int64_t>(basefacecells) * window.scale ||
+        window.worldwidth != 4 * basefacecells || level < 0)
+        throw std::invalid_argument("writecubewindowbundle: the kept cells must be a window of N_L = N x scale of a world of 4 N columns");
+    if (metadata.pixelcolumns || metadata.pixelrows || metadata.pixelcells)
+        throw std::invalid_argument("writecubewindowbundle: a cube window has no pixel grid");
+    const std::size_t count = kept.cellcount();
+    checkfieldsizes(fields, count, " is not the cube window's cell count");
+
+    // The export box: the kept box of the level's lat-lon grid (kW columns).
+    const int scale = window.scale;
+    mesh::LatLonWindowBox box;
+    box.column0 = static_cast<std::int64_t>(window.column0) * scale;
+    box.columns = window.finewidth();
+    box.row0 = window.row0 * scale;
+    box.rows = window.fineheight();
+    const std::shared_ptr<const mesh::CellGrid> exportgrid = mesh::latlonwindowgrid(window.worldwidth * scale, kept.radius_m(), box);
+    const mesh::RemapWeights weights = mesh::makeremap(kept, *exportgrid);
+    const std::size_t columns = static_cast<std::size_t>(box.columns), rows = static_cast<std::size_t>(box.rows);
+
+    runbundle::Writer writer(directory);
+    const ExportHook hook = [&](const runbundle::FieldEntry& entry, worldmodel::RemapRule rule) {
+        std::vector<unsigned char> bytes;
+        if (entry.dtype == "<f4")
+            bytes = exportvalues<float>(entry, rule, weights, kept, *exportgrid);
+        else if (entry.dtype == "|u1")
+            bytes = exportvalues<std::uint8_t>(entry, rule, weights, kept, *exportgrid);
+        else if (entry.dtype == "<i2")
+            bytes = exportvalues<std::int16_t>(entry, rule, weights, kept, *exportgrid);
+        else if (entry.dtype == "<i4")
+            bytes = exportvalues<std::int32_t>(entry, rule, weights, kept, *exportgrid);
+        else
+            throw std::logic_error("writecubewindowbundle: no export for " + entry.id + " of " + entry.dtype);
+        runbundle::FieldEntry exported = entry;
+        exported.shape = {rows, columns};
+        exported.data = bytes.data();
+        exported.bytes = bytes.size();
+        writer.addexport(exported, worldmodel::remaprulename(rule), false);
+    };
+    const std::vector<std::string> written = addregionalfields(writer, fields, {count}, count, metadata, &hook);
+    writewindowcells(writer, kept);
+    runbundle::Metadata manifest = regionalmanifest(fields, metadata, columns, rows, written);
+    manifest.grid.kind = "cube-window";
+    manifest.grid.facecells = kept.facecells();
+    manifest.grid.level = level;
+    manifest.grid.basefacecells = basefacecells;
+    manifest.grid.cellcount = count;
+    manifest.grid.radiuskm = kept.radius_m() / 1000.0;
     writer.finish(manifest);
+}
+
+std::vector<mesh::LevelKey> cubewindowkeys(const runbundle::Reader& reader)
+{
+    if (reader.grid().kind != "cube-window")
+        throw std::runtime_error("cubewindowkeys: " + reader.directory().string() + " is not a cube-window bundle");
+    for (const runbundle::ManifestEntry& entry : reader.cells())
+    {
+        if (entry.id != "cell_ids")
+            continue;
+        if (entry.dtype != "<u8" || entry.shape.size() != 1 || entry.shape[0] != reader.grid().cellcount)
+            throw std::runtime_error("cubewindowkeys: cell_ids does not hold cell_count u8 keys: " + reader.directory().string());
+        const std::vector<unsigned char> bytes = reader.fielddata(entry);
+        std::vector<mesh::LevelKey> keys(entry.shape[0]);
+        if (!keys.empty())
+            std::memcpy(keys.data(), bytes.data(), bytes.size());
+        return keys;
+    }
+    throw std::runtime_error("cubewindowkeys: no cell_ids in " + reader.directory().string());
 }
 }

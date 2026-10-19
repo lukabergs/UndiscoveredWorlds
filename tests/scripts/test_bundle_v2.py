@@ -86,6 +86,41 @@ def write_cube(directory):
     return directory
 
 
+def write_cube_window(directory, keys, level=1, base=N, factor=4, export=(8, 6)):
+    """A cube-window bundle of the level keys `keys` (ascending) at N_L = base factor^level: native [n] and
+    [4, n] fields whose values are their keys, their exports of the box and the cell table with cell_ids."""
+    directory = Path(directory)
+    keys = np.asarray(keys, dtype=np.uint64)
+    count = keys.size
+    rows, columns = export[1], export[0]
+    fields = [field_entry(directory, "geosphere.base_elevation", keys.astype(np.float32), "grid"),
+              field_entry(directory, "atmosphere.precipitation", np.stack([keys.astype(np.float32) + s for s in range(4)]),
+                          "seasonal"),
+              field_entry(directory, "geosphere.sea_level", np.array(0, dtype=np.int32), "scalar")]
+    exports = []
+    for identifier, values in (("geosphere.base_elevation", np.full((rows, columns), 5.0, np.float32)),
+                               ("atmosphere.precipitation", np.full((4, rows, columns), 7.0, np.float32))):
+        component, name = identifier.split(".")
+        entry = save(directory, f"latlon/{component}/{name}.npy", values)
+        entry.update({"id": identifier, "rule": "mean"})
+        exports.append(entry)
+    cells = []
+    for identifier, values in (("cell_ids", keys), ("centre", np.zeros((count, 3))), ("area_m2", np.ones(count)),
+                               ("neighbours", np.full((count, 8), -1, np.int32)), ("reverse", np.zeros((count, 8), np.int8))):
+        entry = save(directory, f"grid/{identifier}.npy", values)
+        entry["id"] = identifier
+        cells.append(entry)
+    grid = {"kind": "cube-window", "face_cells": base * factor ** level, "level": level, "base_face_cells": base,
+            "orientation": "uw-cube-1", "layout": "cell list, ascending id", "cell_count": int(count), "radius_km": 6371.0,
+            "export_columns": columns, "export_rows": rows}
+    manifest = {"schema": SCHEMA, "seed": 1, "recipe": "region", "grid": grid, "fields": fields, "exports": exports,
+                "cells": cells, "tables": [],
+                "window": {"scale": factor ** level, "world_columns": 4 * base, "world_rows": 2 * base, "column0": 0,
+                           "columns": 2, "row0": 1, "rows": 2, "fine_column0": 0, "fine_row0": 4, "halo": 2}}
+    (directory / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    return directory
+
+
 def compare(left, right):
     script = SCRIPTS / "evaluation" / "compare_bundles.py"
     return subprocess.run([sys.executable, str(script), str(left), str(right)], capture_output=True, text=True)
@@ -134,6 +169,23 @@ class BundleV2Tests(unittest.TestCase):
         self.assertEqual(cells["neighbours"].shape, (6 * N * N, 8))
         self.assertEqual(cells["neighbours"].dtype, np.int32)
         self.assertEqual(cells["reverse"].dtype, np.int8)
+
+    def test_cube_window_load_is_the_export_and_load_native_the_cells(self):
+        keys = np.array([3, 4, 9, 70, 71, 300], dtype=np.uint64)
+        bundle = Bundle.open(write_cube_window(self.root / "window", keys))
+        self.assertEqual(bundle.grid_kind, "cube-window")
+        self.assertEqual((bundle.face_cells, bundle.level, bundle.base_face_cells, bundle.cell_count), (8, 1, N, 6))
+        self.assertEqual((bundle.columns, bundle.rows), (8, 6))
+        self.assertEqual(bundle.load("geosphere.base_elevation").shape, (6, 8))
+        self.assertTrue(np.all(bundle.load("atmosphere.precipitation") == 7.0))
+        np.testing.assert_array_equal(bundle.load_native("geosphere.base_elevation"), keys.astype(np.float32))
+        self.assertEqual(bundle.load_native("atmosphere.precipitation").shape, (4, 6))
+        np.testing.assert_array_equal(bundle.cell_ids(), keys)
+        self.assertEqual(bundle.cell_ids().dtype, np.uint64)
+        self.assertIn("cell_ids", bundle.cells())
+        self.assertEqual(bundle.scalar("geosphere.sea_level"), 0)
+        with self.assertRaises(ValueError):
+            Bundle.open(write_cube(self.root / "cube")).cell_ids()
 
     def test_check_grid_accepts_both_kinds(self):
         latlon = Bundle.open(write_latlon(self.root / "latlon", latlon_fields(), SCHEMA))

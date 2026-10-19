@@ -66,12 +66,18 @@ struct StepRecord
 // The manifest's grid block beyond Metadata::columns and rows (sphere-mesh.md
 // section 7). latlon: the columns x rows grid. cube: facecells N per face edge,
 // orientation uw-cube-1, fields [layer,] 6, N, N; columns x rows is its lat-lon
-// export (export_columns W = 4 N). The cube-window kind comes with the windows (W2-W).
+// export (export_columns W = 4 N). cube-window: a list of cell_count level cells of the
+// cube level with facecells N_L per face edge (level L of a world of basefacecells N),
+// fields [layer,] n in ascending key order with their keys in grid/cell_ids.npy (u8);
+// columns x rows is the lat-lon export of the window's box (export_columns, export_rows).
 struct GridSpec
 {
     std::string kind = "latlon";
     int facecells = 0;
     double radiuskm = 0.0;    // written when positive
+    int level = 0;            // cube-window
+    int basefacecells = 0;    // cube-window
+    std::size_t cellcount = 0;  // cube-window
 };
 
 struct Metadata
@@ -100,8 +106,8 @@ public:
     // A field's lat-lon export (latlon/<component>/<name>.npy) by its remap rule; a direction
     // field records whether it was recomputed on the export, any other field only when it was.
     void addexport(const FieldEntry& field, const std::string& rule, bool recomputed);
-    // One array of the cell table (grid/<id>.npy); cube kinds only.
-    void addcells(const ArrayEntry& cells);
+    // One array of the cell table (grid/<id>.npy).
+    void addcells(const ArrayEntry& cells);  // cube and cube-window kinds only
     void addtable(const TableEntry& table);
     void finish(const Metadata& metadata);
     const std::filesystem::path& directory() const { return directory_; }
