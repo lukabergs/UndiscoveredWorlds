@@ -32,8 +32,9 @@ void makevoronoi(std::vector<std::vector<short>>& voronoi, int width, int height
 std::vector<mesh::CellId> columnmajorcells(const mesh::CellGrid& grid);
 
 // The slot [x][y] of a cell in a legacy ARRAYWIDTH x ARRAYHEIGHT (2048 x 1024) array: its column
-// and row on lat-lon; elsewhere the id folded into rows of 2048 (the arrays of the generation
-// scratch and the workbench hold a cube's cells that way until they store per-cell vectors).
+// and row on lat-lon; elsewhere the id folded into rows of 2048 (the imported-mountain arrays of
+// the import screen and the CLI, okmountains and the raw ridge map, hold a cube's cells that way
+// until they store per-cell vectors; the generation scratch is per cell since T8 W2-T3).
 // Throws std::out_of_range for a cell beyond row 1023 (a cube above about 2364 export columns).
 void legacyslot(const mesh::CellGrid& grid, mesh::CellId c, int& x, int& y);
 

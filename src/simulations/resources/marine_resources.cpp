@@ -22,7 +22,7 @@ bool isshelfproxy(const planet& world, const worldgrid<bool>& shelves, CellId c)
     if (iscoast(world, c))
         return true;
 
-    return hasfeatureinradius(world, c, 2, [&](CellId n) { return isoutline(world, n); });
+    return anywithinpixels(world, c, 2, [&](CellId n) { return isoutline(world, n); });
 }
 
 float averagesst(const planet& world, CellId c)
@@ -120,7 +120,7 @@ void generate_ocean_fisheries(planet& world, const worldgrid<bool>& shelves)
             const float currentstrength = clampunit(averagecurrentspeed(world, c) / 160.0f);
             const float contrast = clampunit(sstcontrast(world, c, cellsst) / 18.0f);
             const float maritime = clampunit(averagemaritimeinfluence(world, c) / 220.0f);
-            const float coastal = iscoast(world, c) ? 1.0f : (hasfeatureinradius(world, c, 2, [&](CellId n) { return isoutline(world, n); }) ? 0.6f : 0.0f);
+            const float coastal = iscoast(world, c) ? 1.0f : (anywithinpixels(world, c, 2, [&](CellId n) { return isoutline(world, n); }) ? 0.6f : 0.0f);
             const float icepenalty = world.seaice(c) == 2 ? 0.4f : (world.seaice(c) == 1 ? 0.75f : 1.0f);
 
             float score = 100.0f * (0.38f * shelfbias + 0.18f * coldwater + 0.16f * contrast + 0.14f * currentstrength + 0.08f * maritime + 0.06f * coastal);

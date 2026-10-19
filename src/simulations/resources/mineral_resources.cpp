@@ -9,11 +9,12 @@ using namespace cellqueries;
 
 namespace
 {
+// The highest score within steps legacy pixels of c (anywithinpixels).
 template <typename Getter>
-int maxscoreinradius(const planet& world, CellId c, int radius, Getter&& getter)
+int maxscorewithinpixels(const planet& world, CellId c, int steps, Getter&& getter)
 {
     int best = 0;
-    anyinbox(world, c, radius, [&](CellId n)
+    anywithinpixels(world, c, steps, [&](CellId n)
     {
         best = std::max(best, static_cast<int>(getter(n)));
         return false;
@@ -187,7 +188,7 @@ void generate_volcanic_reserves(planet& world)
             const float crustbias = crustvolcanicbias(crustclass);
             const float ridgebias = (world.oceanridges(c) != 0 || world.oceanrifts(c) != 0) ? 1.0f : 0.0f;
             const float volcanobias = (world.volcanofloat(c) != 0 || world.strato(c)) ? 1.0f : 0.0f;
-            const float nearbyvolcano = maxscoreinradius(world, c, 2, [&](CellId n)
+            const float nearbyvolcano = maxscorewithinpixels(world, c, 2, [&](CellId n)
             {
                 return world.volcanofloat(n) != 0 || world.strato(n) ? 100 : 0;
             }) / 100.0f;
@@ -229,7 +230,7 @@ void generate_metal_ore_reserves(planet& world)
             const float boundaryfocus = boundaryorebias(boundarytype) * boundaryproximity * (0.40f + 0.60f * boundaryhistory);
             const float regionbias = deformingorebias(regiontype);
             const float crustbias = crustorebias(crustclass);
-            const float volcanismnear = static_cast<float>(maxscoreinradius(world, c, 2, [&](CellId n)
+            const float volcanismnear = static_cast<float>(maxscorewithinpixels(world, c, 2, [&](CellId n)
             {
                 return world.volcanicreserve(n);
             })) / 100.0f;

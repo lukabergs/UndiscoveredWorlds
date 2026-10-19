@@ -5,6 +5,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <type_traits>
 #include <vector>
 #include "core/grid_coordinates.hpp"
 #include "core/grid_shapes.hpp"
@@ -96,6 +97,27 @@ inline bool isoutline(const planet& world, CellId c)
 inline bool iscoast(const planet& world, CellId c)
 {
     return terrain::coastgrid::coast(world, c);
+}
+
+// f(cell) for the cells within steps legacy pixels (terrain.sphere_noise.legacy_columns) of c's
+// centre, c included: the legacy box of half-width steps as the disc of steps + 0.5 pixels
+// (terrain::cellswithinkm), the same in km at every resolution (T8 W2-T3; at 128 columns,
+// 312.7 km cells, the discs of one or two pixels hold only c). A callback that returns bool
+// stops the walk when it returns true; the result says whether it did.
+template <typename F>
+inline bool anywithinpixels(const planet& world, CellId c, int steps, F&& f)
+{
+    for (const CellId n : terrain::cellswithinkm(world, c, (steps + 0.5) * terrain::legacycellkm(world)))
+    {
+        if constexpr (std::is_same_v<decltype(f(CellId{})), bool>)
+        {
+            if (f(n))
+                return true;
+        }
+        else
+            f(n);
+    }
+    return false;
 }
 
 // Downstream cell of each land or delta cell, by cell id; -1 where no neighbour exists

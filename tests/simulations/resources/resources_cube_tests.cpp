@@ -39,7 +39,9 @@ int faceof(mesh::CellId c)
 
 // Land rising toward +X (lon 0), sea where the centre's x is below -0.4 and in nine
 // single-cell seas per face; a mild climate; erosion potential on land; a volcano and
-// a convergent boundary on one cell of each face; primary deposits at points uniform
+// a convergent boundary on one land cell of each face (the volcanic and ore reserves read
+// discs of one or two legacy pixels, which on these 625 km cells hold only the cell itself);
+// primary deposits at points uniform
 // on the sphere (u by longitude, v by latitude as the world fractions), each with
 // liberated gold for the placers. On lat-lon (64 x 32) the same rules, i and j read from
 // the id as if it were a cube cell.
@@ -67,7 +69,7 @@ std::unique_ptr<planet> resourcecube(mesh::GridKind kind = mesh::GridKind::cube)
         world->setdepositionpotential(c, sea ? 0 : 30);
         for (int season = 0; season < CLIMATESEASONCOUNT; season++)
             world->setseasonalsst(season, c, static_cast<int>(std::lround(20.0 * std::cos(grid.latitude_rad(c)))));
-        if (i == 7 && j == 7)
+        if (i == 8 && j == 8)
         {
             world->setvolcano(c, 1500.0f);
             world->settectonicboundarytype(c, BoundaryType::convergent);

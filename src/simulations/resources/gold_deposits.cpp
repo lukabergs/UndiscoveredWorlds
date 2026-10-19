@@ -50,12 +50,12 @@ CellId depositcell(const mesh::CellGrid& grid, double u, double v, int& x, int& 
     return grid.locate(mesh::unitvector(latitude, longitude));
 }
 
-// The relief of the 3 x 3 box around a cell.
+// The relief within one legacy pixel of a cell (the legacy 3 x 3 box; anywithinpixels).
 float localrelief(const planet& world, CellId c)
 {
     float lowest = world.mapfloat(c);
     float highest = lowest;
-    anyinbox(world, c, 1, [&](CellId n)
+    anywithinpixels(world, c, 1, [&](CellId n)
     {
         const float elevation = world.mapfloat(n);
         lowest = std::min(lowest, elevation);
