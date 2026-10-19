@@ -22,12 +22,6 @@ using mesh::CellId;
 
 namespace
 {
-// planet::sea at a neighbour: out of the grid (-1) reads as land, as sea(x, y) does.
-bool seaat(const planet& world, std::int32_t n)
-{
-    return n >= 0 && world.sea(static_cast<CellId>(n));
-}
-
 // The lat-lon cell of (x, y) with x wrapped, -1 outside the rows (or on another grid kind).
 std::int32_t latloncell(const planet& world, int x, int y)
 {

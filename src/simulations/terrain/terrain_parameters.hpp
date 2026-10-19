@@ -106,7 +106,7 @@ inline float fineWavelengthKm = 160.0f;
 inline float finePersistence = 0.7f;
 inline float fineMean = 0.5f;
 inline float fineDeviation = 0.25f;
-inline float ridgeAngleDeviation = 0.25f;
+inline float ridgeAngleDeviation = 0.5f;
 }
 
 // Every value above, by its recipe name.

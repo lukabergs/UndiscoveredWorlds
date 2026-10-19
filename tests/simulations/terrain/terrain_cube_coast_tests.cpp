@@ -20,6 +20,8 @@
 #include "simulations/terrain/import_elements.hpp"
 #include "simulations/terrain/terrain.hpp"
 #include "simulations/terrain/terrain_coasts.hpp"
+#include "simulations/terrain/terrain_elevation.hpp"
+#include "core/deterministic_random.hpp"
 #include "world/planet.hpp"
 
 namespace
@@ -198,6 +200,36 @@ TEST(TerrainCubeCoast, ShelvesTrenchesAndRidgesOnTheCube)
         EXPECT_LE(world->oceanridgeangle(c), 360);
     }
     (void)grid;
+}
+
+TEST(TerrainCubeCoast, RidgeAngleFieldHasNoPreferredDirection)
+{
+    // The wrapped angle field of createoceanridges (seeds 1 to 16, area-weighted): the east and
+    // west quarters of the compass each hold about a quarter of the area (a clamped field would
+    // pile up at 0 and 360 degrees, both east).
+    const std::unique_ptr<planet> world = cubeplanet({ faceinterior }, 0.3);
+    const mesh::CellGrid& grid = world->grid();
+    double east = 0.0, west = 0.0, total = 0.0;
+    for (std::uint64_t seed = 1; seed <= 16; seed++)
+    {
+        const std::vector<float> angles = terrain::spherefractalwrapped(*world, deterministiccontextseed(static_cast<long>(seed), 0x0cea0003),
+                                                                        cg::ridgeanglefractal(), 360.0f);
+        for (CellId c = 0; c < world->cellcount(); c++)
+        {
+            const double area = grid.area_m2(c);
+            const float angle = angles[c];
+            ASSERT_GE(angle, 0.0f);
+            ASSERT_LT(angle, 360.0f);
+            if (angle >= 315.0f || angle < 45.0f)
+                east += area;
+            if (angle >= 135.0f && angle < 225.0f)
+                west += area;
+            total += area;
+        }
+    }
+    std::cout << "ridge angles: east quarter " << east / total << ", west quarter " << west / total << "\n";
+    EXPECT_NEAR(east / total, 0.25, 0.03);
+    EXPECT_NEAR(west / total, 0.25, 0.03);
 }
 
 TEST(TerrainCubeCoast, AridLandformsAndRoughnessOnTheCube)

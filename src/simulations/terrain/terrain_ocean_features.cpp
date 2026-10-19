@@ -714,7 +714,7 @@ void sphereoceanridges(planet& world, worldgrid<bool>& shelves)
     // Now we have to work out the angles of lines crossing the rifts, relative to each cell's
     // east and north, blended with an angle field (the legacy fractal's values wrapped at 360).
 
-    const vector<float> anglefield = terrain::spherefractal(world, deterministiccontextseed(world.seed(), 0x0cea0003), cg::ridgeanglefractal(), 360.0f);
+    const vector<float> anglefield = terrain::spherefractalwrapped(world, deterministiccontextseed(world.seed(), 0x0cea0003), cg::ridgeanglefractal(), 360.0f);
 
     short dist = tuning::terrain::oceanridges::ridgeAngleSearchDistance;
 
@@ -740,7 +740,7 @@ void sphereoceanridges(planet& world, worldgrid<bool>& shelves)
         while (angle > 360.0f)
             angle = angle - 360.0f;
 
-        int angle2 = wrappedaverage((int)angle, (int)anglefield[c], 360);
+        int angle2 = wrappedaverage((int)angle, 1 + (int)anglefield[c], 360);
 
         while (angle2 > 180)
             angle2 = angle2 - 180;

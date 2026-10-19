@@ -249,7 +249,7 @@ void spherecreateergs(planet& world, boolshapetemplate smalllake[], boolshapetem
     {
         if (world.climate(c) == 5 && ergprobability[c] != 0) // If this is a hot desert
         {
-            if (cg::uniformdraw() < cg::cellchance(world, c, 1.0 / static_cast<double>(ergprobability[c])))
+            if (terrain::legacyuniform() < cg::cellchance(world, c, 1.0 / static_cast<double>(ergprobability[c])))
             {
                 bool goahead = 1;
 
@@ -307,7 +307,7 @@ void spherecreatesaltpans(planet& world, boolshapetemplate smalllake[], boolshap
     {
         if (world.climate(c) == 5) // If this is a hot desert
         {
-            if (cg::uniformdraw() < cg::cellchance(world, c, saltchance))
+            if (terrain::legacyuniform() < cg::cellchance(world, c, saltchance))
             {
                 bool goahead = 1;
 

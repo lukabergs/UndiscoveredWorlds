@@ -16,8 +16,9 @@ using S = GenerationStageId;
 // Kinds and notes describe the current stages. Access lists and the stochastic
 // flag come from world_process_access.inc (measured, see world_processes.hpp);
 // the flags set here cover generators the analysis cannot see (the tectonics
-// engine's own stream, society and mineral streams). A process is cube-ready
-// (cubeready) when its W2 port of docs/architecture/sphere-mesh.md lists it below.
+// engine's own stream, society and mineral streams). A process runs on a cube world
+// (cubeready) when the W2 port of docs/architecture/sphere-mesh.md that moved it to
+// the cell grid flags it in the list below.
 std::vector<WorldProcessDefinition> buildprocesses()
 {
     std::vector<WorldProcessDefinition> processes =

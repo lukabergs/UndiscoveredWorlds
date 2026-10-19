@@ -61,6 +61,9 @@ void box(const mesh::CellGrid& grid, CellId c, int r, F&& f);
 bool outline(const planet& world, CellId c);
 bool coast(const planet& world, CellId c);
 
+// planet::sea at a neighbour: out of the grid (-1) reads as land, as sea(x, y) does.
+bool seaat(const planet& world, std::int32_t n);
+
 // disruptseacoastline on a cell: base elevations above avedepth lowered to it in the disc of
 // the legacy box of half-width size / 2 around centre.
 void disruptseacoastline(planet& world, CellId centre, float avedepth, bool raise, int size);
@@ -68,13 +71,11 @@ void disruptseacoastline(planet& world, CellId centre, float avedepth, bool rais
 // The fractals of these functions that the terrain stages do not have
 // (terrain.sphere_noise_coast.*, and terrain.sphere_noise.warp_vary_* for the trenches):
 // the rough short-grain fractals of the imported mountains and the ridge displacement, the
-// trench fractal, and the ridge angle field (a share of 360 degrees).
+// trench fractal, and the ridge angle field (360 degrees x the wrapped share: terrain::spherefractalwrapped).
 terrain::SphereFractal finefractal();
 terrain::SphereFractal trenchfractal();
 terrain::SphereFractal ridgeanglefractal();
 
-// A uniform number in [0, 1) from two draws of the ambient sequence (random(0, 32767)).
-double uniformdraw();
 // The chance that a cell sees at least one event of a chance per legacy pixel: 1 - (1 - p)^(A / pixel area).
 double cellchance(const planet& world, CellId c, double perpixel);
 

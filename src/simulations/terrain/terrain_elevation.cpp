@@ -201,14 +201,30 @@ mesh::CellId terrain::movedcell(const planet& world, mesh::CellId c, double east
     return moved == mesh::nocell ? c : moved;
 }
 
+double terrain::legacyuniform()
+{
+    const double high = static_cast<double>(random(0, 32767));
+    const double low = static_cast<double>(random(0, 32767));
+    return (high * 32768.0 + low) / 1073741824.0;
+}
+
 mesh::CellId terrain::randomcellbyarea(const planet& world)
 {
-    return mesh::randomcellbyarea(world.grid(), []
+    return mesh::randomcellbyarea(world.grid(), [] { return legacyuniform(); });
+}
+
+vector<float> terrain::spherefractalwrapped(const planet& world, std::uint64_t seed, const SphereFractal& fractal, float maximum)
+{
+    const landscape::FractalNoiseField field = makefield(world, seed, fractal.wavelength_km, fractal.persistence);
+    const mesh::CellGrid& grid = world.grid();
+    vector<float> values(world.cellcount(), 0.0f);
+    forcells(world, [&](mesh::CellId c)
     {
-        const double high = static_cast<double>(random(0, 32767));
-        const double low = static_cast<double>(random(0, 32767));
-        return (high * 32768.0 + low) / 1073741824.0;
+        const mesh::Vec3 p = grid.centre(c);
+        const double share = fractal.mean + fractal.deviation * field.sum(p.x, p.y, p.z) / field.normalisation();
+        values[c] = static_cast<float>(static_cast<double>(maximum) * (share - floor(share)));
     });
+    return values;
 }
 
 // This function smoothes, but without turning any land to sea or vice versa: each sea cell is

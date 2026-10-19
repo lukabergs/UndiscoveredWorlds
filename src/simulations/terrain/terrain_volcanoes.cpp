@@ -56,13 +56,6 @@ bool nearshelf(const planet& world, mesh::CellId c, const worldgrid<bool>& shelv
 
 // This makes a small, mountainous island.
 
-void terrain::detail::makemountainisland(planet& world, int x, int y, float peakheight)
-{
-    const mesh::CellId c = world.grid().cellof(x, y);
-    if (c != mesh::nocell)
-        terrain::makemountainisland(world, c, peakheight);
-}
-
 void terrain::makemountainisland(planet& world, mesh::CellId c, float peakheight)
 {
     int sealevel = world.sealevel();

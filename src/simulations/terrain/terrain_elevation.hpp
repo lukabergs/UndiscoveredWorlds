@@ -53,6 +53,12 @@ std::vector<mesh::CellId> cellswithinkm(const planet& world, mesh::CellId c, dou
 double distancekm(const planet& world, mesh::CellId a, mesh::CellId b);
 // The cell reached from c by moving east_km and north_km in its tangent frame.
 mesh::CellId movedcell(const planet& world, mesh::CellId c, double east_km, double north_km);
+// A uniform number in [0, 1) of 30 bits from two 15-bit draws of the shared legacy stream
+// (random(0, 32767)): the draw of randomcellbyarea and of the chances per cell.
+double legacyuniform();
+// The fractal wrapped instead of clamped: maximum x the fractional part of mean + deviation x z,
+// for a field of angles (no value is favoured by a clamp).
+std::vector<float> spherefractalwrapped(const planet& world, std::uint64_t seed, const SphereFractal& fractal, float maximum);
 // A cell drawn by area from the shared legacy stream: two uniform numbers, each of 30 bits
 // from two 15-bit draws of random(0, 32767).
 mesh::CellId randomcellbyarea(const planet& world);

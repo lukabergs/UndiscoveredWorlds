@@ -130,7 +130,7 @@ void spherecontinentalshelves(planet& world, worldgrid<bool>& shelves, int point
 
     for (const CellId c : order)
     {
-        if (shelves[c] == 1 && uniformdraw() < cellchance(world, c, circlechance))
+        if (shelves[c] == 1 && terrain::legacyuniform() < cellchance(world, c, circlechance))
         {
             bool nearsea = 0;
 

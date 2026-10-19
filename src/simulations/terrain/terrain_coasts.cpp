@@ -83,11 +83,9 @@ bool terrain::coastgrid::coast(const planet& world, CellId c)
     return world.sea(c) == 1 && borders(world, c, false);
 }
 
-double terrain::coastgrid::uniformdraw()
+bool terrain::coastgrid::seaat(const planet& world, std::int32_t n)
 {
-    const double high = static_cast<double>(random(0, 32767));
-    const double low = static_cast<double>(random(0, 32767));
-    return (high * 32768.0 + low) / 1073741824.0;
+    return n >= 0 && world.sea(static_cast<CellId>(n));
 }
 
 terrain::SphereFractal terrain::coastgrid::finefractal()
@@ -162,12 +160,6 @@ namespace
 bool hasnorthandsouth(const mesh::CellGrid& grid, CellId c)
 {
     return grid.neighbour(c, 1) >= 0 && grid.neighbour(c, 5) >= 0;
-}
-
-// planet::sea at a neighbour: out of the grid (-1) reads as land, as sea(x, y) does.
-bool seaat(const planet& world, std::int32_t n)
-{
-    return n >= 0 && world.sea(static_cast<CellId>(n));
 }
 
 // planet::surfacebelowsea at a neighbour: out of the grid reads as sea (map(x, y) is 0 there).
