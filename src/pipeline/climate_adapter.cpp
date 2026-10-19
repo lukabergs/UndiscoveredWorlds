@@ -158,7 +158,7 @@ ClimateShadow& ClimateShadow::operator=(ClimateShadow&&) noexcept = default;
 ClimateShadow::ClimateShadow(const ClimateShadow& other)
     : shadow_(other.shadow_ != nullptr ? std::make_unique<planet>(*other.shadow_) : nullptr),
       facecells_(other.facecells_), hashes_(other.hashes_), tracked_(other.tracked_),
-      importweights_(other.importweights_), last_(other.last_)
+      initialhashes_(other.initialhashes_), importweights_(other.importweights_), last_(other.last_)
 {
 }
 
@@ -175,6 +175,11 @@ ClimateShadow& ClimateShadow::operator=(const ClimateShadow& other)
 void ClimateShadow::reset()
 {
     *this = ClimateShadow();
+}
+
+std::uint64_t ClimateShadow::initialhash(FieldId id) const
+{
+    return initialhashes_.empty() ? 0 : initialhashes_[indexof(id)];
 }
 
 void runclimateprocess(GenerationStageId stage, planet& world, ClimateShadow& state, const std::function<void(planet&)>& body)
@@ -199,6 +204,10 @@ void runclimateprocess(GenerationStageId stage, planet& world, ClimateShadow& st
         state.importweights_.reset();
         state.hashes_.assign(worldmodel::kFieldCount, 0);
         state.tracked_.assign(worldmodel::kFieldCount, 0);
+        state.initialhashes_.assign(worldmodel::kFieldCount, 0);
+        for (std::size_t index = 0; index < worldmodel::kFieldCount; index++)
+            if (climateshadowowned(static_cast<FieldId>(index)))
+                state.initialhashes_[index] = hashof(readplanetfield(*state.shadow_, static_cast<FieldId>(index)));
         for (const WorldProcessDefinition& candidate : getworldprocesses())
         {
             if (!isclimateprocess(candidate))

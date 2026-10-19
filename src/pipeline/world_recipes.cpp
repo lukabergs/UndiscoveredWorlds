@@ -211,9 +211,13 @@ struct WorldHashes
 {
     std::vector<std::uint64_t> fields;
     std::vector<std::uint64_t> tables;
+    const planet* shadow = nullptr;   // climate's lat-lon shadow the climate-owned fields were hashed on
 };
 
-WorldHashes hashworld(const planet& world)
+// On a cube world the climate-owned fields (climateshadowowned) live on climate's shadow
+// (climate_adapter.hpp): their hashes come from it, so that their writer is recorded and
+// an undeclared write is caught.
+WorldHashes hashworld(const planet& world, const ClimateShadow& climate)
 {
     WorldHashes hashes;
     hashes.fields.resize(worldmodel::kFieldCount);
@@ -222,7 +226,26 @@ WorldHashes hashworld(const planet& world)
         hashes.fields[index] = hashplanetfield(world, static_cast<FieldId>(index));
     for (std::size_t index = 0; index < worldmodel::kTableCount; index++)
         hashes.tables[index] = hashplanettable(world, static_cast<TableId>(index));
+    hashes.shadow = climate.world();
+    if (hashes.shadow != nullptr)
+        for (std::size_t index = 0; index < worldmodel::kFieldCount; index++)
+            if (climateshadowowned(static_cast<FieldId>(index)))
+                hashes.fields[index] = hashplanetfield(*hashes.shadow, static_cast<FieldId>(index));
     return hashes;
+}
+
+// The climate-owned fields of `before` on the source `after` hashed them from: the step that
+// built the shadow starts them from the new shadow, the one that dropped it from the cube.
+void matchshadow(WorldHashes& before, const WorldHashes& after, const ClimateShadow& climate)
+{
+    if ((before.shadow == nullptr) == (after.shadow == nullptr))
+        return;
+    for (std::size_t index = 0; index < worldmodel::kFieldCount; index++)
+    {
+        const FieldId id = static_cast<FieldId>(index);
+        if (climateshadowowned(id))
+            before.fields[index] = after.shadow != nullptr ? climate.initialhash(id) : after.fields[index];
+    }
 }
 }
 
@@ -595,7 +618,7 @@ RecipeRunResult runrecipe(const WorldRecipe& recipe, planet& world, GenerationSc
 
     WorldHashes before;
     if (options.auditAccess)
-        before = hashworld(world);
+        before = hashworld(world, scratch.climateShadow);
 
     const std::size_t firststep = options.selectSteps ? options.steps.first : 0;
     const std::size_t laststep = options.selectSteps ? options.steps.last + 1 : recipe.steps.size();
@@ -654,7 +677,8 @@ RecipeRunResult runrecipe(const WorldRecipe& recipe, planet& world, GenerationSc
 
         if (options.auditAccess)
         {
-            const WorldHashes after = hashworld(world);
+            const WorldHashes after = hashworld(world, scratch.climateShadow);
+            matchshadow(before, after, scratch.climateShadow);
             record.measured = true;
             for (std::size_t field = 0; field < worldmodel::kFieldCount; field++)
                 if (after.fields[field] != before.fields[field])

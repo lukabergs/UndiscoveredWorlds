@@ -62,6 +62,10 @@ public:
     // The lat-lon shadow world; null before the first climate process on a cube world.
     const planet* world() const { return shadow_.get(); }
     const ClimateShadowSync& lastsync() const { return last_; }
+    // The hash (hashplanetfield) of a climate-owned field (climateshadowowned) on the shadow
+    // as it was built, before any climate process ran on it; 0 without a shadow. An audited
+    // run (world_recipes.cpp) compares the owned fields of the step that built it with it.
+    std::uint64_t initialhash(worldmodel::FieldId id) const;
     // Drops the shadow: the next climate process on a cube world rebuilds it. Called
     // where the world is cleared (a new generation).
     void reset();
@@ -73,6 +77,7 @@ private:
     int facecells_ = 0;                                    // the cube's N when the shadow was built
     std::vector<std::uint64_t> hashes_;                    // per field id: the cube's value at the last sync
     std::vector<std::uint8_t> tracked_;                    // per field id: read or written by a climate process
+    std::vector<std::uint64_t> initialhashes_;             // per field id: a climate-owned field's hash on the new shadow
     std::shared_ptr<const mesh::RemapWeights> importweights_;   // shadow -> cube, for the reach of changed cells
     ClimateShadowSync last_;
 };

@@ -40,7 +40,7 @@ SOCIAL = {'social': RECIPES['procedural-world'] + ['--social']}
 ACCESS_SETS = ('phase4-access', 'phase4b-access', 'phase4c-access', 'erosion-a-access', 'erosion-b-access',
                'erosion-c-access', 'erosion-d-access', 'erosion-g-access',
                'multiscale-s3-access', 'multiscale-s5-access', 't412-access', 't412-sea-access',
-               't8-w2t2-access', 't8-e3-access')
+               't8-w2t2-access', 't8-e3-access', 't8-w3-access')
 
 
 def logged(command, log, cwd=ROOT):
