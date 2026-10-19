@@ -8,11 +8,16 @@ engine and the compiled `configs/tectonics-baseline.json` recipe.
 
 ## Geometry and time
 
-Native rasters are cell-centred, row-major width × height, on a planar torus.
-Both axes wrap; native cells have equal area. Cell spacing is
-`world_width_km / width`, not a latitude-dependent spherical distance.
-Coordinates and kinematics are native cells and cells/update unless explicitly
-named in physical units. Array pointers expire when the engine updates or dies.
+Since E3 (W2-E) the engine runs on the equiangular cubed sphere
+(`TectonicGrid::cube`, `docs/architecture/sphere-mesh.md`): N = `sphere_face_cells`
+cells per face edge, 6 N² cells in uw-cube-1 id order, on a planet of `radius_km`.
+Native arrays are that id order; the snapshot and the runtime maps present it as
+width N × height 6 N (face f's rows are rows f N to f N + N - 1). Cells have
+unequal areas (`area_m2`); the cell spacing is the mean cell side,
+sqrt(4 pi R² / 6 N²). Plate motion is a rotation vector per plate; kinematics
+and vectors are (east, north) at a cell unless named otherwise, in cell spacings
+per update or in physical units where named. Array pointers expire when the
+engine updates or dies.
 
 `time_myr` advances once per physical update by `delta_time_myr` until the finite,
 positive `evolution_duration_myr` is reached. A final partial requested timestep
@@ -39,13 +44,13 @@ elapsed time and `crust_age_myr` for consumers.
   accumulated strain, tension and deformation rate: numerical diagnostics,
   not calibrated stresses or quantities of mineral resources.
 - Boundary segment IDs and nearest IDs index the exported boundary objects;
-  `boundary_distance` is in native cells. Zero is the absent-object sentinel.
+  `boundary_distance` is in cell spacings. Zero is the absent-object sentinel.
 - Boundary segments describe plate pairs, centroids, length, persistence, age,
   motion and average scores. Deforming regions describe continental rifting
   and diffuse collision, with centroid and interpolated velocity summaries.
 - Tectonic junctions describe three incident plates/arms, orientation, velocity,
-  geometry quality and stability. Their diagnostics also inform local processes;
-  they do not constitute a spherical plate mesh.
+  geometry quality and stability, found at the cube's mesh vertices (three cells at
+  a cube corner); centroids are longitude and latitude in degrees.
 
 Three column measurements are runtime arrays of `tectonic_api.hpp` only, outside
 `Snapshot` and the snapshot files (the schema stays 7); the world stores them as
@@ -65,30 +70,23 @@ the uplift rate's mean continues the stayed rock's, the strain of new ocean floo
   (`tectonics_get_shortening_direction_map`, radians in [0, pi)): derived at export
   from a cumulative strain tensor (xx, yy, xy, dimensionless). Each update first
   rotates the rock's tensor by the local spin W = (duy/dx - dux/dy) / 2 and adds
-  the strain E = sym(grad u) of the displacement actually applied (`material_displacement`,
-  cells/update). Each derivative along an axis looks at the cell's two neighbours on
-  that axis: when only one is on the same plate, it is the one-sided difference
-  toward that neighbour; when both are, the smaller of the two differences in
-  magnitude (their mean when equal); when neither is, 0. A velocity jump to another
-  plate (subduction, ridges, transforms) is therefore never strain. A jump inside a
-  plate (a rotation seam, where the offset from the plate's centroid wraps) is skipped only where the other difference on that axis is the
-  smaller one, which holds where the plate's velocity is smooth on that side.
-  Distributed deformation and rift opening inside a plate count; a rigid rotation
-  turns the tensor and adds none. The ocean floor created in an opening starts at
+  the strain E = sym(grad u) of the displacement less the plate's rigid rotation
+  (the distributed deformation and rift opening), the gradient by least squares over
+  the cardinal neighbours on the same plate, so a velocity jump to another plate
+  (subduction, ridges, transforms) is never strain and a rigid rotation turns the
+  tensor (by its spin about the vertical) and adds none. The tensor travels with the
+  rock as a 3-D tensor, so its components turn with the cells' frames across face
+  edges. The ocean floor created in an opening starts at
   0, so a divergent cell keeps the stayed rock's tensor on the rest of its area
   only. Cumulative over the run, no decay; a sum of small strains (the strain
   reaches about 1.4 at 256 columns, seed 1, 600 Myr of the legacy recipe v3), so a small-strain measure.
-  `shortening` is minus the least principal component times the native cell width
-  (`world_width_km / width`), 0 where no axis shortens: strain x the native cell
-  width, metres that depend on the engine's resolution, so a consumer that needs
-  the strain divides by the native cell width. `shortening_direction` is that
-  component's axis from the x axis toward y (east toward south in the world), an
-  axis rather than a vector (pi equals 0), 0 where the principal components are
-  equal and meaningful only where `shortening` is positive. Both are taken from the
+  `shortening` is minus the least principal component times the cell spacing,
+  0 where no axis shortens: strain x the spacing, metres that depend on the
+  engine's resolution, so a consumer that needs the strain divides by the spacing.
+  `shortening_direction` is that component's axis from east toward south, an axis
+  rather than a vector (pi equals 0), 0 where the principal components are equal
+  and meaningful only where `shortening` is positive. Both are taken from the
   nearest native cell into the world, never interpolated.
-
-ive. Both are taken from the nearest native cell into the world, never
-  interpolated.
 
 Column budgets expose initial/current mass, ocean/arc/plume generation,
 subduction, erosion, deposition and internal redistribution in kg. Arc and plume
@@ -108,7 +106,8 @@ global budget. Motion diagnostics expose force residuals and speeds in cm/year.
 ## Runtime material sampling
 
 `tectonics_get_material_displacement` exposes the native per-cell displacement
-actually supplied to the latest column update (cells/update); it is null before
+actually supplied to the latest column update ((east, north) in cell spacings per
+update); it is null before
 the first physical update. `tectonics_get_plate_uid` returns a topology stable
 identity. There are no rigid-raster movement or process-global identity hooks.
 
@@ -121,13 +120,13 @@ erosion histories and physical climate coupling remain unfinished work.
 ## Application boundary
 
 `geology/world_tectonics.cpp` runs the native recipe and ingests its output into
-`planet`. `tectonic_world_grid.hpp` defines the cell-centred sampling: bilinear
-terrain and the rock uplift rate with longitude wrapping and clamped polar rows;
-nearest-cell categories, diagnostic fields and the shortening and its direction. Coordinates, distances, lengths and kinematics convert
-to world-grid cells. Object counts scale by cell area. Planet save storage is
-unchanged. The world raster is interpreted by spherical climate/hydrology;
-this sampling is not spherical tectonic physics. Later terrain stages may alter
-the application's terrain independently of the native export.
+`planet` (N = world width / 4 unless `sphere_face_cells` is given; the radius is
+the world body's). Until E5 the hand-off is minimal: heights and rates bilinear
+from the cube at each world cell's position, categories, diagnostic fields and the
+shortening and its direction from the nearest cube cell; kinematics, lengths and
+distances convert to world-grid cells at the equator. Planet save storage is
+unchanged. Later terrain stages may alter the application's terrain independently
+of the native export.
 
 ## Serialization and checks
 
@@ -136,8 +135,11 @@ optional fields (`rift_damage`, `plume_influence`) do not change it. The existin
 a format identifier, not a selectable implementation. Snapshot and batch JSON use
 their existing `tectonic-*/v1` container schemas; snapshot statistics and comparisons
 are computed in Python from run bundles. New
-scenario metadata is version 3 and reports `force-balance` / `isostatic-columns`
-with explicit parameters. Deprecated scenario knobs and old snapshot generators
+scenario metadata is version 4 and reports `force-balance` / `isostatic-columns`
+with explicit parameters: the grid as `sphere_face_cells` and `radius_km` (no width,
+height or world width), and the mantle flow's shape as `mantle_flow_wavelength_km`,
+`mantle_flow_octaves`, `mantle_flow_wobble`, `mantle_flow_drift` and
+`mantle_flow_shear_ratio`. Deprecated scenario knobs and old snapshot generators
 are removed. Previously archived bundles remain evidence and readable comparison
 inputs, not a source of defaults for new worlds.
 

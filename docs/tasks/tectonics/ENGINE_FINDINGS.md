@@ -228,3 +228,33 @@ out/build/headless-modules/bin/tectonic_pipeline.exe inspect --final --seed 1 `
   columns): the engine's Airy slope is 0.1515 km of height per km of crust,
   twice CRUST1.0's fitted 0.077, and the seeded land relief (2000 m) starts
   the interiors at 660 m.
+
+## 10. The switch to the cube (W2-E, E3, 2026-10-19)
+
+The engine runs on the cube alone (`TectonicGrid::cube`, N = `sphere_face_cells`).
+Found while porting its tests; each is fixed in E3:
+
+- A plate's displacement is its rotation's velocity over the update, w x r R. The
+  tangent of the rotation's arc (the log map) is not a rigid field: between two
+  cells it differs at second order, which read as opening across a slipping
+  boundary (ridge heat from pure slip) and as strain.
+- The strain increment reads the displacement less the plate's rigid rotation
+  (the rotation's vertical spin is added analytically). A least-squares gradient
+  of a rotation at a plate edge, one-sided there, gave rigid plates a strain of
+  about w sin(latitude) per cell spacing (4e-3 at a divergent edge of a 100 km
+  band, N 8).
+- Rift partition: each cell to the nearer anchor by great-circle distance, and
+  the fault length as the cut edges projected on the cut's normal. A breadth-first
+  split and the staircase length made a cut across the grid's axes (at a cube
+  corner) about 1.4 times longer, its tension 61 percent of the face-centre case,
+  and an island there never failed (now 46 against 40 Myr).
+- Orogenic collapse: the single-threshold flux multiplies by the edge weight in
+  the same order as the two regimes, so an onset without margin receivers is the
+  onset alone bit for bit (the weights are not 1 on the cube).
+- Explicit limits on the cube are tighter by the non-orthogonal correction factor:
+  surface diffusion stops above 0.2 / factor, and column motion above 0.95 of a
+  cell's smallest edge (about 0.71 of a column at a face edge, so 0.6 column per
+  update at most where 1 was allowed on a regular grid).
+- The per-plate transport's total-restoring scale (|scale - 1| near 1e-7 per
+  update) reads as an uplift rate of about 1e-5 of a carried rate away from the
+  rock's path, and moves held cells by rounding; tests compare within that.
