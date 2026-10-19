@@ -77,6 +77,16 @@ std::size_t markercell(const Marker& marker, const TectonicFrame& frame)
     return frame.grid->locate(marker.position);
 }
 
+mesh::Vec3 rotatedby(const mesh::Vec3& position, const mesh::Vec3& rotation)
+{
+    const double angle = mesh::length(rotation);
+    if (!(angle > 0.0))
+        return position;
+    const mesh::Vec3 axis = (1.0 / angle) * rotation;
+    return mesh::normalise(std::cos(angle) * position + std::sin(angle) * mesh::cross(axis, position) +
+        ((1.0 - std::cos(angle)) * mesh::dot(axis, position)) * axis);
+}
+
 mesh::Vec3 movealong(const mesh::Vec3& position, const mesh::Vec3& displacement, double radius_m)
 {
     // The displacement's part in the tangent plane at the position, then the great circle.
@@ -99,7 +109,18 @@ void applymaterialshift(Marker& marker, const TectonicFrame& frame)
     const int steps = std::max(1, static_cast<int>(std::ceil(largest / (kMaximumSubstepSpacings * spacing_m))));
     for (int step = 0; step < steps; ++step)
     {
-        const mesh::Vec3 shift = frame.materialShift[markercell(marker, frame)];
+        const std::size_t cell = markercell(marker, frame);
+        mesh::Vec3 shift = frame.materialShift[cell];
+        const std::uint32_t owner = frame.plateIndex[cell];
+        if (owner < frame.plateRotation.size())
+        {
+            // The cell's plate turns the marker about its pole (exactly on its small circle);
+            // the rest of the cell's displacement (deformation, rift opening) moves it along
+            // a great circle.
+            const mesh::Vec3 rotation = frame.plateRotation[owner];
+            marker.position = rotatedby(marker.position, (1.0 / steps) * rotation);
+            shift = shift - mesh::cross(rotation, radius_m * frame.grid->centre(static_cast<mesh::CellId>(cell)));
+        }
         marker.position = movealong(marker.position, (1.0 / steps) * shift, radius_m);
     }
 }

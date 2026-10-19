@@ -68,6 +68,10 @@ struct TectonicFrame
     const mesh::Vec3* materialShift = nullptr;
 
     std::vector<PlateIdentity> plates;         // Indexed by plate index.
+    // Per plate index, the rotation vector of the update (omega dt, radians, the planet's
+    // axes); empty when unknown. The rigid part of materialShift at a cell of plate p is
+    // plateRotation[p] x R c.
+    std::vector<mesh::Vec3> plateRotation;
     std::vector<BoundarySummary> boundaries; // Indexed by boundary segment id.
 
     std::size_t cellCount() const { return grid != nullptr ? grid->cellcount() : 0; }

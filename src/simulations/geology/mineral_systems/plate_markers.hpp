@@ -59,6 +59,8 @@ private:
 std::size_t markercell(const Marker& marker, const TectonicFrame& frame);
 // Moves the marker through the frame's piecewise-constant material displacement.
 void applymaterialshift(Marker& marker, const TectonicFrame& frame);
+// A unit vector turned by a rotation vector (radians; Rodrigues).
+mesh::Vec3 rotatedby(const mesh::Vec3& position, const mesh::Vec3& rotation);
 // A unit vector moved along the great circle of a displacement (metres; its part in the
 // tangent plane at the position) on a sphere of the radius.
 mesh::Vec3 movealong(const mesh::Vec3& position, const mesh::Vec3& displacement, double radius_m);

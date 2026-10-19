@@ -283,9 +283,11 @@ are (east, north) at their cell on every grid; the boundary and deforming-region
 records keep centroids in degrees, lengths in km and counts in world cells by true
 area (`docs/architecture/tectonics/tectonic-output-contract.md`, contract schema 8).
 Both geology processes and `layers.finalize` are cube-ready. The mineral history
-reads the engine's cube directly (true cell areas, tracers as unit vectors moved by
-tangent displacements), and its deposits leave the run as fractions of longitude
-and colatitude, which every world grid locates.
+reads the engine's cube directly (true cell areas, tracers as unit vectors turned
+by their plate's rotation plus the residual tangent displacement), and its deposits
+leave the run as fractions of longitude and colatitude, which every world grid
+locates (`CubeFlags.GeologyAndFinalizeOnTheWorldCube` runs both geology processes
+and `layers.finalize` on a cube world).
 
 Deposits split by how they form. Magmatic and hydrothermal deposits (porphyry,
 epithermal and orogenic gold; later plume-related types) need the tectonic

@@ -77,6 +77,16 @@ const TectonicFrame& TectonicFrameReader::read(void* simulation)
     frame_.materialShift = materialShift_.empty() ? nullptr : materialShift_.data();
 
     const std::uint32_t platecount = tectonics_get_plate_count(simulation);
+    // The plates' rotations over the update (contract schema 8: omega in rad/s).
+    frame_.plateRotation.clear();
+    const tectonics::contract::PlateKinematics* kinematics = tectonics_get_plate_kinematics(simulation);
+    if (kinematics != nullptr && tectonics_get_plate_kinematics_count(simulation) == platecount)
+    {
+        const double seconds = frame_.deltaTimeMyr * tectonics::dynamics::kSecondsPerMyr;
+        for (std::uint32_t plate = 0; plate < platecount; ++plate)
+            frame_.plateRotation.push_back({ kinematics[plate].rotation_rad_s[0] * seconds,
+                kinematics[plate].rotation_rad_s[1] * seconds, kinematics[plate].rotation_rad_s[2] * seconds });
+    }
     frame_.plates.resize(platecount);
     for (std::uint32_t plate = 0; plate < platecount; ++plate)
     {

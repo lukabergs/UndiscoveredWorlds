@@ -126,8 +126,10 @@ identity. There are no rigid-raster movement or process-global identity hooks.
 
 `mineral_systems/tectonic_frame_reader` consumes these fields on the engine's cube
 (true cell areas, the cell spacing as the unit of `boundary_distance`). Its point
-tracers are unit vectors moved along great circles by the displacement field and
-located on the cube; deposits leave the run as fractions of longitude and
+tracers are unit vectors turned about the pole of their cell's plate by the plate's
+rotation over the update (schema 8's omega), the rest of the cell's displacement
+(deformation, rift opening) moving them along a great circle, and located on the
+cube; new deposits are placed inside their cell by its face coordinates; deposits leave the run as fractions of longitude and
 colatitude; conservative subcell mixing,
 root flow and sediment redistribution are not exact marker trajectories. The
 mineral denudation proxy reads current native elevation. Per-cell material

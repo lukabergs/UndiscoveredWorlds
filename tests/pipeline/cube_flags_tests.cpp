@@ -351,3 +351,43 @@ TEST(CubeFlags, GridFieldsReadAndLoadByCellId)
     }
     EXPECT_GT(checked, 50);
 }
+
+// The geology processes and layers.finalize on a cube world (T8 E5): the engine on the world's
+// own cube (the identity hand-off) for 10 Myr, then the physical layers with the engine's
+// deposits, each on the cell that contains its longitude and colatitude.
+TEST(CubeFlags, GeologyAndFinalizeOnTheWorldCube)
+{
+    auto world = std::make_unique<planet>();
+    world->setgrid(mesh::GridKind::cube, 4 * facecells);
+    world->setseed(1);
+    world->setgravity(1.0f);
+    GenerationScratch scratch;
+    WorldStageParameters parameters;
+    parameters.tectonicWorldGrid = true;
+    parameters.tectonicDurationMyr = 10;
+    GenerationExecutionContext context;
+    for (const S stage : { S::geosphere_initialization, S::plate_tectonics, S::finalize_layers })
+    {
+        const WorldProcessDefinition& process = getworldprocess(stage);
+        EXPECT_TRUE(process.cubeready) << process.id;
+        std::string error;
+        ASSERT_TRUE(executegenerationstage(stage, *world, scratch, parameters, context, &error)) << process.id << ": " << error;
+    }
+    EXPECT_EQ(nonfinite(*world), 0);
+    const double land = landshare(*world);
+    EXPECT_GT(land, 0.05);
+    EXPECT_LT(land, 0.95);
+    int primary = 0;
+    for (const mineralsystems::Deposit& deposit : world->mineraldeposits())
+    {
+        ASSERT_TRUE(deposit.surface.evaluated);
+        ASSERT_LT(deposit.surface.cell, world->cellcount());
+        if (deposit.system == mineralsystems::DepositSystem::placer_gold)
+            continue;
+        ++primary;
+        const double pi = 3.14159265358979323846;
+        EXPECT_EQ(deposit.surface.cell,
+            world->grid().locate(mesh::unitvector(pi * (0.5 - deposit.v), pi * (2.0 * deposit.u - 1.0))));
+    }
+    EXPECT_GT(primary, 0);
+}

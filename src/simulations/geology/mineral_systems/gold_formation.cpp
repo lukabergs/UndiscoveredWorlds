@@ -1,6 +1,7 @@
 #include "simulations/geology/mineral_systems/gold_formation.hpp"
 
 #include "simulations/geology/mineral_systems/mineral_random.hpp"
+#include "core/mesh/cube_geometry.hpp"
 #include "core/mesh/mesh_geometry.hpp"
 
 #include <algorithm>
@@ -111,14 +112,25 @@ double lognormal(detail::Random& random, const LognormalRange& range)
     return range.median * std::exp(range.sigmaLn * z);
 }
 
-// A point about a cell from two uniform numbers: its centre moved by (u - 1/2, v - 1/2) of
-// the cell's side (the square root of its area) toward local east and north, gnomonic.
+// A point inside a cell from two uniform numbers, in the cell's native coordinates: face
+// coordinates a, b on the cube (any face, the polar ones too), longitude and latitude on
+// lat-lon.
 mesh::Vec3 pointincell(const TectonicFrame& frame, std::size_t cell, double u, double v)
 {
     const mesh::CellGrid& grid = *frame.grid;
     const auto c = static_cast<mesh::CellId>(cell);
-    const double side = std::sqrt(grid.area_m2(c)) / grid.radius_m();
-    return mesh::normalise(grid.centre(c) + ((u - 0.5) * side) * grid.east(c) + ((v - 0.5) * side) * grid.north(c));
+    if (grid.kind() == mesh::GridKind::cube)
+    {
+        const int n = grid.facecells();
+        int face = 0, column = 0, row = 0;
+        mesh::cubeindices(n, c, face, column, row);
+        const double a = mesh::cubeedgea(n, column) + u * (mesh::cubeedgea(n, column + 1) - mesh::cubeedgea(n, column));
+        const double b = mesh::cubeedgeb(n, row) + v * (mesh::cubeedgeb(n, row + 1) - mesh::cubeedgeb(n, row));
+        return mesh::cubepoint(face, a, b);
+    }
+    const double longitude = -kPi + 2.0 * kPi * (grid.column(c) + u) / grid.columns();
+    const double latitude = 0.5 * kPi - kPi * (grid.row(c) + v) / grid.rows();
+    return mesh::unitvector(latitude, longitude);
 }
 
 // Cells weighted for area-proportional sampling.

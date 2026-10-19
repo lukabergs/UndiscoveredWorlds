@@ -78,6 +78,17 @@ struct FrameFixture
             shift[c] = (east * cell_m) * grid->east(c) + (north * cell_m) * grid->north(c);
     }
 
+    // A rigid rotation of every plate per update (a rotation vector, radians): each cell's
+    // displacement is omega x R c and the frame carries the plates' rotations.
+    void rotation(const mesh::Vec3& omega)
+    {
+        const double radius_m = kRadiusKm * 1000.0;
+        shift.resize(plate.size());
+        for (mesh::CellId c = 0; c < shift.size(); ++c)
+            shift[c] = mesh::cross(omega, radius_m * grid->centre(c));
+        frame.plateRotation.assign(frame.plates.size(), omega);
+    }
+
     std::shared_ptr<const mesh::CellGrid> grid;
     std::vector<mesh::Vec3> shift;
     mineralsystems::TectonicFrame frame;

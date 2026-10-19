@@ -22,7 +22,8 @@ void initialiseworld(planet& world)
 {
     world.clear();
 
-    int saveversion = 18;        // Saves of this version (and version 17) can be loaded.
+    int saveversion = 19;        // Saves of this version (and versions 17 and 18, converted) can be loaded.
+                                 // 19: the tectonic records' centroids in degrees and lengths in km (T8 E5).
     int settingssaveversion = 5; // As above, but for settings files.
     int size = tuning::world::defaults::size;
     int width = tuning::world::defaults::width;

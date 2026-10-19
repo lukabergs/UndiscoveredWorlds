@@ -64,7 +64,8 @@ TEST(MineralHistory, DepositsPersistAndTravelAfterTheirBoundaryDies)
 
     // The boundary stops and the plate carries its crust eastward.
     fixture.frame.boundaries[1] = BoundarySummary{};
-    fixture.motion(0.5f);
+    // Half an equatorial column per update about the pole: every marker turns 25 columns.
+    fixture.rotation({ 0.0, 0.0, 0.5 * 2.0 * FrameFixture::kPi / 128 });
     for (int update = 21; update <= 70; ++update)
     {
         fixture.frame.timeMyr = update;
@@ -78,16 +79,12 @@ TEST(MineralHistory, DepositsPersistAndTravelAfterTheirBoundaryDies)
         EXPECT_EQ(deposit.fate, DepositFate::preserved);
         EXPECT_EQ(deposit.formation.geologicRegime, regimecode::continent_collision);
         EXPECT_LE(deposit.formation.timeMyr, 20.0);
-        // 25 equatorial cells east along the marker's parallel (to the drift of local-east
-        // steps toward the equator), where the parallel is short of a circuit.
+        // 25 columns east on every parallel, at the same latitude.
         const auto before = fixture.coordinates(formedmarkers[i].position);
         const auto after = fixture.coordinates(history.markers()[i].position);
-        const double latitude = FrameFixture::kPi * (0.5 - before[1] / fixture.height());
-        if (std::fabs(latitude) > FrameFixture::kPi / 4)
-            continue;
-        const double moved = std::fmod(after[0] - before[0] + 128.0, 128.0) * std::cos(latitude);
-        EXPECT_NEAR(moved / 25.0, 1.0, 0.03) << i;
-        EXPECT_NEAR(after[1], before[1], 0.25) << i;  // the drift is about 0.15 rows at 45 degrees
+        const double moved = std::fmod(after[0] - before[0] + 128.0, 128.0);
+        EXPECT_NEAR(moved, 25.0, 1e-9) << i;
+        EXPECT_NEAR(after[1], before[1], 1e-9) << i;
     }
 }
 

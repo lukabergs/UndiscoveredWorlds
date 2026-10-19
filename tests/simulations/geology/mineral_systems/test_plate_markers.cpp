@@ -55,6 +55,31 @@ TEST(PlateMarkers, TranslationFollowsTheRecordedShiftAndCrossesTheDateLine)
     EXPECT_NEAR(b[1], 4.0, 0.1);
 }
 
+TEST(PlateMarkers, RigidRotationKeepsHighLatitudeMarkersOnTheirSmallCircle)
+{
+    // A plate turning about the pole by a quarter column per update carries a marker at 75 N
+    // (and one at 80 S) along its parallel, with no drift toward the equator.
+    FrameFixture fixture(64, 32);
+    fixture.frame.plates = { { 5 } };
+    const double step = 0.25 * 2.0 * FrameFixture::kPi / 64;
+    fixture.rotation({ 0.0, 0.0, step });
+    MarkerTracker tracker;
+    tracker.begin(fixture.view());
+    std::vector<Marker> markers{ markerat(fixture, 10.0, 32.0 * 15.0 / 180.0), markerat(fixture, 40.0, 32.0 * 170.0 / 180.0) };
+    std::vector<mesh::Vec3> start{ markers[0].position, markers[1].position };
+    ASSERT_TRUE(tracker.attach(markers[0], fixture.view()));
+    ASSERT_TRUE(tracker.attach(markers[1], fixture.view()));
+    for (int update = 0; update < 40; ++update)
+        tracker.advance(markers, fixture.view());
+    for (int m = 0; m < 2; ++m)
+    {
+        EXPECT_NEAR(mesh::latitudeof(markers[m].position), mesh::latitudeof(start[m]), 1e-12) << m;
+        double turned = mesh::longitudeof(markers[m].position) - mesh::longitudeof(start[m]);
+        if (turned < 0) turned += 2.0 * FrameFixture::kPi;
+        EXPECT_NEAR(turned, 40 * step, 1e-12) << m;
+    }
+}
+
 TEST(PlateMarkers, ContinentalMarkerTransfersWithCollidingCrust)
 {
     FrameFixture fixture(8, 4);

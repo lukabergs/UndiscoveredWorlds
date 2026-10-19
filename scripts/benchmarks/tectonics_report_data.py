@@ -1,5 +1,6 @@
 """Read native tectonics fields and measure them independently of preview colours."""
 import json
+import math
 from collections import deque
 from pathlib import Path
 import sys
@@ -319,12 +320,26 @@ def near_convergence(boundary_type):
     return near
 
 
+def plate_speeds(manifest):
+    """Each plate's centroid speed and the 'moving' threshold in the same unit: cm/yr on contract
+    schema 8 (velocity_east_north_cm_yr; 0.01 engine cell spacings per update converted with the
+    cube's mean cell side, sqrt(4 pi R^2 / 6 N^2), and delta_time_myr), engine cells per update
+    (linear_velocity, threshold 0.01) before it."""
+    plates = manifest["plates"]
+    if plates and "velocity_east_north_cm_yr" in plates[0]:
+        scenario = manifest["run_scenario"]
+        spacing_km = math.sqrt(4.0 * math.pi * float(scenario["radius_km"]) ** 2 / (6.0 * float(scenario["sphere_face_cells"]) ** 2))
+        moving = 0.01 * spacing_km / float(manifest["delta_time_myr"]) / 10.0  # km/Myr = mm/yr
+        return [float(np.hypot(*p["velocity_east_north_cm_yr"])) for p in plates], moving
+    return [float(np.hypot(*p["linear_velocity"])) for p in plates if "linear_velocity" in p], .01
+
+
 def mountain_activity(manifest, fields):
     z = fields["elevation"]
     convergence = fields["boundary_type"] == 1
     near = near_convergence(fields["boundary_type"])
     highland = z >= 3000
-    speeds = [float(np.hypot(*p["linear_velocity"])) for p in manifest["plates"] if "linear_velocity" in p]
+    speeds, moving = plate_speeds(manifest)
     return {"area_above_3000_m": float(highland.mean()),
             "area_above_5000_m": float((z >= 5000).mean()),
             "area_above_8000_m": float((z >= 8000).mean()),
@@ -333,7 +348,9 @@ def mountain_activity(manifest, fields):
             "land_near_convergence_m": stats(z[near & (z > 0)]),
             "convergent_boundary_cells": int(convergence.sum()),
             "mean_plate_speed": float(np.mean(speeds)) if speeds else None,
-            "moving_plates": sum(speed > .01 for speed in speeds) if speeds else None,
+            "mean_plate_speed_unit": "cm/yr" if manifest["plates"] and "velocity_east_north_cm_yr" in manifest["plates"][0]
+                                     else "cells/update",
+            "moving_plates": sum(speed > moving for speed in speeds) if speeds else None,
             "plate_count": len(manifest["plates"])}
 
 

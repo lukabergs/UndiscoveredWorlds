@@ -1510,7 +1510,7 @@ bool planet::loadworld(string filename)
 
     const int fileversion = val;
 
-    if (fileversion != itssaveversion && fileversion != 17) // Incompatible file format!
+    if (fileversion != itssaveversion && fileversion != 17 && fileversion != 18) // Incompatible file format!
         return 0;
 
     readvariable(infile, body_.itssize);
@@ -2056,6 +2056,13 @@ bool planet::loadworld(string filename)
             readvariable(infile, geosphere_.itstectonicplatecount);
             readvariable(infile, geosphere_.itstectonicsealevelm);
 
+            // Saves before version 19: raster centroids to degrees, cells to km.
+            const float rastercolumns = static_cast<float>(body_.itswidth + 1);
+            const float rasterrows = static_cast<float>(body_.itsheight + 1);
+            const auto rastercentroidlongitude = [rastercolumns](float x) { return (x + 0.5f) / rastercolumns * 360.0f - 180.0f; };
+            const auto rastercentroidlatitude = [rasterrows](float y) { return 90.0f - (y + 0.5f) / rasterrows * 180.0f; };
+            const float equatorialcellkm = static_cast<float>(2.0 * 3.14159265358979323846 * grid_->radius_m() / 1000.0) / rastercolumns;
+
             int boundarysegmentcount = 0;
             readvariable(infile, boundarysegmentcount);
             boundarysegmentcount = std::max(0, boundarysegmentcount);
@@ -2091,6 +2098,14 @@ bool planet::loadworld(string filename)
                 segment.averageDivergenceScore = std::clamp(segment.averageDivergenceScore, 0, 255);
                 segment.averageShearScore = std::clamp(segment.averageShearScore, 0, 255);
                 segment.ageMyr = std::max(0.0, segment.ageMyr);
+                if (fileversion < 19)
+                {
+                    // Before 19 a centroid was a raster position (cell centres at whole numbers, y
+                    // south) and the length world cells (the equatorial cell).
+                    segment.centroidLongitudeDeg = rastercentroidlongitude(segment.centroidLongitudeDeg);
+                    segment.centroidLatitudeDeg = rastercentroidlatitude(segment.centroidLatitudeDeg);
+                    segment.lengthKm *= equatorialcellkm;
+                }
             }
 
             int deformingregioncount = 0;
@@ -2123,6 +2138,13 @@ bool planet::loadworld(string filename)
                 region.cellCount = std::max(0, region.cellCount);
                 region.persistenceSteps = std::max(0, region.persistenceSteps);
                 region.ageMyr = std::max(0.0, region.ageMyr);
+                if (fileversion < 19)
+                {
+                    // Before 19: a raster centroid and a velocity with y south.
+                    region.centroidLongitudeDeg = rastercentroidlongitude(region.centroidLongitudeDeg);
+                    region.centroidLatitudeDeg = rastercentroidlatitude(region.centroidLatitudeDeg);
+                    region.averageInterpolatedVelocityY = -region.averageInterpolatedVelocityY;
+                }
             }
         }
         else
