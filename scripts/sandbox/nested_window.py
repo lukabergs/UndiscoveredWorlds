@@ -216,14 +216,11 @@ def main():
     relief_parent = local_relief(parent, int(spec['relief_window_parent_cells']))
     relief = np.maximum(prolong(relief_parent, f, pr, pc, prow, pcol), 0.0)
     amplitude = spec['relief_fraction'] * relief + spec['floor_m']
-    xg = child.x * child.cell_km * math.cos(math.radians(latitude_c))
-    yg = child.y * child.cell_km
-    xk, yk = np.meshgrid(xg, yg)
     band = {'wavelength_km': spec['longest_parent_cells'] * parent_domain.fine_km, 'octaves': spec['octaves'],
             'lacunarity': spec['lacunarity'], 'gain': spec['gain'], 'min_cells': spec['min_cells']}
-    noise = ts.fbm(xk, yk, band, config['seed'] + spec['seed_offset'], child)
+    # At the cells' unit vectors in km (the sandbox's noise on the sphere, sphere-mesh.md section 11).
+    noise = ts.fbm(child.points(), band, config['seed'] + spec['seed_offset'], child)
     noise = (1 - spec['ridged']) * noise + spec['ridged'] * ts.ridged(noise) / 0.6
-    del xk, yk
     land0 = ~sea0
     raw = amplitude * noise * land0
     detail = remove_parent_means(raw, land0, f, spec['smooth_passes'], spec['relaxation'])

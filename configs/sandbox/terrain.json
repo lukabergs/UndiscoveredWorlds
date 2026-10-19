@@ -96,5 +96,7 @@
              "project_after_physics": false,
              "inflow": {"enabled": true, "min_m3_s": 1.0}},
  "render": {"before_physics": false, "stages": true, "diagnostics": true, "warp_grid_km": 400,
-            "earth_hardness": "refs/processed/lithology/glim_erodibility_2048.png"}
+            "earth_hardness": "refs/processed/lithology/glim_erodibility_2048.png"},
+ "cube": {"enabled": false, "note": "the global domain on the cube of a cube base bundle (k N cells per face edge, k = domains.global.columns / 4 N); export_columns null: 4 k N; sample_smoothing: the base-to-domain smoothing in base cells (0.41: the cubic B-spline's variance)",
+          "export_columns": null, "sample_smoothing": 0.41}
 }

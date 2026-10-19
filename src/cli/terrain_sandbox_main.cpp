@@ -2,23 +2,35 @@
 // erodes a raster the sandbox writes, with the pipeline's own kernels (Priority-Flood, D8 flow graph,
 // implicit stream power with deposition and hillslope diffusion), so procedural terrain can be judged
 // after real drainage and erosion without running the pipeline. Not a pipeline stage: no world, no
-// bundle, no tuning header. Files are raw little-endian float32, rows north first; elevations are metres
-// relative to today's sea level (--sea-history moves the sea during the run).
+// tuning header. Files are raw little-endian float32: on a lat-lon domain (--columns, --rows) rows north
+// first; on a cube domain (--face-cells N, docs/architecture/sphere-mesh.md section 2) 6 N^2 values in id
+// order, the kernels running on SphereMetric(makecubegrid(N)). Elevations are metres relative to today's
+// sea level (--sea-history moves the sea during the run).
+// Subcommands (the first argument): `grid` writes a cube's cell table (the bundle v2 layout, section 7),
+// `export` remaps cube fields to the lat-lon grid (section 5) for the renders, `synthetic-base` writes a
+// small cube base bundle from analytic fields (the checks' stand-in until the engine writes cube worlds).
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <limits>
 #include <map>
+#include <memory>
 #include <queue>
+#include <sstream>
 #include <utility>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
+#include "core/mesh/cell_grid.hpp"
+#include "core/mesh/mesh_remap.hpp"
 #include "simulations/landscape/depressions.hpp"
 #include "simulations/landscape/flow_graph.hpp"
 #include "simulations/landscape/glacial.hpp"
@@ -536,10 +548,397 @@ void filllakes(const landscape::SphereMetric& metric, const landscape::FlowGraph
     }
 }
 
+// ---------------------------------------------------------------- cube grids, exports, the synthetic base
+
+using Options = std::map<std::string, std::string>;
+
+std::string option(const Options& options, const char* key, const char* fallback)
+{
+    const auto found = options.find(key);
+    return found == options.end() ? std::string(fallback) : found->second;
+}
+
+double numberoption(const Options& options, const char* key, double fallback)
+{
+    const auto found = options.find(key);
+    return found == options.end() ? fallback : std::stod(found->second);
+}
+
+std::uint64_t fnv1a(const void* data, std::size_t size)  // the bundle writer's hash (src/io/run_bundle.cpp)
+{
+    std::uint64_t hash = 1469598103934665603ULL;
+    const auto* bytes = static_cast<const unsigned char*>(data);
+    for (std::size_t index = 0; index < size; index++)
+    {
+        hash ^= bytes[index];
+        hash *= 1099511628211ULL;
+    }
+    return hash;
+}
+
+std::string hexhash(std::uint64_t hash)
+{
+    std::ostringstream out;
+    out << std::hex << std::setw(16) << std::setfill('0') << hash;
+    return out.str();
+}
+
+std::string shapetext(const std::vector<std::size_t>& shape, bool json)
+{
+    std::ostringstream out;
+    out << (json ? '[' : '(');
+    for (std::size_t index = 0; index < shape.size(); index++)
+        out << (index ? ", " : "") << shape[index];
+    if (!json && shape.size() == 1)
+        out << ',';
+    out << (json ? ']' : ')');
+    return out.str();
+}
+
+// A version 1.0 .npy file, as the bundle writer's (src/io/run_bundle.cpp, writenpy).
+void writenpy(const std::filesystem::path& path, const std::string& dtype, const std::vector<std::size_t>& shape,
+              const void* data, std::size_t bytes)
+{
+    std::filesystem::create_directories(path.parent_path());
+    std::string header = "{'descr': '" + dtype + "', 'fortran_order': False, 'shape': " + shapetext(shape, false) + ", }";
+    const std::size_t prefix = 10;
+    const std::size_t total = ((prefix + header.size() + 1 + 63) / 64) * 64;
+    header.append(total - prefix - header.size() - 1, ' ');
+    header += '\n';
+    std::ofstream out(path, std::ios::binary);
+    out.write("\x93NUMPY", 6);
+    const unsigned char version[2] = { 1, 0 };
+    out.write(reinterpret_cast<const char*>(version), 2);
+    const auto length = static_cast<std::uint16_t>(header.size());
+    const unsigned char lengthbytes[2] = { static_cast<unsigned char>(length & 0xff), static_cast<unsigned char>(length >> 8) };
+    out.write(reinterpret_cast<const char*>(lengthbytes), 2);
+    out.write(header.data(), static_cast<std::streamsize>(header.size()));
+    if (bytes)
+        out.write(static_cast<const char*>(data), static_cast<std::streamsize>(bytes));
+    if (!out)
+        throw std::runtime_error("cannot write " + path.string());
+}
+
+// One array written into a bundle directory, for its manifest entry.
+struct WrittenArray
+{
+    std::string id, dtype, file;
+    std::vector<std::size_t> shape;
+    std::uint64_t hash = 0;
+};
+
+template <typename T>
+WrittenArray savearray(const std::filesystem::path& directory, const std::string& relative, const std::string& id,
+                       const std::string& dtype, const std::vector<std::size_t>& shape, const std::vector<T>& values)
+{
+    writenpy(directory / relative, dtype, shape, values.data(), values.size() * sizeof(T));
+    return { id, dtype, relative, shape, fnv1a(values.data(), values.size() * sizeof(T)) };
+}
+
+// The cube's cell table in id order (bundle v2, sphere-mesh.md section 7; as world/planet_bundle.cpp writes it):
+// centre (unit vectors), latitude_deg, longitude_deg, area_m2, neighbours (slots 1..8, -1 none), reverse (0 none).
+std::vector<WrittenArray> writecelltable(const mesh::CellGrid& grid, const std::filesystem::path& directory,
+                                         const std::string& prefix)
+{
+    const std::size_t count = grid.cellcount();
+    constexpr double degrees = 180.0 / pi;
+    std::vector<double> centre(3 * count), latitude(count), longitude(count), area(count);
+    std::vector<std::int32_t> neighbours(mesh::slotcount * count);
+    std::vector<std::int8_t> reverse(mesh::slotcount * count);
+    for (mesh::CellId c = 0; c < count; c++)
+    {
+        const mesh::Vec3 p = grid.centre(c);
+        centre[3 * c] = p.x;
+        centre[3 * c + 1] = p.y;
+        centre[3 * c + 2] = p.z;
+        latitude[c] = grid.latitude_rad(c) * degrees;
+        longitude[c] = grid.longitude_rad(c) * degrees;
+        area[c] = grid.area_m2(c);
+        for (int k = 1; k <= mesh::slotcount; k++)
+        {
+            neighbours[mesh::slotcount * c + static_cast<std::size_t>(k - 1)] = grid.neighbour(c, k);
+            reverse[mesh::slotcount * c + static_cast<std::size_t>(k - 1)] = static_cast<std::int8_t>(grid.reverse(c, k));
+        }
+    }
+    const std::size_t slots = static_cast<std::size_t>(mesh::slotcount);
+    return { savearray(directory, prefix + "centre.npy", "centre", "<f8", { count, 3 }, centre),
+             savearray(directory, prefix + "latitude_deg.npy", "latitude_deg", "<f8", { count }, latitude),
+             savearray(directory, prefix + "longitude_deg.npy", "longitude_deg", "<f8", { count }, longitude),
+             savearray(directory, prefix + "area_m2.npy", "area_m2", "<f8", { count }, area),
+             savearray(directory, prefix + "neighbours.npy", "neighbours", "<i4", { count, slots }, neighbours),
+             savearray(directory, prefix + "reverse.npy", "reverse", "|i1", { count, slots }, reverse) };
+}
+
+// `terrain_sandbox grid --face-cells N [--radius-km R] --out DIR`: the cell table of a cube of N cells per face edge
+// as DIR/<name>.npy (the sandbox's cube domains read their neighbours from it; Python never builds the topology).
+int gridcommand(const Options& options)
+{
+    const int facecells = std::stoi(option(options, "--face-cells", "0"));
+    const auto grid = mesh::makecubegrid(facecells, numberoption(options, "--radius-km", 6371.0) * 1000.0);
+    writecelltable(*grid, option(options, "--out", "."), "");
+    std::printf("cells %zu\n", grid->cellcount());
+    return 0;
+}
+
+// `terrain_sandbox export --face-cells N --columns W --input FILE --rules RULE,... --output FILE [--radius-km R]
+// [--depth D]`: FILE holds F fields of 6 N^2 float32 each (id order), one after the other, and the output F lat-lon
+// rasters of W x W/2 (rows north first), field f by RULE f: `bilinear` (mesh::samplebilinear's stencil at the
+// lat-lon centres: smooth renders, section 5), `mean` (remapmean over makeremap's overlaps, quadtree depth D,
+// default 4) or `nearest` (the cell containing the centre: masks, codes, angles, the discharge of the network).
+int exportcommand(const Options& options)
+{
+    const double radius_m = numberoption(options, "--radius-km", 6371.0) * 1000.0;
+    const int facecells = std::stoi(option(options, "--face-cells", "0"));
+    const int columns = std::stoi(option(options, "--columns", "0"));
+    const auto cube = mesh::makecubegrid(facecells, radius_m);
+    const auto latlon = mesh::makelatlongrid(columns, radius_m);
+    std::vector<std::string> rules;
+    {
+        const std::string text = option(options, "--rules", "");
+        std::size_t start = 0;
+        while (start < text.size())
+        {
+            std::size_t end = text.find(',', start);
+            if (end == std::string::npos)
+                end = text.size();
+            rules.push_back(text.substr(start, end - start));
+            start = end + 1;
+        }
+    }
+    const std::size_t count = cube->cellcount(), destinations = latlon->cellcount();
+    const std::vector<float> input = readraster(option(options, "--input", ""), count * rules.size());
+    std::vector<float> output(destinations * rules.size());
+    std::vector<mesh::BilinearStencil> stencils;
+    std::vector<mesh::CellId> nearest;
+    std::unique_ptr<mesh::RemapWeights> weights;
+    for (std::size_t f = 0; f < rules.size(); f++)
+    {
+        const std::vector<float> values(input.begin() + static_cast<std::ptrdiff_t>(f * count),
+                                        input.begin() + static_cast<std::ptrdiff_t>((f + 1) * count));
+        float* result = output.data() + f * destinations;
+        if (rules[f] == "bilinear")
+        {
+            if (stencils.empty())
+            {
+                stencils.resize(destinations);
+                for (std::size_t d = 0; d < destinations; d++)
+                    stencils[d] = mesh::bilinearstencil(*cube, latlon->centre(static_cast<mesh::CellId>(d)));
+            }
+            for (std::size_t d = 0; d < destinations; d++)
+            {
+                const mesh::BilinearStencil& stencil = stencils[d];
+                const double first = static_cast<double>(values[stencil.cell[0]]);
+                double sum = 0.0;  // relative to the first value, as mesh::samplebilinear
+                for (int n = 1; n < stencil.count; n++)
+                    sum += stencil.weight[n] * (static_cast<double>(values[stencil.cell[n]]) - first);
+                result[d] = static_cast<float>(first + sum);
+            }
+        }
+        else if (rules[f] == "nearest")
+        {
+            if (nearest.empty())
+            {
+                nearest.resize(destinations);
+                for (std::size_t d = 0; d < destinations; d++)
+                    nearest[d] = cube->locate(latlon->centre(static_cast<mesh::CellId>(d)));
+            }
+            for (std::size_t d = 0; d < destinations; d++)
+                result[d] = values[nearest[d]];
+        }
+        else if (rules[f] == "mean")
+        {
+            if (!weights)
+            {
+                mesh::RemapOptions remap;
+                remap.depth = static_cast<int>(numberoption(options, "--depth", 4.0));
+                weights = std::make_unique<mesh::RemapWeights>(mesh::makeremap(*cube, *latlon, remap));
+            }
+            const std::vector<float> mean = mesh::remapmean(*weights, *cube, *latlon, values);
+            std::copy(mean.begin(), mean.end(), result);
+        }
+        else
+            throw std::runtime_error("export: unknown rule '" + rules[f] + "' (bilinear, mean, nearest)");
+    }
+    writeraster(option(options, "--output", ""), output);
+    return 0;
+}
+
+// The synthetic cube base (`terrain_sandbox synthetic-base --face-cells N [--radius-km R] --out DIR`): a bundle v2 of
+// grid kind cube with the fields the sandbox reads, analytic functions of the unit vector: three continents (one over
+// the north pole, one across a cube corner, one on the equator astride a face edge) joined by a collision belt along a
+// great circle (shortening across it, uplift, thick crust, a convergent boundary) and a spreading ridge along another
+// (young oceanic crust, a divergent boundary). Lat-lon exports at 4 N columns by each field's rule; seed 1; no steps.
+int syntheticbasecommand(const Options& options)
+{
+    const int facecells = std::stoi(option(options, "--face-cells", "32"));
+    const double radius_km = numberoption(options, "--radius-km", 6371.0);
+    const std::filesystem::path directory = option(options, "--out", "");
+    if (directory.empty())
+        throw std::runtime_error("synthetic-base: --out DIR is required");
+    if (std::filesystem::exists(directory / "manifest.json"))
+        throw std::runtime_error("synthetic-base: " + directory.string() + " already holds a bundle");
+    const auto grid = mesh::makecubegrid(facecells, radius_km * 1000.0);
+    const auto latlon = mesh::makelatlongrid(4 * facecells, radius_km * 1000.0);
+    const std::size_t count = grid->cellcount();
+    const auto unit = [](double latitude_deg, double longitude_deg) {
+        return mesh::unitvector(latitude_deg * pi / 180.0, longitude_deg * pi / 180.0);
+    };
+    const auto angle = [](const mesh::Vec3& p, const mesh::Vec3& q) {
+        return std::acos(std::clamp(mesh::dot(p, q), -1.0, 1.0));
+    };
+    struct Continent
+    {
+        mesh::Vec3 centre;
+        double radius_rad, height_m;
+    };
+    const Continent continents[] = { { unit(80.0, 30.0), 0.38, 900.0 },     // over the north pole
+                                     { unit(35.26, 45.0), 0.42, 700.0 },    // across the cube corner of faces 0, 1, 4
+                                     { unit(-10.0, 135.0), 0.45, 600.0 } }; // astride the edge of faces 1 and 2
+    const mesh::Vec3 beltpole = mesh::normalise(mesh::cross(continents[1].centre, continents[2].centre));
+    const mesh::Vec3 ridgepole = unit(10.0, -100.0);  // the ridge is the great circle 90 degrees from it
+    std::vector<float> elevation(count), shortening(count), direction(count), uplift(count), sediment(count),
+        crust(count), age(count), strain(count), zero(count, 0.0f);
+    std::vector<std::uint8_t> crustclass(count), boundary(count), deforming(count);
+    for (mesh::CellId c = 0; c < count; c++)
+    {
+        const mesh::Vec3 p = grid->centre(c);
+        double land = -0.22;  // the land function: > 0 on land
+        for (const Continent& continent : continents)
+        {
+            const double x = angle(p, continent.centre) / continent.radius_rad;
+            land += std::exp(-x * x) * (continent.height_m / 900.0);
+        }
+        // The belt: within 6 degrees of the great circle through the second and third continents' centres, between them.
+        const double offbelt = std::asin(std::clamp(mesh::dot(p, beltpole), -1.0, 1.0));
+        const double between = mesh::dot(p, mesh::normalise(continents[1].centre + continents[2].centre));
+        const double belt = between > 0.75 ? std::exp(-std::pow(offbelt / (6.0 * pi / 180.0), 2.0)) : 0.0;
+        land += 0.6 * belt;
+        const double ridgedistance = std::abs(std::asin(std::clamp(mesh::dot(p, ridgepole), -1.0, 1.0))) * radius_km;
+        const bool sea = land <= 0.0;
+        elevation[c] = static_cast<float>(sea ? std::max(-5500.0, -1500.0 - 14000.0 * (-land)) : 50.0 + 2200.0 * land + 3500.0 * belt);
+        shortening[c] = static_cast<float>(120000.0 * belt);
+        // The shortening axis across the belt (toward its pole), radians from east toward south in the cell's frame.
+        const mesh::Vec3 across = mesh::normalise(beltpole - mesh::dot(beltpole, p) * p);
+        direction[c] = static_cast<float>(std::atan2(-mesh::dot(across, grid->north(c)), mesh::dot(across, grid->east(c))));
+        uplift[c] = static_cast<float>(250.0 * belt - (sea ? 0.0 : 20.0 * std::max(0.0, 0.3 - land)));
+        crust[c] = static_cast<float>(sea && elevation[c] < -1500.0f ? 0.0 : 33000.0 + 22000.0 * belt);
+        crustclass[c] = crust[c] > 0.0f ? 2 : 1;
+        age[c] = static_cast<float>(crustclass[c] == 1 ? std::min(180.0, ridgedistance / 25.0) : 900.0);
+        sediment[c] = static_cast<float>(sea ? 400.0 : 1500.0 * std::max(0.0, 0.25 - land) * 4.0);
+        strain[c] = static_cast<float>(0.5 * belt);
+        boundary[c] = belt > 0.8 ? 1 : (crustclass[c] == 1 && ridgedistance < 120.0 ? 2 : 0);
+        deforming[c] = belt > 0.5 ? 2 : 0;
+    }
+    struct Field
+    {
+        std::string id, layout, dtype, units, rule;
+        const void* data;
+        std::size_t elementsize;
+        bool code;
+    };
+    const std::vector<Field> fields = {
+        { "geosphere.base_elevation", "grid", "<f4", "m above datum", "mean", elevation.data(), 4, false },
+        { "geosphere.mountain_height", "grid", "<f4", "m", "mean", zero.data(), 4, false },
+        { "geosphere.extra_elevation", "grid", "<f4", "m", "mean", zero.data(), 4, false },
+        { "geosphere.crater_rims", "grid", "<f4", "m", "mean", zero.data(), 4, false },
+        { "geosphere.crater_centres", "grid", "<f4", "m", "mean", zero.data(), 4, false },
+        { "geosphere.volcano", "grid", "<f4", "m", "mean", zero.data(), 4, false },
+        { "geosphere.ocean_ridge_height", "grid", "<f4", "m", "mean", zero.data(), 4, false },
+        { "geosphere.crust_age", "grid", "<f4", "Myr", "mean", age.data(), 4, false },
+        { "geosphere.crust_class", "grid", "|u1", "code", "nearest", crustclass.data(), 1, true },
+        { "geosphere.rock_uplift_rate", "grid", "<f4", "m/Myr", "mean", uplift.data(), 4, false },
+        { "geosphere.shortening", "grid", "<f4", "m", "mean", shortening.data(), 4, false },
+        { "geosphere.shortening_direction", "grid", "<f4", "rad", "nearest", direction.data(), 4, false },
+        { "geosphere.accumulated_strain", "grid", "<f4", "engine units", "mean", strain.data(), 4, false },
+        { "geosphere.boundary_type", "grid", "|u1", "code", "nearest", boundary.data(), 1, true },
+        { "geosphere.deforming_region_type", "grid", "|u1", "code", "nearest", deforming.data(), 1, true },
+        { "geosphere.continental_crust", "grid", "<f4", "m", "mean", crust.data(), 4, false },
+        { "geosphere.sediment", "grid", "<f4", "m", "mean", sediment.data(), 4, false },
+    };
+    mesh::RemapOptions remapoptions;
+    remapoptions.depth = 5;
+    const mesh::RemapWeights weights = mesh::makeremap(*grid, *latlon, remapoptions);
+    const std::size_t n = static_cast<std::size_t>(facecells);
+    const std::size_t columns = static_cast<std::size_t>(4 * facecells), rows = columns / 2;
+    std::vector<WrittenArray> written, exports;
+    std::vector<std::string> rules;
+    for (const Field& field : fields)
+    {
+        const std::string name = field.id.substr(field.id.find('.') + 1);
+        const std::size_t bytes = count * field.elementsize;
+        writenpy(directory / ("fields/geosphere/" + name + ".npy"), field.dtype, { 6, n, n }, field.data, bytes);
+        written.push_back({ field.id, field.dtype, "fields/geosphere/" + name + ".npy", { 6, n, n }, fnv1a(field.data, bytes) });
+        std::vector<float> values(count);
+        for (std::size_t i = 0; i < count; i++)
+            values[i] = field.code ? static_cast<float>(static_cast<const std::uint8_t*>(field.data)[i])
+                                   : static_cast<const float*>(field.data)[i];
+        const std::vector<float> exported = field.rule == "mean" ? mesh::remapmean(weights, *grid, *latlon, values)
+                                                                 : mesh::remapnearest(*grid, *latlon, values);
+        const std::string file = "latlon/geosphere/" + name + ".npy";
+        if (field.code)
+        {
+            std::vector<std::uint8_t> codes(exported.size());
+            for (std::size_t i = 0; i < codes.size(); i++)
+                codes[i] = static_cast<std::uint8_t>(exported[i]);
+            exports.push_back(savearray(directory, file, field.id, field.dtype, { rows, columns }, codes));
+        }
+        else
+            exports.push_back(savearray(directory, file, field.id, field.dtype, { rows, columns }, exported));
+        rules.push_back(field.rule);
+    }
+    const std::int32_t sealevel = 0;
+    writenpy(directory / "fields/geosphere/sea_level.npy", "<i4", {}, &sealevel, sizeof(sealevel));
+    const WrittenArray sealevelentry{ "geosphere.sea_level", "<i4", "fields/geosphere/sea_level.npy", {},
+                                      fnv1a(&sealevel, sizeof(sealevel)) };
+    const std::vector<WrittenArray> cells = writecelltable(*grid, directory, "grid/");
+    std::filesystem::create_directories(directory / "tables");
+
+    std::ostringstream out;
+    out << std::setprecision(6) << std::fixed;
+    out << "{\n  \"schema\": \"uw-run-bundle/v2\",\n  \"created\": \"synthetic\",\n  \"seed\": 1,\n";
+    out << "  \"grid\": {\"kind\": \"cube\", \"face_cells\": " << facecells
+        << ", \"orientation\": \"uw-cube-1\", \"layout\": \"face, row (top first), column\", \"radius_km\": " << radius_km
+        << ", \"export_columns\": " << columns << "},\n";
+    out << "  \"recipe\": \"synthetic-cube-base\",\n  \"command\": [\"terrain_sandbox\", \"synthetic-base\"],\n";
+    out << "  \"properties\": {\"note\": \"analytic fields of the unit vector (terrain_sandbox synthetic-base), not an engine world\"},\n";
+    out << "  \"parameters\": {\"world.body.radius_km\": " << radius_km << "},\n  \"steps\": [],\n  \"fields\": [";
+    const auto entry = [&](const WrittenArray& array, const std::string& layout, const std::string& units) {
+        out << "\n    {\"id\": \"" << array.id << "\", \"component\": \"geosphere\", \"layout\": \"" << layout
+            << "\", \"dtype\": \"" << array.dtype << "\", \"shape\": " << shapetext(array.shape, true) << ", \"units\": \""
+            << units << "\", \"file\": \"" << array.file << "\", \"hash\": \"" << hexhash(array.hash)
+            << "\", \"written_by\": \"terrain_sandbox synthetic-base\", \"description\": \"\"}";
+    };
+    entry(sealevelentry, "scalar", "m above datum");
+    for (std::size_t i = 0; i < fields.size(); i++)
+    {
+        out << ",";
+        entry(written[i], fields[i].layout, fields[i].units);
+    }
+    out << "\n  ],\n  \"exports\": [";
+    for (std::size_t i = 0; i < exports.size(); i++)
+        out << (i ? "," : "") << "\n    {\"id\": \"" << exports[i].id << "\", \"dtype\": \"" << exports[i].dtype
+            << "\", \"shape\": " << shapetext(exports[i].shape, true) << ", \"file\": \"" << exports[i].file
+            << "\", \"hash\": \"" << hexhash(exports[i].hash) << "\", \"rule\": \"" << rules[i] << "\"}";
+    out << "\n  ],\n  \"cells\": [";
+    for (std::size_t i = 0; i < cells.size(); i++)
+        out << (i ? "," : "") << "\n    {\"id\": \"" << cells[i].id << "\", \"dtype\": \"" << cells[i].dtype
+            << "\", \"shape\": " << shapetext(cells[i].shape, true) << ", \"file\": \"" << cells[i].file
+            << "\", \"hash\": \"" << hexhash(cells[i].hash) << "\"}";
+    out << "\n  ],\n  \"tables\": []\n}\n";
+    std::ofstream manifest(directory / "manifest.json", std::ios::binary);
+    manifest << out.str();
+    if (!manifest)
+        throw std::runtime_error("cannot write the manifest in " + directory.string());
+    std::printf("synthetic cube base N %d: %zu cells in %s\n", facecells, count, directory.string().c_str());
+    return 0;
+}
+
 void usage()
 {
     std::cout << "terrain_sandbox --columns W --rows H --elevation FILE --sea FILE --out-elevation FILE --out-discharge FILE\n"
                  "  [--north DEG --pixel-deg DEG] (a window; default the whole sphere)\n"
+                 "  [--face-cells N] (instead of --columns and --rows: a cube domain, 6 N^2 cells in id order)\n"
+                 "  [--cells FILE] (with --face-cells: raw int32 neighbours, n x 8, checked against the cube's table)\n"
                  "  [--erodibility FILE] (relative K per cell, default 1) [--uplift FILE] (m/Myr per cell, default 0)\n"
                  "  [--runoff M_PER_YR 0.3 | --runoff-file FILE] [--duration MYR 10] [--step MYR 0.5] [--k 750] [--m 0.5]\n"
                  "  [--deposition G 1] [--diffusivity KM2_PER_MYR 1] [--delta-top M 0] [--threshold-slope S 0: off]\n"
@@ -556,14 +955,19 @@ void usage()
                  "  [--out-fields PREFIX] (per-cell totals: PREFIX-eroded_m.f32, -deposited_m, -glacial_eroded_m,\n"
                  "   -ice_time_myr, -ice_max_m, -landslide_m, -last_eroded_m; -basin_fill_m with --aggrade-subsidence 1)\n"
                  "  [--ice-threshold M 10]\n"
-                 "  [--random-routing 0|1] [--seed N 1] [--radius-km 6371]\n";
+                 "  [--random-routing 0|1] [--seed N 1] [--radius-km 6371]\n"
+                 "terrain_sandbox grid --face-cells N [--radius-km R] --out DIR (the cube's cell table as .npy)\n"
+                 "terrain_sandbox export --face-cells N --columns W --input FILE --rules bilinear|mean|nearest,...\n"
+                 "  --output FILE [--radius-km R] [--depth D 4] (F stacked cube fields to F stacked lat-lon rasters)\n"
+                 "terrain_sandbox synthetic-base --face-cells N [--radius-km R] --out DIR (an analytic cube base bundle)\n";
 }
 }
 
 int main(int argc, char** argv)
 {
+    const std::string command = argc > 1 && argv[1][0] != '-' ? argv[1] : "";
     std::map<std::string, std::string> options;
-    for (int i = 1; i + 1 < argc; i += 2)
+    for (int i = command.empty() ? 1 : 2; i + 1 < argc; i += 2)
         options[argv[i]] = argv[i + 1];
     const auto text = [&](const char* key, const char* fallback) {
         const auto found = options.find(key);
@@ -573,20 +977,59 @@ int main(int argc, char** argv)
         const auto found = options.find(key);
         return found == options.end() ? fallback : std::stod(found->second);
     };
-    if (argc < 2 || options.count("--columns") == 0 || options.count("--elevation") == 0)
+    if (!command.empty())
+    {
+        try
+        {
+            if (command == "grid")
+                return gridcommand(options);
+            if (command == "export")
+                return exportcommand(options);
+            if (command == "synthetic-base")
+                return syntheticbasecommand(options);
+        }
+        catch (const std::exception& error)
+        {
+            std::cerr << "terrain_sandbox " << command << ": " << error.what() << "\n";
+            return 1;
+        }
+        usage();
+        return 2;
+    }
+    const bool cube = options.count("--face-cells") != 0;
+    if (argc < 2 || (options.count("--columns") == 0 && !cube) || options.count("--elevation") == 0)
     {
         usage();
         return 2;
     }
     try
     {
-        const int columns = std::stoi(text("--columns", "0"));
-        const int rows = std::stoi(text("--rows", "0"));
+        const int columns = cube ? 0 : std::stoi(text("--columns", "0"));
+        const int rows = cube ? 0 : std::stoi(text("--rows", "0"));
         const double radius_m = number("--radius-km", 6371.0) * 1000.0;
-        const std::size_t count = static_cast<std::size_t>(columns) * static_cast<std::size_t>(rows);
-        landscape::SphereMetric metric = options.count("--pixel-deg")
+        if (cube && options.count("--pixel-deg"))
+            throw std::runtime_error("--pixel-deg is a lat-lon window's; a cube domain is the whole sphere");
+        // A cube domain: the kernels on SphereMetric(makecubegrid(N)); --cells checks the caller's neighbour table.
+        landscape::SphereMetric metric = cube
+            ? landscape::SphereMetric(mesh::makecubegrid(std::stoi(text("--face-cells", "0")), radius_m))
+            : options.count("--pixel-deg")
             ? windowmetric(columns, rows, number("--north", 90.0), number("--pixel-deg", 180.0 / rows), radius_m)
             : landscape::SphereMetric(columns, rows, radius_m);
+        const std::size_t count = metric.size();
+        if (cube && options.count("--cells"))
+        {
+            const std::vector<float> bits = readraster(text("--cells", ""), count * mesh::slotcount);  // int32 values
+            std::vector<std::int32_t> table(bits.size());
+            std::memcpy(table.data(), bits.data(), bits.size() * sizeof(float));
+            for (std::size_t c = 0; c < count; c++)
+                for (int k = 1; k <= mesh::slotcount; k++)
+                {
+                    const std::int32_t stored = table[c * mesh::slotcount + static_cast<std::size_t>(k - 1)];
+                    if (stored != metric.grid->neighbour(static_cast<mesh::CellId>(c), k))
+                        throw std::runtime_error("--cells: neighbour table differs from the cube's at cell " +
+                                                 std::to_string(c) + " slot " + std::to_string(k));
+                }
+        }
 
         std::vector<float> elevation = readraster(text("--elevation", ""), count);
         const std::vector<float> seavalues = readraster(text("--sea", ""), count);
@@ -609,10 +1052,14 @@ int main(int argc, char** argv)
             seaseeds.assign(count, 0);
             for (std::size_t i = 0; i < count; i++)
             {
-                const int column = static_cast<int>(i % static_cast<std::size_t>(columns));
-                const int row = static_cast<int>(i / static_cast<std::size_t>(columns));
-                const bool ring = column == 0 || column == columns - 1 || row == 0 || row == rows - 1;
-                if (sea[i] && (elevation[i] < lowestlevel || (window && ring)))
+                bool ring = false;
+                if (window)
+                {
+                    const int column = static_cast<int>(i % static_cast<std::size_t>(columns));
+                    const int row = static_cast<int>(i / static_cast<std::size_t>(columns));
+                    ring = column == 0 || column == columns - 1 || row == 0 || row == rows - 1;
+                }
+                if (sea[i] && (elevation[i] < lowestlevel || ring))
                     seaseeds[i] = 1;
             }
         }

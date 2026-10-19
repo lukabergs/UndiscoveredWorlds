@@ -12,6 +12,30 @@ filter (erosion_filter.py) on base + relief, a rock-hardness field (relative ero
 strike), then routing and stream power. Every noise is a function of absolute position, so a window is a
 zoom of the world preview; octaves finer than a domain's grid fade out instead of aliasing.
 
+Noise on the sphere (docs/architecture/sphere-mesh.md section 11, roadmap T8.8): every noise and procedural layer is
+evaluated at the cells' unit vectors times the radius (km; Domain.points: a lat-lon cell's centre from its global
+fine column and row, so two windows sharing a cell evaluate it from the same numbers and their overlaps are
+bit-identical). The gradient noise is 3-D (a quintic-faded lattice in km over wavelength; each isotropic octave
+rotated by a fixed rotation); a noise stretched along a direction (the strike's bank, the hardness bands, the sea
+floor's hills) is a bank of fixed 3-D axes (a Fibonacci set over the half sphere of axes, 0.75 B^2 of them for the
+config's B orientations) weighted by max(0, 2 (s . a)^2 - 1)^sharpness, s the local strike's unit tangent, so the
+2-D bank's cos 2(theta - phi) weight; ridge-transform segments are cut along the great circle normal to each bank
+axis (the arc length about it); the warp moves points on the local east and south tangents; seamounts are a 3-D
+lattice of candidates kept within half a spacing of the sphere; the erosion filter's Phacelle noise is the 3-D
+lattice version with its stripes in the tangent plane. Displacement resamplings (the coast and micro terms) and the
+raster filters stay on the domain's grid. Angles (theta) are from the cell's local east toward its south.
+
+The cube (cube.enabled, default off; a cube base bundle, bundle v2): the global domain runs on a cube of k N cells
+per face edge (k = domains.global.columns / 4 N; cube_domain.py), base fields read native ((6, N, N) by
+Bundle.load_native, neighbours from the bundle's cell table, the domain's table from `terrain_sandbox grid`); every
+grid operation is a gather over the neighbour slots (no raster convolution or wrap); the world-scale fields (the
+precipitation proxy runs along parallels on a lat-lon grid of 4 N columns sampled from the base cube, then back
+to the cube) and the physics (terrain_sandbox.exe --face-cells) run on the cube; the maps are drawn from the exe's
+lat-lon export (cube.export_columns, default 4 k N; bilinear for continuous fields, nearest for masks, codes, the
+discharge and the lakes). A cube domain saves its arrays as <domain>-<name>-native.npy ((6, N_d, N_d)) and the
+elevations also as the lat-lon export <domain>-<name>.npy, so the lat-lon measurement scripts read them as before.
+Windows on a cube base are W2-SB2; with a cube base and cube.enabled false the sandbox runs on its lat-lon export.
+
 Config groups: domains, seafloor, warp, structure, zones, relief, coast, micro, uplands, hardness, platform, filter,
 physics, sea_level, history, glacial, precipitation, lakes, rivers, render, nesting.
 platform (roadmap T1 v19): a tectonic stability field (0 to 1) and provinces (oceanic, shield, platform, sedimentary
@@ -110,7 +134,8 @@ reads its parent's arrays from the same run's directory, or from --parent-run LA
 
   uv run python scripts/sandbox/terrain_sandbox.py --label try1 [--config FILE] [--set group.key=value ...]
       [--domains global,A,B] [--no-physics] [--parent-run LABEL]
-Writes out/scratch/sandbox/<label>/: index.html, the PNGs, config.json (the values used) and timings.
+Writes out/scratch/sandbox/<label>/ (a label that is an absolute path is that directory): index.html, the PNGs,
+config.json (the values used) and timings.
 """
 import argparse
 import copy
@@ -137,13 +162,17 @@ from uwtools.palettes import palette_rgb  # noqa: E402
 from validation import surface_elevation  # noqa: E402
 from maps import hillshade, shade_factor, terrain_base  # noqa: E402
 
+import cube_domain  # noqa: E402
 import erosion_filter  # noqa: E402
 import nesting  # noqa: E402
 import overlays  # noqa: E402
 
 DEFAULT_CONFIG = ROOT / 'configs' / 'sandbox' / 'terrain.json'
 PHYSICS = ROOT / 'out' / 'build' / 'headless' / 'bin' / 'Release' / 'terrain_sandbox.exe'
-NOISE_STD = 0.22  # standard deviation of one octave of the gradient noise below, measured
+NOISE_STD = 0.22  # standard deviation of one octave of the 2-D gradient noise below, measured
+# fbm's divisor for the 3-D gradient noise: one octave's standard deviation is 0.191 against the 2-D noise's 0.176
+# (both measured on 2e6 random points, seeds 1, 7, 131), so 0.22 x 0.191 / 0.176 keeps every fbm's spread as it was.
+NOISE_STD3 = 0.239
 
 
 # ---------------------------------------------------------------- configuration
@@ -184,40 +213,154 @@ def preset_overrides(names):
 
 class Domain:
     """A grid of fine cells in global-cell units: x east from the date line, y south from the north pole;
-    cell centres at (column + 0.5) / k. km: kilometres per global cell (east-west at the equator and
-    north-south alike on a cell-centred W x W/2 grid)."""
+    cell centres at (column + 0.5) / k, the column and row counted from the date line and the north pole at the
+    domain's resolution (integers, so a cell's position is the same in every domain of its k). km: kilometres per
+    global cell (east-west at the equator and north-south alike on a cell-centred W x W/2 grid)."""
+
+    kind = 'latlon'
 
     def __init__(self, name, columns, rows, x0, y0, k, world_columns, world_rows, radius_km, crop=None,
                  exaggeration=10.0, physics=None):
         self.name, self.k = name, k
         self.columns, self.rows = columns, rows
-        self.x = x0 + (np.arange(columns) + 0.5) / k
-        self.y = y0 + (np.arange(rows) + 0.5) / k
+        self.column0, self.row0 = int(round(x0 * k)), int(round(y0 * k))
+        self.x = (self.column0 + np.arange(columns) + 0.5) / k
+        self.y = (self.row0 + np.arange(rows) + 0.5) / k
         self.world_columns, self.world_rows = world_columns, world_rows
         self.cell_km = 2.0 * math.pi * radius_km / world_columns
         self.fine_km = self.cell_km / k
         self.radius_km = radius_km
         self.north_deg = 90.0 - y0 * 180.0 / world_rows
         self.pixel_deg = 180.0 / world_rows / k
-        latitude = self.north_deg - (np.arange(rows) + 0.5) * self.pixel_deg
-        self.coslat = np.maximum(np.cos(np.radians(latitude)), 1e-3)
+        self.latitude_deg = 90.0 - (self.row0 + np.arange(rows) + 0.5) * (180.0 / (world_rows * k))
+        self.longitude_deg = -180.0 + (self.column0 + np.arange(columns) + 0.5) * (360.0 / (world_columns * k))
+        self.coslat = np.maximum(np.cos(np.radians(self.latitude_deg)), 1e-3)
         self.crop = crop  # (row0, row1, column0, column1) of the kept window, or None
         self.whole = crop is None
         self.exaggeration = exaggeration
         self.physics = physics or {}
+        self._points = None
 
-    def mesh_km(self):
-        """Planar kilometres of every cell (equirectangular: east-west at the equator's scale)."""
-        return np.meshgrid(self.x * self.cell_km, self.y * self.cell_km)
+    def points(self):
+        """The cells' unit vectors times the radius, km (3, rows, columns): the noise's positions."""
+        if self._points is None:
+            latitude, longitude = np.radians(self.latitude_deg)[:, None], np.radians(self.longitude_deg)[None, :]
+            cl, sl = np.cos(latitude), np.sin(latitude)
+            self._points = self.radius_km * np.stack([cl * np.cos(longitude), cl * np.sin(longitude),
+                                                      sl * np.ones_like(longitude)])
+        return self._points
+
+    def frame(self):
+        """Local unit east and north tangents (3, rows, columns)."""
+        latitude, longitude = np.radians(self.latitude_deg)[:, None], np.radians(self.longitude_deg)[None, :]
+        so, co, sl, cl = np.sin(longitude), np.cos(longitude), np.sin(latitude), np.cos(latitude)
+        east = np.stack([-so * np.ones_like(sl), co * np.ones_like(sl), np.zeros((self.rows, self.columns))])
+        north = np.stack([-sl * co, -sl * so, cl * np.ones_like(co)])
+        return east, north
+
+    def abs_latitude(self):
+        return np.abs(self.latitude_deg)[:, None]
+
+    def area_km2(self):
+        """Fine-cell areas as the sandbox measures them (fine_km^2 cos latitude)."""
+        return self.fine_km ** 2 * self.coslat[:, None] * np.ones((1, self.columns))
 
 
-def make_domains(config, bundle, names):
+# ---------------------------------------------------------------- grid operations of either kind of domain
+# A lat-lon domain uses the raster calls the sandbox always had; a cube domain the gathers of cube_domain.CubeGrid.
+
+EIGHT = np.ones((3, 3))
+
+
+def grid_label(domain, mask):
+    if domain.kind == 'cube':
+        return domain.grid.label(mask)
+    return ndimage.label(mask, structure=EIGHT)
+
+
+def connected_sea(domain, water, seed):
+    """The cells of `water` 8-connected to a cell of `seed` within it."""
+    labels, _ = grid_label(domain, water)
+    touching = np.unique(labels[(labels > 0) & seed])
+    return np.isin(labels, touching[touching > 0])
+
+
+def shore_distance_km(domain, mask, reach_km):
+    """Distance (km) from each cell to the other side of `mask`'s boundary (both sides), as the raster code's
+    distance transforms; on a cube by the slot paths up to 4 reach_km (beyond it infinite: the terms fade out)."""
+    if domain.kind == 'cube':
+        inside = domain.grid.distance_km(~mask, cutoff_km=4.0 * reach_km)
+        outside = domain.grid.distance_km(mask, cutoff_km=4.0 * reach_km)
+        return np.where(mask, inside, outside)
+    distance = np.where(mask, ndimage.distance_transform_edt(mask), ndimage.distance_transform_edt(~mask))
+    return distance * domain.fine_km
+
+
+def displaced(domain, values, points, east_cells, south_cells, order=1):
+    """values at the cells moved by (east_cells, south_cells) fine cells: map_coordinates on lat-lon (columns
+    wrapped on the whole world), the bilinear stencil on a cube (in km on the tangent plane)."""
+    if domain.kind == 'cube':
+        return domain.grid.resample(values, points, east_cells * domain.fine_km, -south_cells * domain.fine_km)
+    rows, columns = np.indices(values.shape, dtype=float)
+    mode = 'grid-wrap' if domain.whole else 'nearest'
+    return ndimage.map_coordinates(values, [rows + south_cells, columns + east_cells], order=order, mode=mode)
+
+
+def surface_gradient(domain, values):
+    """(d/d east, d/d south) per km of a domain field: central differences on lat-lon (true km: dx = dy cos
+    latitude), least squares over the slots on a cube."""
+    if domain.kind == 'cube':
+        ge, gn = domain.grid.gradient(values)
+        return ge, -gn
+    gs, ge = np.gradient(values)
+    return ge / (domain.fine_km * domain.coslat[:, None]), gs / domain.fine_km
+
+
+def filter_extreme(domain, values, size, which):
+    """minimum or maximum over size x size cells (mode nearest; wrapped east-west on the whole world)."""
+    if domain.kind == 'cube':
+        return getattr(domain.grid, which)(values, size // 2)
+    function = ndimage.minimum_filter if which == 'minimum' else ndimage.maximum_filter
+    return function(values, size=size, mode=('nearest', 'wrap') if domain.whole else 'nearest')
+
+
+def domain_flood(domain, elevation, sea):
+    if domain.kind == 'cube':
+        return domain.grid.priority_flood(elevation, sea)
+    return priority_flood(elevation, sea, domain.whole)
+
+
+def world_smooth(world, field, sigma):
+    """A world field smoothed over sigma world cells: rows clamped, columns wrapped; on a cube base over the slots."""
+    if world.get('grid') is not None:
+        return world['grid'].smooth(field, sigma)
+    return ndimage.gaussian_filter(field, sigma, mode=('nearest', 'wrap'))
+
+
+def cube_on(config, bundle):
+    """Whether the global domain runs on the cube (cube.enabled; it needs a cube base bundle)."""
+    enabled = bool(config.get('cube', {}).get('enabled', False))
+    if enabled and bundle.grid_kind != 'cube':
+        raise ValueError(f'cube.enabled needs a cube base bundle; {config["base_bundle"]} is {bundle.grid_kind}')
+    return enabled
+
+
+def make_domains(config, bundle, names, directory=None):
     radius_km = float(bundle.manifest.get('parameters', {}).get('world.body.radius_km', 6371.0))
     W, H = bundle.columns, bundle.rows
     domains = []
     for name in names:
         spec = config['domains'][name]
-        if name == 'global':
+        if name == 'global' and cube_on(config, bundle):
+            k = spec['columns'] // W
+            grid = cube_domain.cube_table(PHYSICS, bundle.face_cells * k, radius_km, directory)
+            domains.append(cube_domain.CubeDomain(name, grid, bundle.face_cells, radius_km,
+                                                  exaggeration=spec.get('exaggeration', 10.0),
+                                                  physics=config['physics']['global'],
+                                                  smoothing=config['cube'].get('sample_smoothing', 0.41)))
+        elif cube_on(config, bundle):
+            raise ValueError(f'{name}: windows on a cube base are W2-SB2; run --domains global')
+        elif name == 'global':
             k = spec['columns'] // W
             domains.append(Domain(name, W * k, H * k, 0.0, 0.0, k, W, H, radius_km,
                                   exaggeration=spec.get('exaggeration', 10.0), physics=config['physics']['global']))
@@ -418,23 +561,23 @@ def nested_start(domain, world, config, parent, seed):
     # and the oriented bank, so the directionality is the parent's.
     started = time.perf_counter()
     stages = fields['stages']
-    x, y = fields['coords']
+    warped_points = fields['coords']
     theta, alignment = stages['strike']
     _, core = stages['zones']
     relief, structure = config['relief'], config['structure']
     band = band_spec(config, domain.cell_km / pk)
     relief_alignment = alignment * (1 - config['zones']['core_isotropy'] * core)
     whole = stages['relief_noise']
-    part = oriented_fbm(x, y, theta, relief_alignment, {**relief, **structure, **band}, seed + 20, domain)
+    part = oriented_fbm(warped_points, theta, relief_alignment, {**relief, **structure, **band}, seed + 20, domain)
     mix = lambda n: (1 - relief['ridged']) * n + relief['ridged'] * ridged(n) / 0.6  # noqa: E731
     detail = fields['amplitude'] * (mix(whole) - mix(whole - part)) * fade
     surface = prolonged + detail
     coast = config['coast']
     if coast['amplitude_m'] > 0:
         fraction = coast.get('warp_fraction', 1.0)
-        (xp, yp) = fields['plain']
-        xc, yc = (x, y) if fraction == 1.0 else (xp + fraction * (x - xp), yp + fraction * (y - yp))
-        surface = surface + coast_detail(domain, fields['base'], surface, xc, yc, fields['amplitude'],
+        plain = fields['plain']
+        coast_points = warped_points if fraction == 1.0 else plain + fraction * (warped_points - plain)
+        surface = surface + coast_detail(domain, fields['base'], surface, coast_points, fields['amplitude'],
                                          fields['erodibility'], {**coast, **band}, seed, displacement_fade=fade)
     land0 = ~sea0
     info['detail_rms_m'] = {'relief_land': float(np.sqrt((detail[land0] ** 2).mean())) if land0.any() else 0.0,
@@ -654,43 +797,71 @@ def nested_after_physics(domain, fields, elevation, sea, discharge, info):
 # ---------------------------------------------------------------- sampling the world
 
 def bspline_matrix(positions, size, wrap):
-    """Rows of cubic B-spline weights from `size` cell-centred samples to `positions` (cell units)."""
+    """The cubic B-spline taps from `size` cell-centred samples to `positions` (cell units): (indices, weights),
+    each four rows of positions.size (the indices wrapped or clamped)."""
     t = positions - 0.5
     i0 = np.floor(t).astype(np.int64)
     f = t - i0
-    weights = [(1 - f) ** 3 / 6, (3 * f ** 3 - 6 * f ** 2 + 4) / 6, (-3 * f ** 3 + 3 * f ** 2 + 3 * f + 1) / 6, f ** 3 / 6]
-    matrix = np.zeros((positions.size, size))
-    for offset, w in zip(range(-1, 3), weights):
-        index = i0 + offset
-        index = np.mod(index, size) if wrap else np.clip(index, 0, size - 1)
-        np.add.at(matrix, (np.arange(positions.size), index), w)
-    return matrix
+    weights = np.stack([(1 - f) ** 3 / 6, (3 * f ** 3 - 6 * f ** 2 + 4) / 6, (-3 * f ** 3 + 3 * f ** 2 + 3 * f + 1) / 6,
+                        f ** 3 / 6])
+    index = i0[None, :] + np.arange(-1, 3)[:, None]
+    index = np.mod(index, size) if wrap else np.clip(index, 0, size - 1)
+    return index, weights
 
 
 def sample(field, domain, mx=None, my=None):
-    mx = bspline_matrix(domain.x, domain.world_columns, True) if mx is None else mx
-    my = bspline_matrix(domain.y, domain.world_rows, False) if my is None else my
-    return my @ np.asarray(field, dtype=np.float64) @ mx.T
+    """A world field at the domain's cells: the separable cubic B-spline, each value the same four-by-four sum in
+    the same order whatever the domain (a cell shared by two windows gets the same bits)."""
+    (ix, wx) = bspline_matrix(domain.x, domain.world_columns, True) if mx is None else mx
+    (iy, wy) = bspline_matrix(domain.y, domain.world_rows, False) if my is None else my
+    field = np.asarray(field, dtype=np.float64)
+    along = wx[0] * field[:, ix[0]] + wx[1] * field[:, ix[1]] + wx[2] * field[:, ix[2]] + wx[3] * field[:, ix[3]]
+    return wy[0][:, None] * along[iy[0]] + wy[1][:, None] * along[iy[1]] + wy[2][:, None] * along[iy[2]] + \
+        wy[3][:, None] * along[iy[3]]
 
 
-def world_fields(bundle):
-    elevation = surface_elevation(bundle)
-    sea = bundle.load('geosphere.base_elevation').astype(float) <= float(bundle.scalar('geosphere.sea_level'))
+def make_sampler(domain, world):
+    """A function from a world field to the domain's cells: the B-spline on lat-lon, the cube's sampler on a cube."""
+    if domain.kind == 'cube':
+        return domain.sampler(world['grid'])
+    mx = bspline_matrix(domain.x, domain.world_columns, True)
+    my = bspline_matrix(domain.y, domain.world_rows, False)
+    return lambda field: sample(field, domain, mx, my)  # noqa: E731
+
+
+def world_fields(bundle, native=False):
+    """The sandbox's world fields: the lat-lon view (Bundle.load) or, with native, a cube bundle's native cells
+    (Bundle.load_native, flattened in id order) with its cell table as world['grid'] (cube_domain.CubeGrid)."""
+    load = (lambda name: bundle.load_native(name).reshape(-1)) if native else bundle.load  # noqa: E731
+    if native:
+        base = load('geosphere.base_elevation').astype(float)
+        sea_level = float(bundle.scalar('geosphere.sea_level'))
+        volcano = np.abs(load('geosphere.volcano').astype(float))
+        land = base + np.maximum(volcano, load('geosphere.mountain_height')) + load('geosphere.extra_elevation') + \
+            load('geosphere.crater_rims') + load('geosphere.crater_centres')
+        ocean = base + load('geosphere.ocean_ridge_height') + volcano
+        elevation = np.where(base <= sea_level, ocean, land) - sea_level  # validation.surface_elevation's formula
+    else:
+        elevation = surface_elevation(bundle)
+    sea = load('geosphere.base_elevation').astype(float) <= float(bundle.scalar('geosphere.sea_level'))
     # The strain as the fold fabric reads it: the shortening (m) over the native cell width 2 pi R / W.
     radius_m = float(bundle.manifest.get('parameters', {}).get('world.body.radius_km', 6371.0)) * 1000.0
-    strain = bundle.load('geosphere.shortening').astype(float) / (2.0 * math.pi * radius_m / bundle.columns)
-    direction = bundle.load('geosphere.shortening_direction').astype(float)
-    uplift = bundle.load('geosphere.rock_uplift_rate').astype(float) if bundle.has('geosphere.rock_uplift_rate') else \
+    strain = load('geosphere.shortening').astype(float) / (2.0 * math.pi * radius_m / bundle.columns)
+    direction = load('geosphere.shortening_direction').astype(float)
+    uplift = load('geosphere.rock_uplift_rate').astype(float) if bundle.has('geosphere.rock_uplift_rate') else \
         np.zeros_like(elevation)
-    optional = lambda name, dtype: bundle.load(f'geosphere.{name}').astype(dtype) if bundle.has(f'geosphere.{name}') \
+    optional = lambda name, dtype: load(f'geosphere.{name}').astype(dtype) if bundle.has(f'geosphere.{name}') \
         else np.zeros(elevation.shape, dtype=dtype)  # noqa: E731
-    return {'elevation': elevation, 'sea': sea, 'shortening': np.maximum(strain, 0.0), 'direction': direction,
-            'uplift': uplift, 'sediment': bundle.load('geosphere.sediment').astype(float),
-            'continental_crust': bundle.load('geosphere.continental_crust').astype(float),
-            'crust_class': bundle.load('geosphere.crust_class'), 'crust_age': bundle.load('geosphere.crust_age').astype(float),
-            'boundary_type': bundle.load('geosphere.boundary_type'),
-            'accumulated_strain': optional('accumulated_strain', float),
-            'deforming_region_type': optional('deforming_region_type', np.uint8)}
+    world = {'elevation': elevation, 'sea': sea, 'shortening': np.maximum(strain, 0.0), 'direction': direction,
+             'uplift': uplift, 'sediment': load('geosphere.sediment').astype(float),
+             'continental_crust': load('geosphere.continental_crust').astype(float),
+             'crust_class': load('geosphere.crust_class'), 'crust_age': load('geosphere.crust_age').astype(float),
+             'boundary_type': load('geosphere.boundary_type'),
+             'accumulated_strain': optional('accumulated_strain', float),
+             'deforming_region_type': optional('deforming_region_type', np.uint8), 'grid': None}
+    if native:
+        world['grid'] = cube_domain.CubeGrid.from_bundle(bundle)
+    return world
 
 
 # ---------------------------------------------------------------- noise
@@ -731,15 +902,67 @@ def band_weight(wavelength_km, spec):
     return 1.0 - float(np.clip((wavelength_km / parent_km - min_cells) / min_cells, 0.0, 1.0))
 
 
-def fbm(x, y, spec, seed, domain, stretch=1.0):
-    """Fractal sum with unit standard deviation (about); x across and y along a stretch of `stretch`.
-    Each octave is rotated by a fixed irrational angle so no lattice direction repeats. With
-    spec['band_parent_km'] (a nested level, rule B) only the level's band of octaves is summed (band_weight), with
-    the normalisation of the whole sum on this grid, so the band is the part of this grid's noise the parent lacks."""
-    total = np.zeros_like(x)
+cell_hash3 = erosion_filter.cell_hash3  # three values in [-1, 1) per 3-D lattice cell
+
+
+def gradient_noise3(u, seed):
+    """3-D gradient noise at lattice positions u (3, ...) with a quintic fade; standard deviation NOISE_STD3."""
+    cells = np.floor(u)
+    f = (u - cells).astype(np.float32)
+    cells = cells.astype(np.int64)
+    fade = f * f * f * (f * (f * 6 - 15) + 10)
+    corners = {}
+    for cx in (0, 1):
+        for cy in (0, 1):
+            for cz in (0, 1):
+                gx, gy, gz = cell_hash3(cells[0] + cx, cells[1] + cy, cells[2] + cz, seed)
+                corners[cx, cy, cz] = gx * (f[0] - cx) + gy * (f[1] - cy) + gz * (f[2] - cz)
+    lerp = lambda a, b, t: a + t * (b - a)  # noqa: E731
+    x00 = lerp(corners[0, 0, 0], corners[1, 0, 0], fade[0])
+    x10 = lerp(corners[0, 1, 0], corners[1, 1, 0], fade[0])
+    x01 = lerp(corners[0, 0, 1], corners[1, 0, 1], fade[0])
+    x11 = lerp(corners[0, 1, 1], corners[1, 1, 1], fade[0])
+    return lerp(lerp(x00, x10, fade[1]), lerp(x01, x11, fade[1]), fade[2])
+
+
+def octave_rotation(octave):
+    """A fixed rotation per octave (the golden angle times the octave about a fixed irrational axis), so no
+    lattice direction repeats between octaves."""
+    axis = np.array([0.3623, 0.4806, 0.7986])
+    axis = axis / np.linalg.norm(axis)
+    angle = 2.399963 * octave
+    k = np.array([[0.0, -axis[2], axis[1]], [axis[2], 0.0, -axis[0]], [-axis[1], axis[0], 0.0]])
+    return np.eye(3) + math.sin(angle) * k + (1.0 - math.cos(angle)) * (k @ k)
+
+
+def bank_axes(count):
+    """The bank's fixed 3-D axes for a 2-D bank of `count` orientations: max(count, round(0.75 count^2)) points of a
+    Fibonacci set over the upper half sphere (an axis and its opposite are one), so the spacing of the 2-D bank's
+    pi / count holds in every direction of every tangent plane."""
+    members = max(count, int(round(0.75 * count * count)))
+    index = np.arange(members) + 0.5
+    z = index / members
+    phi = index * 2.399963229728653
+    r = np.sqrt(1.0 - z * z)
+    return np.stack([r * np.cos(phi), r * np.sin(phi), z], axis=1)
+
+
+def fbm(points, spec, seed, domain, stretch=1.0, axis=None):
+    """Fractal sum with unit standard deviation (about) at points (3, ...) in km: the cells' unit vectors times
+    the radius, or positions moved from them. Each isotropic octave is rotated by a fixed rotation (octave_rotation);
+    with an axis (a unit 3-vector) and a stretch, features are stretched along the axis by `stretch` (the coordinate
+    along it divided by the stretch; octaves shifted, not rotated). With spec['band_parent_km'] (a nested level,
+    rule B) only the level's band of octaves is summed (band_weight), with the normalisation of the whole sum on this
+    grid, so the band is the part of this grid's noise the parent lacks."""
+    points = np.asarray(points, dtype=np.float64)
+    total = np.zeros(points.shape[1:])
     norm = 0.0
     wavelength, amplitude = spec['wavelength_km'], 1.0
     banded = spec.get('band_parent_km') is not None
+    if axis is not None:
+        a = np.asarray(axis, dtype=np.float64)
+        along = (a[0] * points[0] + a[1] * points[1] + a[2] * points[2]) * (1.0 / stretch - 1.0)
+        points = np.stack([points[0] + along * a[0], points[1] + along * a[1], points[2] + along * a[2]])
     for octave in range(spec['octaves']):
         fade = octave_fade(wavelength, domain, spec.get('min_cells', 2.5))
         if banded and fade > 0.0 and band_weight(wavelength, spec) <= 0.0:
@@ -748,43 +971,54 @@ def fbm(x, y, spec, seed, domain, stretch=1.0):
             amplitude *= spec.get('gain', 0.5)
             continue
         if fade > 0.0:
-            if stretch == 1.0:  # each octave rotated by the golden angle
-                angle = 2.399963 * octave
-                ca, sa = math.cos(angle), math.sin(angle)
-                u, v = (ca * x - sa * y) / wavelength, (sa * x + ca * y) / wavelength
-            else:  # a stretched octave keeps the stretch's axes: shifted, not rotated
-                u, v = x / wavelength + 0.37 * octave, y / (wavelength * stretch) + 0.61 * octave
-            if banded:
-                total += amplitude * fade * band_weight(wavelength, spec) * gradient_noise(u, v, seed * 131 + octave)
-            else:
-                total += amplitude * fade * gradient_noise(u, v, seed * 131 + octave)
+            if axis is None:
+                q = octave_rotation(octave) / wavelength
+                u = np.stack([q[r, 0] * points[0] + q[r, 1] * points[1] + q[r, 2] * points[2] for r in range(3)])
+            else:  # a stretched octave keeps the stretch's axis: shifted, not rotated
+                u = np.stack([points[0] / wavelength + 0.37 * octave, points[1] / wavelength + 0.61 * octave,
+                              points[2] / wavelength + 0.83 * octave])
+            weight = amplitude * fade * (band_weight(wavelength, spec) if banded else 1.0)
+            total += weight * gradient_noise3(u, seed * 131 + octave)
         norm += (amplitude * fade) ** 2
         wavelength /= spec.get('lacunarity', 2.0)
         amplitude *= spec.get('gain', 0.5)
-    return total / (NOISE_STD * math.sqrt(norm)) if norm > 0 else total
+    return total / (NOISE_STD3 * math.sqrt(norm)) if norm > 0 else total
 
 
-def oriented_fbm(x, y, theta, alignment, spec, seed, domain):
-    """Isotropic fBm blended into a bank of fBm stretched along the strike: bank member b has its across-
-    strike axis at phi_b = b pi / B, weight max(0, cos 2(theta - phi_b))^sharpness; `alignment` 0..1 mixes
-    the isotropic sum into the bank's. theta: the shortening axis (radians from east toward south)."""
-    isotropic = fbm(x, y, spec, seed, domain)
+def strike_tangent(domain, theta):
+    """The unit tangent along the strike (3, ...) of a shortening axis theta (radians from east toward south)."""
+    east, north = domain.frame()
+    return -np.sin(theta) * east - np.cos(theta) * north
+
+
+def axis_tangent(domain, theta):
+    """The unit tangent along theta itself (3, ...), radians from east toward south."""
+    east, north = domain.frame()
+    return np.cos(theta) * east - np.sin(theta) * north
+
+
+def oriented_fbm(points, theta, alignment, spec, seed, domain):
+    """Isotropic fBm blended into a bank of fBm stretched along the strike: bank member b is stretched along its
+    fixed axis a_b (bank_axes of the config's orientations), weight max(0, 2 (s . a_b)^2 - 1)^sharpness with s the
+    strike's unit tangent (the 2-D bank's max(0, cos 2(theta - phi_b))^sharpness); `alignment` 0..1 mixes the
+    isotropic sum into the bank's. theta: the shortening axis (radians from east toward south)."""
+    isotropic = fbm(points, spec, seed, domain)
     count = spec.get('orientations', 6)
     if count == 0 or not np.any(alignment > 0):
         return isotropic
-    bank = np.zeros_like(x)
-    weights = np.zeros_like(x)
+    points = np.asarray(points, dtype=np.float64)
+    strike = strike_tangent(domain, theta)
+    bank = np.zeros(points.shape[1:])
+    weights = np.zeros(points.shape[1:])
     aligned = alignment > 0
-    for b in range(count):
-        phi = math.pi * b / count
-        w = np.maximum(0.0, np.cos(2.0 * (theta - phi))) ** spec.get('sharpness', 4.0)
+    for b, a in enumerate(bank_axes(count)):
+        cosine = a[0] * strike[0] + a[1] * strike[1] + a[2] * strike[2]
+        w = np.maximum(0.0, 2.0 * cosine * cosine - 1.0) ** spec.get('sharpness', 4.0)
         active = aligned & (w > 1e-3)  # evaluated only where the member carries weight
         if not np.any(active):
             continue
-        xa, ya = x[active], y[active]
-        across = math.cos(phi) * xa + math.sin(phi) * ya
-        along = -math.sin(phi) * xa + math.cos(phi) * ya
-        bank[active] += w[active] * fbm(across, along, spec, seed * 7 + 101 + b, domain, stretch=spec.get('stretch', 4.0))
+        bank[active] += w[active] * fbm(points[:, active], spec, seed * 7 + 101 + b, domain,
+                                        stretch=spec.get('stretch', 4.0), axis=a)
         weights[active] += w[active] ** 2
     bank = bank / np.sqrt(np.maximum(weights, 1e-12))
     a = np.clip(alignment, 0.0, 1.0)
@@ -801,49 +1035,46 @@ def ridged(n):
 def procedural(domain, world, config, seed):
     timings = {}
     started = time.perf_counter()
-    mx = bspline_matrix(domain.x, domain.world_columns, True)
-    my = bspline_matrix(domain.y, domain.world_rows, False)
-    base = sample(world['elevation'], domain, mx, my)
-    strain = sample(world['shortening'], domain, mx, my)
+    sampler = make_sampler(domain, world)
+    base = sampler(world['elevation'])
+    strain = sampler(world['shortening'])
     doubled = world['shortening'] * np.exp(2j * world['direction'])
-    doubled = sample(doubled.real, domain, mx, my) + 1j * sample(doubled.imag, domain, mx, my)
+    doubled = sampler(doubled.real) + 1j * sampler(doubled.imag)
     theta = 0.5 * np.angle(doubled)
     coherence = np.abs(doubled) / np.maximum(strain, 1e-9)
     structure = config['structure']
     alignment = np.clip(strain / structure['strain_full'], 0.0, 1.0) * np.clip(coherence, 0.0, 1.0)
-    uplift = sample(world['uplift'], domain, mx, my)
-    rain = np.maximum(sample(world['precipitation'], domain, mx, my), 0.0)
-    sea_seed = sample(world['sea'].astype(float), domain, mx, my) > 0.5
+    uplift = sampler(world['uplift'])
+    rain = np.maximum(sampler(world['precipitation']), 0.0)
+    sea_seed = sampler(world['sea'].astype(float)) > 0.5
     plain_base = base
     ocean_age, spreading = None, None
     if config['seafloor'].get('shelf', {}).get('enabled', False):
-        base = shelf_profile(base, np.clip(sample(world['ocean']['oceanic'], domain, mx, my), 0.0, 1.0),
-                             config['seafloor']['shelf'])
+        base = shelf_profile(base, np.clip(sampler(world['ocean']['oceanic']), 0.0, 1.0), config['seafloor']['shelf'])
     if config['seafloor']['enabled']:
-        base, ocean_age, spreading = seafloor(domain, world, world['ocean'], base, mx, my, config['seafloor'], seed)
+        base, ocean_age, spreading = seafloor(domain, world, world['ocean'], base, sampler, config['seafloor'], seed)
     timings['base'] = time.perf_counter() - started
 
     started = time.perf_counter()
-    x, y = domain.mesh_km()
+    plain = domain.points()  # the cells' unit vectors times the radius, km: every noise's positions
     # The warp reads the strain smoothed over warp.smoothing_cells world cells: a drag that changes over one
     # 156 km cell folds the grid over itself (v4's loops along the belts).
     sigma = config['warp']['smoothing_cells']
-    smooth = lambda field: ndimage.gaussian_filter(field, sigma, mode=('nearest', 'wrap'))  # noqa: E731
-    warp_strain = sample(smooth(world['shortening']), domain, mx, my)
+    warp_strain = sampler(world_smooth(world, world['shortening'], sigma))
     warp_doubled = world['shortening'] * np.exp(2j * world['direction'])
-    warp_doubled = sample(smooth(warp_doubled.real), domain, mx, my) + 1j * sample(smooth(warp_doubled.imag), domain, mx, my)
+    warp_doubled = sampler(world_smooth(world, warp_doubled.real, sigma)) + \
+        1j * sampler(world_smooth(world, warp_doubled.imag, sigma))
     warp_alignment = np.clip(warp_strain / structure['strain_full'], 0.0, 1.0) * \
         np.clip(np.abs(warp_doubled) / np.maximum(warp_strain, 1e-9), 0.0, 1.0)
-    x0, y0 = x, y  # the plain coordinates, before the warp
-    x, y = warped(x, y, 0.5 * np.angle(warp_doubled), warp_alignment, config['warp'], seed, domain)
-    ratio, long_axis = warp_stretch(domain, x, y)
-    stages = {'base': plain_base, 'seafloor': base, 'warp': (x, y), 'stretch': (ratio, long_axis),
+    points = warped(plain, 0.5 * np.angle(warp_doubled), warp_alignment, config['warp'], seed, domain)
+    ratio, long_axis = warp_stretch(domain, points)
+    stages = {'base': plain_base, 'seafloor': base, 'warp': points, 'stretch': (ratio, long_axis),
               'strike': (theta, alignment), 'ocean_age': ocean_age, 'spreading': spreading}
     # The belt's zones (multiscale plan S5.5): the foreland (moderate strain) is folded and layered, the core
     # (high strain or thick crust) is crystalline: homogeneous rock and a relief stretched less along the
     # strike, so its rivers can branch (dendritic) instead of following bands.
     zones = config['zones']
-    crust = sample(world['continental_crust'], domain, mx, my)
+    crust = sampler(world['continental_crust'])
     foreland = smoothstep(strain, *zones['foreland_strain']) * (1 - smoothstep(strain, *zones['core_strain']))
     core = np.maximum(smoothstep(strain, *zones['core_strain']),
                       smoothstep(crust, *zones['core_crust_m']) * smoothstep(strain, *zones['foreland_strain']))
@@ -851,7 +1082,7 @@ def procedural(domain, world, config, seed):
     stages['zones'] = (foreland, core)
     relief = config['relief']
     relief_alignment = alignment * (1 - zones['core_isotropy'] * core)
-    noise = oriented_fbm(x, y, theta, relief_alignment, {**relief, **structure}, seed + 20, domain)
+    noise = oriented_fbm(points, theta, relief_alignment, {**relief, **structure}, seed + 20, domain)
     stages['relief_noise'] = noise  # before the ridged share: a nested level splits it by band (nested_start)
     noise = (1 - relief['ridged']) * noise + relief['ridged'] * ridged(noise) / 0.6
     amplitude = relief['base_m'] + relief['elevation_fraction'] * np.maximum(base, 0.0) + \
@@ -866,21 +1097,21 @@ def procedural(domain, world, config, seed):
     platform = config.get('platform', {'enabled': False})
     stability, province = None, None
     if platform['enabled']:
-        stability, province = provinces_domain(domain, world['provinces'], platform, x, y, mx, my, seed)
+        stability, province = provinces_domain(domain, world['provinces'], platform, points, sampler, seed)
         amplitude = amplitude * (1.0 - platform['relief_damp'] * stability * (1.0 - wet))
         stages['provinces'] = (stability, province)
     surface = base + amplitude * noise
     stages['relief'] = surface
     uplands = config['uplands']
     if uplands['lift_m'] > 0:  # continental interiors raised in patches: a non-negative lift, none at the coast
-        land_share = sample(ndimage.gaussian_filter((~world['sea']).astype(float), uplands['coast_sigma_cells'],
-                                                    mode=('nearest', 'wrap')), domain, mx, my)
+        land_share = sampler(world_smooth(world, (~world['sea']).astype(float), uplands['coast_sigma_cells']))
         inland = np.clip((land_share - 0.5) * 2.0, 0.0, 1.0)
-        large = fbm(x, y, uplands, seed + 50, domain)
+        large = fbm(points, uplands, seed + 50, domain)
         surface = surface + uplands['lift_m'] * inland * np.clip(0.5 + 0.5 * large, 0.0, 1.5) * \
             smoothstep(base, 0.0, 300.0)  # faded in above the coast, no step at the base's zero contour
     stages['uplands'] = surface
-    erodibility = hardness(domain, world, config['hardness'], structure, x, y, theta, alignment * foreland, mx, my, seed)
+    erodibility = hardness(domain, world, config['hardness'], structure, points, theta, alignment * foreland, sampler,
+                           seed)
     stages['hardness'] = erodibility
     # The physics' erodibility on stable ground (old basement and flat-lying cover): x erodibility_factor at full
     # stability, so the rivers do not dissect the platforms into badlands. The drawn hardness and the coast and filter
@@ -891,11 +1122,12 @@ def procedural(domain, world, config, seed):
         # coast.warp_fraction: the share of the warp the coast term's noise follows (1: all, v14; less: its
         # features keep the trend but vary more along a strike-parallel shore).
         fraction = config['coast'].get('warp_fraction', 1.0)
-        xc, yc = (x, y) if fraction == 1.0 else (x0 + fraction * (x - x0), y0 + fraction * (y - y0))
-        surface = surface + coast_detail(domain, base, surface, xc, yc, amplitude, erodibility, config["coast"], seed)
+        coast_points = points if fraction == 1.0 else plain + fraction * (points - plain)
+        surface = surface + coast_detail(domain, base, surface, coast_points, amplitude, erodibility, config["coast"],
+                                         seed)
     micro = config.get('micro', {'enabled': False})
     if micro['enabled'] and micro.get('when', 'after') == 'before':
-        surface = surface + micro_texture(domain, surface, sea_seed, x, y, x0, y0, ratio, micro, seed)
+        surface = surface + micro_texture(domain, surface, sea_seed, points, plain, ratio, micro, seed)
     stages['coast'] = surface
     stages['precipitation'] = rain
     timings['noise'] = time.perf_counter() - started
@@ -904,14 +1136,11 @@ def procedural(domain, world, config, seed):
     filtered = surface
     spec = config['filter']
     if spec['enabled'] and spec.get('when', 'before') == 'before':
-        filtered = surface + erosion_pass(domain, surface, x, y, amplitude, erodibility, spec, seed)
+        filtered = surface + erosion_pass(domain, surface, points, amplitude, erodibility, spec, seed)
     stages['filter'] = filtered
     timings['filter'] = time.perf_counter() - started
 
-    land_or_low = filtered <= 0.0
-    labels, _ = ndimage.label(land_or_low, structure=np.ones((3, 3)))
-    sea_labels = np.unique(labels[(labels > 0) & sea_seed])
-    sea = np.isin(labels, sea_labels[sea_labels > 0])
+    sea = connected_sea(domain, filtered <= 0.0, sea_seed)
     pinned = np.zeros_like(sea)
     if not domain.whole:
         # The outer ring drains the window (sea at or below -1 m); the ring inside it is pinned at the lowest
@@ -936,7 +1165,7 @@ def procedural(domain, world, config, seed):
     noise_spec = relief_spec.get('fill_noise', {})
     fill_noise = None
     if noise_spec.get('amplitude_m', 0.0) > 0.0:
-        fill_noise = noise_spec['amplitude_m'] * fbm(x0, y0, noise_spec, seed + 90, domain)
+        fill_noise = noise_spec['amplitude_m'] * fbm(plain, noise_spec, seed + 90, domain)
     fill_stats = {}
     if relief_spec.get('fill_depressions', False):
         started = time.perf_counter()
@@ -947,20 +1176,21 @@ def procedural(domain, world, config, seed):
     stages['fill'] = filtered
     return {'base': base, 'surface': filtered, 'sea': sea, 'erodibility': erodibility, 'uplift': uplift,
             'physics_erodibility': physics_erodibility, 'stability': stability, 'province': province,
-            'strain': strain, 'stages': stages, 'precipitation': rain, 'coords': (x, y), 'amplitude': amplitude,
-            'pinned': pinned, 'warped': (x, y), 'plain': (x0, y0), 'ratio': ratio, 'fill_noise': fill_noise,
+            'strain': strain, 'stages': stages, 'precipitation': rain, 'coords': points, 'amplitude': amplitude,
+            'pinned': pinned, 'warped': points, 'plain': plain, 'ratio': ratio, 'fill_noise': fill_noise,
             'fill_stats': fill_stats}, timings
 
 
-def warp_stretch(domain, x, y):
-    """How the warp distorts the noise drawn on its coordinates: the singular values s1 >= s2 of its Jacobian
-    d(x', y') / d(x, y) (the planar kilometres of the grid against the warped ones). A noise feature of size L
-    appears L / s in the map, so the anisotropy is s1 / s2 and features are long along the right singular
-    vector of s2 (the map direction in which the warped coordinates change slowest). Returns (s1 / s2, the
-    long axis's angle from east toward south, radians)."""
-    dx_c, dx_r = np.gradient(x, axis=1) / domain.fine_km, np.gradient(x, axis=0) / domain.fine_km
-    dy_c, dy_r = np.gradient(y, axis=1) / domain.fine_km, np.gradient(y, axis=0) / domain.fine_km
-    p, q, r = dx_c ** 2 + dy_c ** 2, dx_r ** 2 + dy_r ** 2, dx_c * dx_r + dy_c * dy_r  # J^T J = [[p, r], [r, q]]
+def warp_stretch(domain, points):
+    """How the warp distorts the noise drawn on its positions: the singular values s1 >= s2 of its Jacobian
+    d(moved point) / d(east, south) (km per km on the tangent plane; 1 and 1 without a warp). A noise feature of
+    size L appears L / s in the map, so the anisotropy is s1 / s2 and features are long along the right singular
+    vector of s2 (the map direction in which the moved positions change slowest). Returns (s1 / s2, the long
+    axis's angle from east toward south, radians)."""
+    derivatives = [surface_gradient(domain, component) for component in points]
+    p = sum(de * de for de, _ in derivatives)
+    q = sum(ds * ds for _, ds in derivatives)
+    r = sum(de * ds for de, ds in derivatives)  # J^T J = [[p, r], [r, q]]
     root = np.sqrt(((p - q) / 2.0) ** 2 + r ** 2)
     largest, smallest = (p + q) / 2.0 + root, np.maximum((p + q) / 2.0 - root, 1e-12)
     ratio = np.sqrt(largest / smallest)
@@ -968,36 +1198,31 @@ def warp_stretch(domain, x, y):
     return ratio, long_axis
 
 
-def micro_texture(domain, surface, sea_seed, x, y, x0, y0, ratio, spec, seed, open_sea=None):
+def micro_texture(domain, surface, sea_seed, points, plain, ratio, spec, seed, open_sea=None):
     """A little fine texture on the shoreline where the warp stretches most (option 1 of the user's
-    2026-10-12 talk). The coast term's displacement is drawn on the fully warped coordinates, where an
+    2026-10-12 talk). The coast term's displacement is drawn on the fully warped positions, where an
     anisotropy of 4 makes it vary only every 150 km along a strike-parallel shore: it moves a whole arc
     together. Here the surface within reach_km of the current shoreline (the sea connected to the base's
     sea) is resampled at positions moved by up to displacement_km, a fine fBm (wavelength_km) drawn at
     warp_fraction of the warp (features elongated along the trend by about the stretch^warp_fraction, not
     erased), plus a small vertical part (amplitude_m); both weighted by smoothstep(stretch ratio, ratio)."""
     fraction = spec['warp_fraction']
-    xm, ym = x0 + fraction * (x - x0), y0 + fraction * (y - y0)
+    moved = plain + fraction * (points - plain)
     if open_sea is None:
-        labels, _ = ndimage.label(surface <= 0.0, structure=np.ones((3, 3)))
-        touching = np.unique(labels[(labels > 0) & sea_seed])
-        sea = np.isin(labels, touching[touching > 0])
+        sea = connected_sea(domain, surface <= 0.0, sea_seed)
     else:  # after the physics: the open sea's shore only, not the glacial troughs it flooded inland (G-coast)
         sea = open_sea
-    distance = np.where(sea, ndimage.distance_transform_edt(sea), ndimage.distance_transform_edt(~sea))
-    near = np.exp(-(distance * domain.fine_km / spec['reach_km']) ** 2)
+    near = np.exp(-(shore_distance_km(domain, sea, spec['reach_km']) / spec['reach_km']) ** 2)
     weight = smoothstep(ratio, *spec['ratio']) * near
     scale = spec['displacement_km'] / domain.fine_km * weight
-    dx = scale * fbm(xm, ym, spec, seed + 75, domain)
-    dy = scale * fbm(xm, ym, spec, seed + 76, domain)
-    rows, columns = np.indices(surface.shape, dtype=float)
-    mode = 'grid-wrap' if domain.whole else 'nearest'
-    moved = ndimage.map_coordinates(surface, [rows + dy, columns + dx], order=1, mode=mode)
-    vertical = spec['amplitude_m'] * weight * fbm(xm, ym, spec, seed + 77, domain)
-    return moved + vertical - surface
+    dx = scale * fbm(moved, spec, seed + 75, domain)
+    dy = scale * fbm(moved, spec, seed + 76, domain)
+    shifted = displaced(domain, surface, plain, dx, dy)
+    vertical = spec['amplitude_m'] * weight * fbm(moved, spec, seed + 77, domain)
+    return shifted + vertical - surface
 
 
-def coast_detail(domain, base, surface, x, y, relief_m, erodibility, spec, seed, displacement_fade=None):
+def coast_detail(domain, base, surface, points, relief_m, erodibility, spec, seed, displacement_fade=None):
     """Relief concentrated around the sea level, so the shoreline is a fractal line rather than a contour of
     smooth fields: a rough fBm (gain near 0.6 keeps the fine octaves strong, a ridged share makes headlands
     and skerries) times exp(-(surface / band_m)^2) on the surface so far. Its amplitude follows the terrain:
@@ -1007,23 +1232,21 @@ def coast_detail(domain, base, surface, x, y, relief_m, erodibility, spec, seed,
     function of position, so every zoom draws the same coast down to its grid's resolution. With
     spec['band_parent_km'] (a nested level, rule B) the vertical term is the difference the level's band makes to the
     ridged mix (of the whole noise on this grid less the band) and the displacement is the band's alone."""
-    noise = fbm(x, y, spec, seed + 70, domain)
+    noise = fbm(points, spec, seed + 70, domain)
     if spec.get('band_parent_km') is not None:
-        whole = fbm(x, y, {key: value for key, value in spec.items() if key != 'band_parent_km'}, seed + 70, domain)
+        whole = fbm(points, {key: value for key, value in spec.items() if key != 'band_parent_km'}, seed + 70, domain)
         mix = lambda n: (1 - spec['ridged']) * n + spec['ridged'] * ridged(n) / 0.6  # noqa: E731
         noise = mix(whole) - mix(whole - noise)
     else:
         noise = (1 - spec['ridged']) * noise + spec['ridged'] * ridged(noise) / 0.6
-    latitude = np.abs(domain.north_deg - (np.arange(domain.rows) + 0.5) * domain.pixel_deg)[:, None]
+    latitude = domain.abs_latitude()
     strength = spec['amplitude_m'] * erodibility ** spec['hardness_exponent'] * \
         (1.0 + spec['relief_gain'] * np.clip(relief_m / spec['relief_reference_m'], 0.0, 2.0)) * \
         (1.0 + spec['cold_gain'] * smoothstep(latitude, *spec['cold_latitude']))
     # Near the coast only: the band by height alone also took every low inland valley (G-coast: valley floors
     # pushed below the sea and flooded 100 km inland); the distance to the base's coastline (the zero contour
     # of the smooth base, both sides) fades it beyond reach_km.
-    land = base > 0.0
-    distance = np.where(land, ndimage.distance_transform_edt(land), ndimage.distance_transform_edt(~land))
-    near = np.exp(-(distance * domain.fine_km / spec['reach_km']) ** 2)
+    near = np.exp(-(shore_distance_km(domain, base > 0.0, spec['reach_km']) / spec['reach_km']) ** 2)
     strength = strength * near
     band = np.exp(-(surface / spec['band_m']) ** 2)
     detail = strength * band * noise
@@ -1036,12 +1259,9 @@ def coast_detail(domain, base, surface, x, y, relief_m, erodibility, spec, seed,
         scale = spec['warp_km'] / domain.fine_km * wide * strength / spec['amplitude_m']
         if displacement_fade is not None:  # a nested level: none near the parent's shore (nested_start)
             scale = scale * displacement_fade
-        dx = scale * fbm(x, y, warp_spec, seed + 71, domain)
-        dy = scale * fbm(x, y, warp_spec, seed + 72, domain)
-        rows, columns = np.indices(surface.shape, dtype=float)
-        mode = 'grid-wrap' if domain.whole else 'nearest'
-        moved = ndimage.map_coordinates(surface + detail, [rows + dy, columns + dx], order=1, mode=mode)
-        return moved - surface
+        dx = scale * fbm(points, warp_spec, seed + 71, domain)
+        dy = scale * fbm(points, warp_spec, seed + 72, domain)
+        return displaced(domain, surface + detail, domain.points(), dx, dy) - surface
     return detail
 
 
@@ -1062,31 +1282,31 @@ def hardness_domains(world, spec):
     # Basins the engine leaves without sediment (v9 against GLiM: Earth's soft rock lies in interior basins):
     # low continental interior away from the belts, and the lowland in front of a belt (a foreland basin).
     elevation = world['elevation']
-    share = ndimage.gaussian_filter((~world['sea']).astype(float), 2.0, mode=('nearest', 'wrap'))
+    share = world_smooth(world, (~world['sea']).astype(float), 2.0)
     inland = np.clip((share - 0.5) * 2.0, 0.0, 1.0)
     interior = np.clip((spec['basin_elevation_m'] - elevation) / spec['basin_elevation_m'], 0.0, 1.0) * inland * \
         (1 - strained)
-    near_belt = ndimage.gaussian_filter(strained, spec['foreland_sigma_cells'], mode=('nearest', 'wrap'))
+    near_belt = world_smooth(world, strained, spec['foreland_sigma_cells'])
     foreland = np.clip(2.0 * (near_belt - strained), 0.0, 1.0) * np.clip((1500.0 - elevation) / 1000.0, 0.0, 1.0) * \
         (elevation > 0)
     value = spec['sediment_soft'] * sediment - spec['shield_hard'] * shield - spec['core_hard'] * core + \
         spec['thin_soft'] * thin + spec['basin_soft'] * interior + spec['foreland_soft'] * foreland
-    return ndimage.gaussian_filter(value, 1.0, mode=('nearest', 'wrap'))
+    return world_smooth(world, value, 1.0)
 
 
-def hardness(domain, world, spec, structure, x, y, theta, banded, mx, my, seed):
+def hardness(domain, world, spec, structure, points, theta, banded, sampler, seed):
     """Relative erodibility K / K0: exp of the rock domains (hardness_domains), a weak large-scale noise, a
     mosaic at the scale of map units (about 60 km) and, where `banded` (the belts' foreland alignment), hard
     and soft bands across the strike (fold-scale layers stretched along it, the material of trellis
     drainage), their strength varied along the belt. Bands finer than a grid shows fade out like every octave."""
-    value = sample(hardness_domains(world, spec), domain, mx, my)
-    value += spec['noise']['sigma'] * fbm(x, y, spec['noise'], seed + 30, domain)
-    value += spec['mosaic']['sigma'] * fbm(x, y, spec['mosaic'], seed + 32, domain)
+    value = sampler(hardness_domains(world, spec))
+    value += spec['noise']['sigma'] * fbm(points, spec['noise'], seed + 30, domain)
+    value += spec['mosaic']['sigma'] * fbm(points, spec['mosaic'], seed + 32, domain)
     bands = spec['bands']
-    layered = oriented_fbm(x, y, theta, np.ones_like(banded), {**bands, 'orientations': structure['orientations'],
-                                                               'sharpness': structure['sharpness']}, seed + 31, domain)
+    layered = oriented_fbm(points, theta, np.ones_like(banded), {**bands, 'orientations': structure['orientations'],
+                                                                 'sharpness': structure['sharpness']}, seed + 31, domain)
     contrast = bands['contrast']
-    variation = np.clip(0.5 + 0.7 * fbm(x, y, bands['variation'], seed + 33, domain), 0.0, 1.0)
+    variation = np.clip(0.5 + 0.7 * fbm(points, bands['variation'], seed + 33, domain), 0.0, 1.0)
     value += bands['amplitude'] * banded * variation * np.tanh(contrast * layered) / math.tanh(contrast)
     return np.exp(value)
 
@@ -1097,12 +1317,16 @@ PROVINCES = ('oceanic', 'shield', 'platform', 'sedimentary basin', 'orogen', 'ri
 PROVINCE_COLOURS = ((40, 62, 110), (196, 84, 84), (226, 190, 120), (246, 238, 160), (128, 76, 150), (70, 170, 165))
 
 
-def boundary_distance_km(boundary_type, code, cell_km):
-    """Distance (km) from every world cell to the nearest boundary cell of `code`, wrapping east-west (the engine's
-    planar cells, cell_km each way); infinite when the world has none."""
+def boundary_distance_km(world, code, cell_km):
+    """Distance (km) from every world cell to the nearest boundary cell of `code`: on lat-lon wrapping east-west (the
+    engine's planar cells, cell_km each way), on a cube base along the slots (great-circle lengths); infinite when the
+    world has none."""
+    boundary_type = world['boundary_type']
     mask = boundary_type == code
     if not mask.any():
         return np.full(mask.shape, np.inf)
+    if world.get('grid') is not None:
+        return world['grid'].distance_km(mask)
     columns = mask.shape[1]
     distance = ndimage.distance_transform_edt(~np.tile(mask, (1, 3)))[:, columns:2 * columns]
     return distance * cell_km
@@ -1124,7 +1348,7 @@ def provinces_world(world, spec, cell_km):
     region) explain more of the instability than the extensional ones (divergent and transform boundaries, thin crust,
     subsidence, a rift region), else a rift or active margin. Returns stability, memberships (one per PROVINCES,
     smoothed like the stability) and the hard codes."""
-    smooth = lambda field, sigma: ndimage.gaussian_filter(field, sigma, mode=('nearest', 'wrap'))  # noqa: E731
+    smooth = lambda field, sigma: world_smooth(world, field, sigma)  # noqa: E731
     crust = world['continental_crust']
     c0, c1, c2, c3 = spec['crust_m']
     thin = 1.0 - smoothstep(crust, c0, c1)
@@ -1135,7 +1359,7 @@ def provinces_world(world, spec, cell_km):
     moving = smoothstep(np.abs(rate), *spec['uplift_m_myr'])
     near = {}
     for name, code in (('convergent', 1), ('divergent', 2), ('transform', 3)):
-        near[name] = 1.0 - smoothstep(boundary_distance_km(world['boundary_type'], code, cell_km), *spec['boundary_km'][name])
+        near[name] = 1.0 - smoothstep(boundary_distance_km(world, code, cell_km), *spec['boundary_km'][name])
     deforming = world['deforming_region_type']
     a0, a1 = spec['age_myr']
     age = 1.0 - spec['age_weight'] * (1.0 - smoothstep(world['crust_age'], a0, a1))
@@ -1163,15 +1387,14 @@ def provinces_world(world, spec, cell_km):
     return {'stability': stability, 'memberships': memberships, 'codes': codes}
 
 
-def provinces_domain(domain, provinces, spec, x, y, mx, my, seed):
-    """The stability (cubic B-spline of the world's, smooth) and the province codes on a domain: each province's
-    smoothed membership B-spline sampled, plus provinces.edge_noise x an fBm per province on the (warped) noise
-    coordinates so the edges are not smooth contours, then the largest."""
-    stability = np.clip(sample(provinces['stability'], domain, mx, my), 0.0, 1.0)
+def provinces_domain(domain, provinces, spec, points, sampler, seed):
+    """The stability (the world's, sampled smoothly) and the province codes on a domain: each province's smoothed
+    membership sampled, plus provinces.edge_noise x an fBm per province on the (warped) noise positions so the edges
+    are not smooth contours, then the largest."""
+    stability = np.clip(sampler(provinces['stability']), 0.0, 1.0)
     noise_spec = spec['provinces']['noise']
     amplitude = spec['provinces']['edge_noise']
-    scores = [sample(field, domain, mx, my) + (amplitude * fbm(x, y, noise_spec, seed + 95 + code, domain)
-                                               if amplitude > 0 else 0.0)
+    scores = [sampler(field) + (amplitude * fbm(points, noise_spec, seed + 95 + code, domain) if amplitude > 0 else 0.0)
               for code, field in enumerate(provinces['memberships'])]
     return stability, np.argmax(np.stack(scores), axis=0).astype(np.uint8)
 
@@ -1190,7 +1413,20 @@ def precipitation(world, spec, radius_m):
     downwind: the air's moisture m recharges over the sea (recharge per cell), rains out a little per 1000 km
     over land (loss_per_1000_km) and much more where the air rises (orographic_loss per km of rise), and the
     rain is zonal x m x (1 + orographic_gain x rise in km), less with altitude (exp(-elevation /
-    altitude_scale_m)). So windward coasts and slopes are wet and the lee of a range is dry."""
+    altitude_scale_m)). So windward coasts and slopes are wet and the lee of a range is dry. On a cube base the
+    proxy runs along the parallels of a lat-lon grid of 4 N columns (the base sampled bilinearly, its sea by the
+    containing cell) and is sampled back to the cube's centres by the same cubic spline as sample_at."""
+    if world.get('grid') is not None:
+        grid = world['grid']
+        columns, rows = 4 * grid.N, 2 * grid.N
+        latitude = np.radians(90.0 - (np.arange(rows) + 0.5) * 180.0 / rows)[:, None]
+        longitude = np.radians(-180.0 + (np.arange(columns) + 0.5) * 360.0 / columns)[None, :]
+        points = np.stack([np.cos(latitude) * np.cos(longitude), np.cos(latitude) * np.sin(longitude),
+                           np.sin(latitude) * np.ones_like(longitude)])
+        ids, _, _ = grid.locate(points)
+        proxy = {'elevation': grid.bilinear(world['elevation'], points), 'sea': np.asarray(world['sea'])[ids]}
+        rain = precipitation(proxy, spec, radius_m)
+        return latlon_at(rain, grid.centre.T, order=3)
     elevation = np.maximum(ndimage.gaussian_filter(world['elevation'], 1.0, mode=('nearest', 'wrap')), 0.0)
     sea = world['sea']
     rows, columns = elevation.shape
@@ -1232,7 +1468,19 @@ def ocean_age_depth(age_myr):
     return np.where(t < 20.0, 2600.0 + 365.0 * np.sqrt(t), 5651.0 - 2473.0 * np.exp(-0.0278 * t))
 
 
-def ocean_world(world, spec, seed, radius_km):
+def world_gradient(world, field):
+    """(d/d column, d/d row) of a world field per world cell (rows south): np.gradient on lat-lon; on a cube base the
+    slots' least squares in km times the equatorial cell (east and south of each cell)."""
+    if world.get('grid') is not None:
+        grid = world['grid']
+        cell_km = 2.0 * math.pi * grid.radius_km / (4 * grid.N)
+        ge, gn = grid.gradient(field)
+        return ge * cell_km, -gn * cell_km
+    gy, gx = np.gradient(field)
+    return gx, gy
+
+
+def ocean_world(world, spec, seed, radius_km, directory=None):
     """World-grid fields of the sea floor: the oceanic share (crust class 1), the spreading axis (the
     direction age increases in, as doubled-angle components weighted by the age gradient, smoothed) and the
     trench indicator (convergent boundary cells beside oceanic crust, smoothed). With half_rate_km_myr, also
@@ -1242,41 +1490,50 @@ def ocean_world(world, spec, seed, radius_km):
     half rate instead, wherever that is younger. The axis is where the age read through the segments
     (segment_shift, so the crest steps at the transforms) is a minimum along the spreading direction (no
     higher than axis_step_cells ahead and behind), on crust younger than young_myr; the distance is planar
-    (the sandbox's equirectangular km)."""
+    on lat-lon (the sandbox's equirectangular km) and along the slots on a cube base (the ridge grid a cube of
+    ridge_grid_factor N, its table from `terrain_sandbox grid` in directory)."""
     oceanic = (world['crust_class'] == 1).astype(float)
-    age = ndimage.gaussian_filter(world['crust_age'], 1.0, mode=('nearest', 'wrap'))
-    gy, gx = np.gradient(age)
+    age = world_smooth(world, world['crust_age'], 1.0)
+    gx, gy = world_gradient(world, age)
     strength = np.hypot(gx, gy) * oceanic
     doubled = strength * np.exp(2j * np.arctan2(gy, gx))
-    doubled = ndimage.gaussian_filter(doubled.real, 1.5, mode=('nearest', 'wrap')) + \
-        1j * ndimage.gaussian_filter(doubled.imag, 1.5, mode=('nearest', 'wrap'))
-    near_ocean = ndimage.binary_dilation(oceanic > 0, structure=np.ones((3, 3)))
+    doubled = world_smooth(world, doubled.real, 1.5) + 1j * world_smooth(world, doubled.imag, 1.5)
+    cube = world.get('grid') is not None
+    near_ocean = world['grid'].dilate(oceanic > 0) if cube else \
+        ndimage.binary_dilation(oceanic > 0, structure=np.ones((3, 3)))
     trench = ((world['boundary_type'] == 1) & near_ocean).astype(float)
-    trench = ndimage.gaussian_filter(trench, 1.0, mode=('nearest', 'wrap'))
-    ocean = {'oceanic': oceanic, 'doubled': doubled, 'trench': trench,
-             'strength': ndimage.gaussian_filter(strength, 1.5, mode=('nearest', 'wrap'))}
+    trench = world_smooth(world, trench, 1.0)
+    ocean = {'oceanic': oceanic, 'doubled': doubled, 'trench': trench, 'strength': world_smooth(world, strength, 1.5)}
     if spec.get('half_rate_km_myr', 0.0) > 0.0:
         factor = spec['ridge_grid_factor']
-        H, W = oceanic.shape
-        grid = Domain('ridge-grid', W * factor, H * factor, 0.0, 0.0, factor, W, H, radius_km)
-        mx, my = bspline_matrix(grid.x, W, True), bspline_matrix(grid.y, H, False)
-        x, y = grid.mesh_km()
-        share = np.clip(sample(oceanic, grid, mx, my), 0.0, 1.0)
-        axis_doubled = sample(doubled.real, grid, mx, my) + 1j * sample(doubled.imag, grid, mx, my)
+        if cube:
+            base = world['grid']
+            grid = cube_domain.CubeDomain('ridge-grid', cube_domain.cube_table(PHYSICS, base.N * factor, radius_km,
+                                                                               directory), base.N, radius_km)
+        else:
+            H, W = oceanic.shape
+            grid = Domain('ridge-grid', W * factor, H * factor, 0.0, 0.0, factor, W, H, radius_km)
+        sampler = make_sampler(grid, world)
+        points = grid.points()
+        share = np.clip(sampler(oceanic), 0.0, 1.0)
+        axis_doubled = sampler(doubled.real) + 1j * sampler(doubled.imag)
         spreading = 0.5 * np.angle(axis_doubled)
-        xs, ys, _ = segment_shift(grid, x, y, spreading, share, spec, seed)
-        grid_age = np.maximum(sample_at(world['crust_age'], grid, xs, ys), 0.0)
+        shifted, _ = segment_shift(grid, points, spreading, share, spec, seed)
+        grid_age = np.maximum(sample_at(world['crust_age'], world, shifted), 0.0)
         # A minimum along the spreading direction: a minimum in every direction found only dots on the
         # engine's young lines (sea-v4), whose distances drew round swells instead of ridges.
-        step = spec['axis_step_cells'] * grid.fine_km
-        dx, dy = step * np.cos(spreading), step * np.sin(spreading)
-        ahead = sample_at(world['crust_age'], grid, xs + dx, ys + dy)
-        behind = sample_at(world['crust_age'], grid, xs - dx, ys - dy)
+        step = spec['axis_step_cells'] * grid.fine_km * axis_tangent(grid, spreading)
+        ahead = sample_at(world['crust_age'], world, shifted + step)
+        behind = sample_at(world['crust_age'], world, shifted - step)
         axis = (share > 0.5) & (grid_age < spec['young_myr']) & (grid_age <= ahead) & (grid_age <= behind)
-        tiled = np.concatenate([~axis] * 3, axis=1)  # columns wrap
-        distance = ndimage.distance_transform_edt(tiled)[:, grid.columns:2 * grid.columns] * grid.fine_km
+        if cube:
+            distance = grid.grid.distance_km(axis)
+        else:
+            tiled = np.concatenate([~axis] * 3, axis=1)  # columns wrap
+            distance = ndimage.distance_transform_edt(tiled)[:, grid.columns:2 * grid.columns] * grid.fine_km
         ocean['ridge_distance'] = distance if axis.any() else np.full_like(distance, np.inf)
         ocean['ridge_factor'] = factor
+        ocean['ridge_grid'] = grid
     return ocean
 
 
@@ -1286,9 +1543,8 @@ def damp_abyss(world, spec):
     its sea-only mean over sigma_cells world cells is kept at the share `keep`."""
     elevation, sea = world['elevation'], world['sea']
     depth = -elevation
-    mode = ('nearest', 'wrap')
-    weight = ndimage.gaussian_filter(sea.astype(float), spec['sigma_cells'], mode=mode)
-    mean = ndimage.gaussian_filter(np.where(sea, depth, 0.0), spec['sigma_cells'], mode=mode) / np.maximum(weight, 1e-6)
+    weight = world_smooth(world, sea.astype(float), spec['sigma_cells'])
+    mean = world_smooth(world, np.where(sea, depth, 0.0), spec['sigma_cells']) / np.maximum(weight, 1e-6)
     deep = smoothstep(depth, spec['start_m'], spec['start_m'] + 1000.0) * sea * (world['crust_class'] != 1)
     damped = mean + spec['keep'] * (depth - mean)
     return elevation - deep * (damped - depth)
@@ -1315,52 +1571,77 @@ def shelf_profile(base, oceanic, spec):
     return base + weight * (-profile - base)
 
 
-def sample_at(field, domain, x_km, y_km):
-    """A world field at arbitrary planar positions (km, the domain's mesh units): cubic spline, columns
-    wrapped, rows clamped."""
+def latlon_at(field, points, order=3):
+    """A W x W/2 lat-lon field at points (3, ...): spline of `order` (cubic by default), columns wrapped, rows
+    clamped (the point's latitude and longitude in the field's cell units)."""
+    points = np.asarray(points, dtype=np.float64)
+    rows_count, columns_count = field.shape
     pad = 4
     padded = np.concatenate([field[:, -pad:], field, field[:, :pad]], axis=1)
-    columns = x_km / domain.cell_km - 0.5 + pad
-    columns = np.mod(columns - pad, domain.world_columns) + pad
-    rows = y_km / domain.cell_km - 0.5
-    return ndimage.map_coordinates(padded, [rows, columns], order=3, mode='nearest')
+    latitude = np.arctan2(points[2], np.hypot(points[0], points[1]))
+    longitude = np.arctan2(points[1], points[0])
+    columns = np.mod((longitude + math.pi) / (2.0 * math.pi) * columns_count - 0.5, columns_count) + pad
+    rows = (math.pi / 2.0 - latitude) / math.pi * rows_count - 0.5
+    return ndimage.map_coordinates(padded, [rows, columns], order=order, mode='nearest')
 
 
-def sample_fine(field, factor, domain, x_km, y_km):
-    """A field on a grid `factor` times finer than the world's, at planar positions (km): linear (a
-    distance's V keeps its crest), columns wrapped, rows clamped."""
-    pad = 2
-    padded = np.concatenate([field[:, -pad:], field, field[:, :pad]], axis=1)
-    cell = domain.cell_km / factor
-    columns = np.mod(x_km / cell - 0.5, field.shape[1]) + pad
-    rows = y_km / cell - 0.5
-    return ndimage.map_coordinates(padded, [rows, columns], order=1, mode='nearest')
+def sample_at(field, world, points):
+    """A world field at arbitrary positions (3, ...; km or unit): on lat-lon a cubic spline (columns wrapped, rows
+    clamped), on a cube base the bilinear stencil."""
+    if world.get('grid') is not None:
+        return world['grid'].bilinear(field, points)
+    return latlon_at(field, points, order=3)
 
 
-def segment_shift(domain, x, y, theta, oceanic, spec, seed):
-    """Ridge-transform segments: for a bank of spreading directions phi_b (weighted by cos^sharpness 2(theta -
-    phi_b)), the along-ridge coordinate is cut into segments segment_km long, each shifted along the
-    spreading direction by up to offset_km. Returns the shifted positions and the fracture-zone trough
-    (0 to 1, scaled by its transform's offset). fracture_warp (sea-v6): the segments are cut on positions
-    moved by a noise of amplitude_km, so the fracture zones curve and wander instead of running as straight,
-    evenly spaced lines (the user: window O's lines looked artificial); fracture_patch: the trough comes and
-    goes along its length, as Earth's fracture zones do."""
-    shift_x, shift_y, trough, weights = (np.zeros_like(x) for _ in range(4))
+def sample_fine(ocean, domain, points):
+    """The ridge distance (km) at a domain's cells: on lat-lon the ridge grid's raster linearly at the positions
+    (a distance's V keeps its crest); on a cube the ridge cube's own cells when it is the domain's cube, else its
+    bilinear stencil."""
+    field, grid = ocean['ridge_distance'], ocean['ridge_grid']
+    if grid.kind == 'cube':
+        if domain.kind == 'cube' and domain.grid.N == grid.grid.N:
+            return field
+        return grid.grid.bilinear(np.where(np.isfinite(field), field, 1e9), points)
+    return latlon_at(field, points, order=1)
+
+
+def segment_shift(domain, points, theta, oceanic, spec, seed):
+    """Ridge-transform segments: for a bank of fixed spreading axes d_b (bank_axes of spec['orientations'],
+    weighted by max(0, 2 (t . d_b)^2 - 1)^sharpness, t the local spreading direction's unit tangent, so the 2-D
+    bank's cos^sharpness 2(theta - phi_b)), the along-ridge coordinate (the arc length about d_b: the great circle
+    normal to d_b is where the member is tangent, along a ridge) is cut into segments segment_km long, each shifted
+    along d_b by up to offset_km. Returns the shifted positions and the fracture-zone trough (0 to 1, scaled by its
+    transform's offset). fracture_warp (sea-v6): the segments are cut on positions moved by a noise of amplitude_km,
+    so the fracture zones curve and wander instead of running as straight, evenly spaced lines (the user: window
+    O's lines looked artificial); fracture_patch: the trough comes and goes along its length, as Earth's fracture
+    zones do."""
+    points = np.asarray(points, dtype=np.float64)
+    shape = points.shape[1:]
+    shift = np.zeros((3,) + shape)
+    trough, weights = np.zeros(shape), np.zeros(shape)
+    east, north = domain.frame()
     warp = spec.get('fracture_warp')
     if warp:
-        xw = x + warp['amplitude_km'] * fbm(x, y, warp, seed + 130, domain)
-        yw = y + warp['amplitude_km'] * fbm(x, y, warp, seed + 131, domain)
+        moved = points + warp['amplitude_km'] * (fbm(points, warp, seed + 130, domain) * east -
+                                                 fbm(points, warp, seed + 131, domain) * north)
     else:
-        xw, yw = x, y
-    count, length = spec['orientations'], spec['segment_km']
-    for b in range(count):
-        phi = math.pi * b / count
-        w = np.maximum(0.0, np.cos(2.0 * (theta - phi))) ** spec['sharpness']
+        moved = points
+    spreading = axis_tangent(domain, theta)
+    length = spec['segment_km']
+    radius = domain.radius_km
+    for b, d in enumerate(bank_axes(spec['orientations'])):
+        cosine = d[0] * spreading[0] + d[1] * spreading[1] + d[2] * spreading[2]
+        w = np.maximum(0.0, 2.0 * cosine * cosine - 1.0) ** spec['sharpness']
         active = (oceanic > 0.01) & (w > 1e-3)
         if not np.any(active):
             continue
-        xa, ya = xw[active], yw[active]
-        along_ridge = (-math.sin(phi) * xa + math.cos(phi) * ya) / length
+        first = np.cross(d, [0.0, 0.0, 1.0] if abs(d[2]) < 0.9 else [1.0, 0.0, 0.0])
+        first /= np.linalg.norm(first)
+        second = np.cross(d, first)
+        pa = moved[:, active]
+        around = np.arctan2(second[0] * pa[0] + second[1] * pa[1] + second[2] * pa[2],
+                            first[0] * pa[0] + first[1] * pa[1] + first[2] * pa[2])
+        along_ridge = radius * around / length
         jitter = spec.get('segment_jitter', 0.0)
         if jitter > 0.0:  # irregular spacing: the along-ridge coordinate stretched by a 1-D noise of itself
             along_ridge = along_ridge + jitter * gradient_noise(along_ridge * 0.6, np.full_like(along_ridge, 7.3 * b),
@@ -1368,68 +1649,77 @@ def segment_shift(domain, x, y, theta, oceanic, spec, seed):
         segment = np.floor(along_ridge).astype(np.int64)
         bank = np.full_like(segment, b)
         offset = spec['offset_km'] * erosion_filter.cell_hash(segment, bank, seed + 120)[0]
-        shift_x[active] += w[active] * offset * math.cos(phi)
-        shift_y[active] += w[active] * offset * math.sin(phi)
+        wa = w[active]
+        for axis in range(3):
+            shift[axis][active] += wa * offset * d[axis]
         # A fracture zone's trough scales with its transform's offset: the jump between the two segments it
         # separates (a comb of equal troughs at every boundary read as artificial, sea-v1).
         boundary = np.round(along_ridge).astype(np.int64)
         jump = np.abs(erosion_filter.cell_hash(boundary, bank, seed + 120)[0] -
                       erosion_filter.cell_hash(boundary - 1, bank, seed + 120)[0]) / 2.0
         edge = np.abs(along_ridge - boundary) * length  # km to the nearest segment boundary
-        trough[active] += w[active] * jump * np.exp(-(edge / spec['fracture_width_km']) ** 2)
-        weights[active] += w[active]
+        trough[active] += wa * jump * np.exp(-(edge / spec['fracture_width_km']) ** 2)
+        weights[active] += wa
     weights = np.maximum(weights, 1e-12)
     trough = trough / weights
     if spec.get('fracture_patch'):
-        trough = trough * np.clip(0.5 + 0.7 * fbm(x, y, spec['fracture_patch'], seed + 132, domain), 0.0, 1.5)
-    return x + shift_x / weights, y + shift_y / weights, trough
+        trough = trough * np.clip(0.5 + 0.7 * fbm(points, spec['fracture_patch'], seed + 132, domain), 0.0, 1.5)
+    return points + shift / weights, trough
 
 
-def seamounts(x, y, spec, seed):
-    """Scattered volcanic cones (sea-v6): one candidate per spacing_km lattice cell at a hashed position,
-    kept with `probability`; size u in 0..1 sets the radius (radius_km range) and the height (height_m
-    range, by u^2: many small, few large); profile (1 - r / R)^profile. The tallest cone wins where two
-    overlap."""
+def seamounts(points, spec, seed, radius_km):
+    """Scattered volcanic cones (sea-v6): one candidate per spacing_km cell of a 3-D lattice at a hashed position,
+    kept with `probability` when it lies within half a spacing of the sphere (so about one per spacing^2 of surface)
+    and projected onto it; size u in 0..1 sets the radius (radius_km range) and the height (height_m range, by u^2:
+    many small, few large); profile (1 - r / R)^profile with r the chord to the point. The tallest cone wins where
+    two overlap."""
+    points = np.asarray(points, dtype=np.float64)
     spacing = spec['spacing_km']
-    ix, iy = np.floor(x / spacing).astype(np.int64), np.floor(y / spacing).astype(np.int64)
-    out = np.zeros_like(x)
+    cells = np.floor(points / spacing).astype(np.int64)
+    out = np.zeros(points.shape[1:])
     (r0, r1), (h0, h1) = spec['radius_km'], spec['height_m']
     for dx in (-1, 0, 1):
         for dy in (-1, 0, 1):
-            cx, cy = ix + dx, iy + dy
-            u, v = erosion_filter.cell_hash(cx, cy, seed + 140)
-            keep, size = erosion_filter.cell_hash(cx, cy, seed + 141)
-            size = 0.5 + 0.5 * size
-            px, py = (cx + 0.5 + 0.45 * u) * spacing, (cy + 0.5 + 0.45 * v) * spacing
-            radius = r0 + (r1 - r0) * size
-            cone = (h0 + (h1 - h0) * size ** 2) * np.clip(1.0 - np.hypot(x - px, y - py) / radius, 0.0, 1.0) ** spec['profile']
-            out = np.maximum(out, np.where(0.5 + 0.5 * keep < spec['probability'], cone, 0.0))
+            for dz in (-1, 0, 1):
+                cx, cy, cz = cells[0] + dx, cells[1] + dy, cells[2] + dz
+                u, v, w = cell_hash3(cx, cy, cz, seed + 140)
+                keep, size, _ = cell_hash3(cx, cy, cz, seed + 141)
+                size = 0.5 + 0.5 * size
+                candidate = np.stack([(cx + 0.5 + 0.45 * u) * spacing, (cy + 0.5 + 0.45 * v) * spacing,
+                                      (cz + 0.5 + 0.45 * w) * spacing])
+                distance = np.linalg.norm(candidate, axis=0)
+                shell = np.abs(distance - radius_km) < 0.5 * spacing
+                projected = candidate * (radius_km / distance)
+                chord = np.linalg.norm(points - projected, axis=0)
+                radius = r0 + (r1 - r0) * size
+                cone = (h0 + (h1 - h0) * size ** 2) * np.clip(1.0 - chord / radius, 0.0, 1.0) ** spec['profile']
+                out = np.maximum(out, np.where((0.5 + 0.5 * keep < spec['probability']) & shell, cone, 0.0))
     return out
 
 
-def seafloor(domain, world, ocean, base, mx, my, spec, seed):
+def seafloor(domain, world, ocean, base, sampler, spec, seed):
     """The sea floor on oceanic crust (the user's 2026-10-13 request): depth from the crust age (GDH1),
     with the age read through ridge-transform segments (segment_shift: the ridge steps at each transform and
     the age step carries on across the plate as a fracture zone), an axial valley on the youngest crust,
     fracture-zone troughs, abyssal hills elongated along the ridge (fading with age as sediment buries them)
     and trenches on the ocean side of convergent boundaries. Blended into the base where the crust is
     oceanic and the base is deeper than shallow_m. Returns (the new base, the age read, the spreading axis)."""
-    x, y = domain.mesh_km()
-    oceanic = np.clip(sample(ocean['oceanic'], domain, mx, my), 0.0, 1.0)
-    doubled = sample(ocean['doubled'].real, domain, mx, my) + 1j * sample(ocean['doubled'].imag, domain, mx, my)
+    points = domain.points()
+    oceanic = np.clip(sampler(ocean['oceanic']), 0.0, 1.0)
+    doubled = sampler(ocean['doubled'].real) + 1j * sampler(ocean['doubled'].imag)
     theta = 0.5 * np.angle(doubled)  # the spreading axis
-    xs, ys, trough = segment_shift(domain, x, y, theta, oceanic, spec, seed)
-    age = np.maximum(sample_at(world['crust_age'], domain, xs, ys), 0.0)
+    shifted, trough = segment_shift(domain, points, theta, oceanic, spec, seed)
+    age = np.maximum(sample_at(world['crust_age'], world, shifted), 0.0)
     if 'ridge_distance' in ocean:
         # sea-v4: the age as the distance to the spreading axis over an Earth-like half rate, where younger.
-        distance = sample_fine(ocean['ridge_distance'], ocean['ridge_factor'], domain, x, y)
+        distance = sample_fine(ocean, domain, points)
         age = np.minimum(age, distance / spec['half_rate_km_myr'])
     else:
         # The world's age is per 156 km cell, so near a ridge its minimum is a broad smooth trough that never
         # reaches 0: no crest, no axial valley, the transform steps lost in it (sea-v1). Young crust is aged
         # relative to the lowest age within ridge_radius_km, fully at the axis and not at all beyond young_myr.
         size = max(3, int(round(2.0 * spec['ridge_radius_km'] / domain.fine_km)) | 1)
-        lowest = ndimage.minimum_filter(age, size=size, mode=('nearest', 'wrap') if domain.whole else 'nearest')
+        lowest = filter_extreme(domain, age, size, 'minimum')
         young = 1.0 - smoothstep(age, 0.5 * spec['young_myr'], spec['young_myr'])
         age = np.maximum(age - lowest * young, 0.0)
     depth = ocean_age_depth(age)
@@ -1437,41 +1727,40 @@ def seafloor(domain, world, ocean, base, mx, my, spec, seed):
     depth = depth + spec['fracture_trough_m'] * trough * np.exp(-age / spec['fracture_age_myr'])
     # The hills are stretched along the ridge only where the spreading direction is coherent (sea-v6: where
     # the bank's orientation turned fast, the stretched noise drew swirls and fingerprints).
-    coherence = np.ones_like(x)
+    coherence = np.ones(points.shape[1:])
     if spec.get('hills_coherence', False):
-        coherence = np.clip(np.abs(doubled) / np.maximum(sample(ocean['strength'], domain, mx, my), 1e-9), 0.0, 1.0)
-    hills = oriented_fbm(xs, ys, theta, coherence, spec['hills'], seed + 121, domain)
+        coherence = np.clip(np.abs(doubled) / np.maximum(sampler(ocean['strength']), 1e-9), 0.0, 1.0)
+    hills = oriented_fbm(shifted, theta, coherence, spec['hills'], seed + 121, domain)
     amplitude = spec['hills']['amplitude_m'] * (spec['hills']['old_fraction'] + (1.0 - spec['hills']['old_fraction'])
                                                 * np.exp(-age / spec['hills']['age_scale_myr']))
     if spec['hills'].get('patch'):
-        amplitude = amplitude * np.clip(0.7 + 0.5 * fbm(x, y, spec['hills']['patch'], seed + 122, domain), 0.15, 1.6)
+        amplitude = amplitude * np.clip(0.7 + 0.5 * fbm(points, spec['hills']['patch'], seed + 122, domain), 0.15, 1.6)
     floor = -depth + amplitude * hills
     if spec.get('seamounts', {}).get('enabled', False):
-        floor = floor + seamounts(x, y, spec['seamounts'], seed)
+        floor = floor + seamounts(points, spec['seamounts'], seed, domain.radius_km)
     weight = oceanic * smoothstep(-base, spec['shallow_m'], 2.0 * spec['shallow_m']) * spec['blend']
     out = base + weight * (floor - base)
     # The trench: a V along the crest of the smoothed indicator (its value over its local maximum within a
     # world cell), so it is even along the boundary, not the whole smoothed band (sea-v1: beaded troughs
     # hundreds of km wide); trench_crest's lower end sets its width.
-    trench = sample(ocean['trench'], domain, mx, my)
+    trench = sampler(ocean['trench'])
     size = max(3, int(round(domain.cell_km / domain.fine_km)) | 1)
-    crest = trench / np.maximum(ndimage.maximum_filter(trench, size=size, mode=('nearest', 'wrap') if domain.whole
-                                                       else 'nearest'), 1e-6)
+    crest = trench / np.maximum(filter_extreme(domain, trench, size, 'maximum'), 1e-6)
     sharp = smoothstep(crest, *spec['trench_crest'])
     out = out - spec['trench_m'] * sharp * sharp * smoothstep(trench, *spec['trench_band']) * (base < 0)
     return out, age, theta
 
 
-def warped(x, y, theta, alignment, spec, seed, domain):
-    """Positions moved by the warp. Two noise components v = (n1, n2) give a background displacement
-    amplitude_km v everywhere and, in the belts, strain_amplitude_km x alignment x (s (s.v) + across_fraction
-    c (c.v)), s along the strike and c across it: rock dragged along the belt, a little squeezed across it.
-    The projections s (s.v) and c (c.v) do not change when the axis flips sign, so the displacement stays
-    continuous where the shortening angle wraps from pi to 0."""
+def warped(points, theta, alignment, spec, seed, domain):
+    """Positions moved by the warp on the cells' tangent planes (east and south, km). Two noise components v =
+    (n1, n2) give a background displacement amplitude_km v everywhere and, in the belts, strain_amplitude_km x
+    alignment x (s (s.v) + across_fraction c (c.v)), s along the strike and c across it: rock dragged along the
+    belt, a little squeezed across it. The projections s (s.v) and c (c.v) do not change when the axis flips sign,
+    so the displacement stays continuous where the shortening angle wraps from pi to 0."""
     if spec['amplitude_km'] <= 0 and spec['strain_amplitude_km'] <= 0:
-        return x, y
-    n1 = fbm(x, y, spec, seed + 11, domain)
-    n2 = fbm(x, y, spec, seed + 12, domain)
+        return points
+    n1 = fbm(points, spec, seed + 11, domain)
+    n2 = fbm(points, spec, seed + 12, domain)
     cx, cy = np.cos(theta), np.sin(theta)  # across the strike (the shortening axis)
     sx, sy = -cy, cx                        # along the strike
     along = sx * n1 + sy * n2
@@ -1479,7 +1768,8 @@ def warped(x, y, theta, alignment, spec, seed, domain):
     belt = spec['strain_amplitude_km'] * np.clip(alignment, 0.0, 1.0)
     dx = spec['amplitude_km'] * n1 + belt * (sx * along + spec['across_fraction'] * cx * across)
     dy = spec['amplitude_km'] * n2 + belt * (sy * along + spec['across_fraction'] * cy * across)
-    return x + dx, y + dy
+    east, north = domain.frame()
+    return points + dx * east - dy * north
 
 
 def filter_field(domain, fields, ice, spec, seed):
@@ -1488,9 +1778,8 @@ def filter_field(domain, fields, ice, spec, seed):
     ((P / reference)^exponent clipped: wetter ground is more dissected) and no gullies under today's ice
     (1 - ice / ice_full_m: a glacier smooths its bed). 1 where every factor is neutral."""
     field_spec = spec['field']
-    x, y = fields['coords']
     noise = field_spec['noise']
-    field = np.exp(noise['sigma'] * fbm(x, y, noise, seed + 60, domain))
+    field = np.exp(noise['sigma'] * fbm(fields['coords'], noise, seed + 60, domain))
     field = field * fields['erodibility'] ** field_spec['hardness_exponent']
     low, high = field_spec['precipitation_clip']
     rain = np.clip(fields['precipitation'] / field_spec['precipitation_reference_m_yr'], low, high)
@@ -1500,21 +1789,27 @@ def filter_field(domain, fields, ice, spec, seed):
     return field
 
 
-def erosion_pass(domain, height_m, x, y, amplitude_m, erodibility, spec, seed, field=None):
-    """The erosion filter on the domain: horizontal unit km, vertical unit km x vertical_scale; the
-    slope by central differences; the fade target the height between the local floor and crest (a
-    min/max filter over fade_radius_km, smoothed), -1 at the floor and +1 at the crest; the strength
-    scaled by the local relief amplitude over relief_reference_m and by the erodibility^hardness_exponent."""
+def erosion_pass(domain, height_m, points, amplitude_m, erodibility, spec, seed, field=None):
+    """The erosion filter on the domain: horizontal unit km, vertical unit km x vertical_scale; the slope by
+    central differences (lat-lon) or the slots' least squares (cube) as a 3-D tangent vector; the fade target the
+    height between the local floor and crest (a min/max filter over fade_radius_km, smoothed), -1 at the floor and
+    +1 at the crest; the strength scaled by the local relief amplitude over relief_reference_m and by the
+    erodibility^hardness_exponent. The filter (erosion_filter.erosion_filter3) runs at the positions only where its
+    strength is above 0 (elsewhere it adds nothing)."""
     vs = spec['vertical_scale']
     h = height_m / 1000.0 * vs
-    dy_km = domain.fine_km
-    dx_km = domain.fine_km * domain.coslat[:, None]
-    gy, gx = np.gradient(h)
-    slope_x, slope_y = gx / dx_km, gy / dy_km
+    slope_e, slope_s = surface_gradient(domain, h)
     radius = max(1, int(round(spec['fade_radius_km'] / domain.fine_km)))
-    mode = ('nearest', 'wrap') if domain.whole else 'nearest'
-    low = ndimage.uniform_filter(ndimage.minimum_filter(h, size=2 * radius + 1, mode=mode), size=2 * radius + 1, mode=mode)
-    high = ndimage.uniform_filter(ndimage.maximum_filter(h, size=2 * radius + 1, mode=mode), size=2 * radius + 1, mode=mode)
+    if domain.kind == 'cube':
+        box = (2 * radius + 1) / math.sqrt(12.0)  # the uniform filter's standard deviation, in cells
+        low = domain.grid.smooth(domain.grid.minimum(h, radius), box)
+        high = domain.grid.smooth(domain.grid.maximum(h, radius), box)
+    else:
+        mode = ('nearest', 'wrap') if domain.whole else 'nearest'
+        low = ndimage.uniform_filter(ndimage.minimum_filter(h, size=2 * radius + 1, mode=mode), size=2 * radius + 1,
+                                     mode=mode)
+        high = ndimage.uniform_filter(ndimage.maximum_filter(h, size=2 * radius + 1, mode=mode), size=2 * radius + 1,
+                                      mode=mode)
     fade = 2.0 * (h - low) / np.maximum(high - low, 1e-6) - 1.0
     land = np.clip(height_m / spec['land_fade_m'], 0.0, 1.0)  # no gullies at sea, faded in above the coast
     strength = spec['strength'] * np.clip(amplitude_m / spec['relief_reference_m'], 0.0, spec['relief_cap']) * \
@@ -1522,16 +1817,25 @@ def erosion_pass(domain, height_m, x, y, amplitude_m, erodibility, spec, seed, f
     if field is not None:
         strength = strength * field
     if 'slope_fade' in spec:  # gullies on slopes only: on flats they have no direction and crinkle the plain
-        real_slope = np.sqrt(slope_x * slope_x + slope_y * slope_y) / vs
+        real_slope = np.sqrt(slope_e * slope_e + slope_s * slope_s) / vs
         strength = strength * smoothstep(real_slope, *spec['slope_fade'])
     weights, wavelength = [], spec['scale_km']
     for _ in range(spec['octaves']):
         weights.append(octave_fade(wavelength, domain, spec.get('min_cells', 2.5)))
         wavelength /= spec['lacunarity']
-    dh, _, _, magnitude, _ = erosion_filter.erosion_filter(
-        x, y, h, slope_x, slope_y, fade, strength, spec['gully_weight'], spec['detail'], spec['rounding'],
-        spec['onset'], spec['assumed_slope'], spec['scale_km'], spec['octaves'], spec['lacunarity'], spec['gain'],
-        spec['cell_scale'], spec['normalization'], seed + 40, octave_weights=weights)
+    active = strength > 0.0
+    dh = np.zeros_like(h)
+    magnitude = np.zeros_like(h)
+    if active.any():
+        east, north = domain.frame()
+        slope = slope_e[active] * east[:, active] - slope_s[active] * north[:, active]
+        position = np.asarray(points, dtype=np.float64)[:, active]
+        normal = position / np.linalg.norm(position, axis=0)
+        dh[active], magnitude[active] = erosion_filter.erosion_filter3(
+            position, h[active], slope, normal, fade[active], strength[active], spec['gully_weight'], spec['detail'],
+            spec['rounding'], spec['onset'], spec['assumed_slope'], spec['scale_km'], spec['octaves'],
+            spec['lacunarity'], spec['gain'], spec['cell_scale'], spec['normalization'], seed + 40,
+            octave_weights=weights)
     offset_x, offset_y = spec['height_offset']
     offset = (offset_x + (-np.clip(fade, -1, 1) - offset_x) * offset_y) * magnitude
     return (dh + offset) / vs * 1000.0
@@ -1610,7 +1914,13 @@ def run_physics(domain, fields, config, directory):
     duration = plan['duration'] if plan else spec['duration_myr']
     step = (plan or {}).get('step') or spec['step_myr']
     totals_prefix = stem.with_name(f'{domain.name}-totals')
-    command = [str(PHYSICS), '--columns', str(domain.columns), '--rows', str(domain.rows),
+    if domain.kind == 'cube':  # the kernels on the cube; the exe checks the neighbour table the sandbox read
+        files['cells'] = stem.with_name(f'{domain.name}-cells.i32')
+        np.asarray(domain.grid.neighbours, dtype='<i4').tofile(files['cells'])
+        grid_options = ['--face-cells', str(domain.grid.N), '--cells', str(files['cells'])]
+    else:
+        grid_options = ['--columns', str(domain.columns), '--rows', str(domain.rows)]
+    command = [str(PHYSICS)] + grid_options + [
                '--elevation', str(files['elevation']), '--sea', str(files['sea']),
                '--erodibility', str(files['erodibility']), '--uplift', str(files['uplift']),
                '--runoff-file', str(files['runoff']), '--duration', str(duration),
@@ -1663,7 +1973,7 @@ def run_physics(domain, fields, config, directory):
     result = subprocess.run(command, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(f'terrain_sandbox failed on {domain.name}: {result.stderr.strip()}')
-    shape = (domain.rows, domain.columns)
+    shape = (domain.grid.n,) if domain.kind == 'cube' else (domain.rows, domain.columns)
     elevation = np.fromfile(out_elevation, dtype='<f4').reshape(shape).astype(np.float64)
     discharge = np.fromfile(out_discharge, dtype='<f4').reshape(shape).astype(np.float64)
     ice = np.fromfile(out_ice, dtype='<f4').reshape(shape).astype(np.float64) if glacial['enabled'] else None
@@ -1728,7 +2038,10 @@ def sloped_fill(domain, elevation, sea, gradient, noise=None):
     the spill at about g, with the noise's few metres on it so the routing on the floor follows the noise instead
     of the flood's straight lines; every raised cell has a lower neighbour (its parent), so no closed depression
     is left. The rising fill also buries low ground just above the flat spill level (the fill laps onto the
-    basin's margins). Returns the filled surface (the sea and every cell that was not raised unchanged)."""
+    basin's margins). Returns the filled surface (the sea and every cell that was not raised unchanged). On a cube
+    over the slots (CubeGrid.sloped_fill, d the great-circle distance)."""
+    if domain.kind == 'cube':
+        return domain.grid.sloped_fill(elevation, sea, gradient, noise)
     rows, columns = elevation.shape
     wrap = domain.whole
     pad = columns // 8 if wrap else 0
@@ -1775,7 +2088,7 @@ def fill_statistics(domain, before, after, sea):
     """What relief.fill_depressions added on the kept domain: volume (km^3), the raised share of the land (cells
     raised by more than 1 m), mean and largest raise (m), and the land's area-weighted mean before and after."""
     raise_m, land = crop(domain, after - before), ~crop(domain, sea)
-    area = domain.fine_km ** 2 * crop(domain, domain.coslat[:, None] * np.ones((1, domain.columns)))
+    area = crop(domain, domain.area_km2())
     raised = land & (raise_m > 1.0)
     return {'fill_km3': round(float((raise_m * area)[land].sum()) / 1e3, 1),
             'fill_land_pct': round(100.0 * float(area[raised].sum() / max(area[land].sum(), 1e-9)), 2),
@@ -1792,9 +2105,9 @@ def find_lakes(domain, elevation, sea, spec, physics_lakes=None):
     given, keeps only the depressions that overlap it: on the surface after the filter, the lakes the physics
     left, at the spill level the filter leaves them, without the filter's own small pits (thousands of them
     in a k 256 window, t13-control). Returns the lake surface (m; NaN off lakes)."""
-    filled = priority_flood(elevation, sea, domain.whole)
+    filled = domain_flood(domain, elevation, sea)
     depth = np.where(sea, 0.0, filled - elevation)
-    labels, count = ndimage.label(depth > 1e-3, structure=np.ones((3, 3)))
+    labels, count = grid_label(domain, depth > 1e-3)
     if count == 0:
         return np.full(elevation.shape, np.nan)
     index = np.arange(1, count + 1)
@@ -1813,9 +2126,8 @@ def lake_statistics(domain, elevation, surface):
     """Lake count, area (km^2) and the deepest lake (m) in the kept window."""
     surface, elevation = crop(domain, surface), crop(domain, elevation)
     lake = np.isfinite(surface)
-    coslat = crop(domain, domain.coslat[:, None] * np.ones((1, domain.columns)))
-    area = np.where(lake, domain.fine_km ** 2 * coslat, 0.0)
-    labels, count = ndimage.label(lake, structure=np.ones((3, 3)))
+    area = np.where(lake, crop(domain, domain.area_km2()), 0.0)
+    labels, count = grid_label(domain, lake)
     depth = np.where(lake, surface - elevation, 0.0)
     return {'lakes': int(count), 'lake_area_km2': round(float(area.sum()), 1),
             'deepest_lake_m': round(float(depth.max()) if count else 0.0, 1),
@@ -1829,11 +2141,11 @@ def equilibrium_line(domain, precipitation, spec):
     the precipitation over ela_reference_m_yr (a wet coast's glaciers reach lower, Ohmura et al. 1992); never
     below ela_min_m, so polar lowlands carry no ice sheet that would grind them below the sea for the whole
     run (v10 and v11)."""
-    latitude = np.abs(domain.north_deg - (np.arange(domain.rows) + 0.5) * domain.pixel_deg)
+    latitude = domain.abs_latitude()
     flat, at_sea = spec['ela_flat_latitude'], spec['ela_sea_latitude']
     line = spec['ela_equator_m'] * np.clip((at_sea - latitude) / (at_sea - flat), 0.0, 1.0) ** spec['ela_power']
     wet = spec['ela_per_doubling_m'] * np.log2(np.maximum(precipitation, 0.05) / spec['ela_reference_m_yr'])
-    return np.maximum(line[:, None] - wet, spec['ela_min_m'])
+    return np.maximum(line - wet, spec['ela_min_m'])
 
 
 # ---------------------------------------------------------------- rendering
@@ -1875,11 +2187,8 @@ def render_stages(domain, fields, final_elevation, config, directory):
                                             ('physics', 'drainage and erosion')), 1):
         if key == 'warp':
             rgb = relief_rgb(domain, crop(domain, stages['base']), sea)
-            spacing = config['render']['warp_grid_km']
-            width = 0.75 * domain.fine_km / spacing
-            xw, yw = (crop(domain, values) / spacing for values in stages['warp'])
-            lines = (np.abs(xw - np.round(xw)) < width) | (np.abs(yw - np.round(yw)) < width)
-            rgb[lines] = (255, 255, 255)
+            rgb[warp_lines(domain, crop_points(domain, stages['warp']), config['render']['warp_grid_km'])] = \
+                (255, 255, 255)
         elif key == 'hardness':
             values = np.log(crop(domain, stages['hardness'])) / 0.7  # +-0.7 in ln K spans the palette
             rgb = colourize(values, HARDNESS_STOPS)
@@ -1905,6 +2214,23 @@ def render_stages(domain, fields, final_elevation, config, directory):
 
 
 STRETCH_STOPS = [(1.0, (12, 16, 40)), (1.5, (40, 70, 140)), (2.5, (220, 120, 40)), (4.0, (255, 240, 200))]
+
+
+def crop_points(domain, points):
+    """(3, rows, columns) positions cropped to the kept window."""
+    return np.stack([crop(domain, component) for component in points])
+
+
+def warp_lines(domain, points, spacing_km):
+    """The warp's grid: the graticule every spacing_km (of the equator's degrees) carried by the displacement, i.e.
+    the cells whose moved position lies within 0.75 of a pixel of a parallel or a meridian of that spacing."""
+    latitude = np.degrees(np.arctan2(points[2], np.hypot(points[0], points[1])))
+    longitude = np.degrees(np.arctan2(points[1], points[0]))
+    step = spacing_km / (domain.radius_km * math.pi / 180.0)
+    width = 0.75 * domain.fine_km / spacing_km
+    a, b = latitude / step, longitude / step
+    return (np.abs(a - np.round(a)) < width) | \
+        (np.abs(b - np.round(b)) < width / np.maximum(np.cos(np.radians(latitude)), 0.05))
 
 
 def nice_spacing_km(width_km, lines=12):
@@ -1943,9 +2269,7 @@ def render_diagnostics(domain, fields, config, directory):
     width_km = (domain.crop[3] - domain.crop[2] if domain.crop else domain.columns) * domain.fine_km
     spacing = config['render']['warp_grid_km'] if domain.whole else nice_spacing_km(width_km)
     rgb = relief_rgb(domain, crop(domain, stages['base']), sea)
-    line = 0.75 * domain.fine_km / spacing
-    xw, yw = (crop(domain, values) / spacing for values in stages['warp'])
-    rgb[(np.abs(xw - np.round(xw)) < line) | (np.abs(yw - np.round(yw)) < line)] = (255, 255, 255)
+    rgb[warp_lines(domain, crop_points(domain, stages['warp']), spacing)] = (255, 255, 255)
     images.append((f'warp: a {spacing:g} km grid carried by the displacement, on the base relief', 'warp-grid'))
     maps = [rgb]
     ratio, axis = (crop(domain, values) for values in stages['stretch'])
@@ -2180,7 +2504,7 @@ pre{{background:#0d0f12;padding:8px;overflow:auto;font-size:12px}}</style></head
 <h2>Timings and physics</h2><pre>{timings}</pre></body></html>"""
 
 
-def write_page(directory, label, sections, config, timings):
+def write_page(directory, label, sections, config, timings, bundle=None):
     html = []
     for title, images in sections:
         figures = ''.join(f'<figure><a href="{path}"><img src="{path}"></a><figcaption>{caption}</figcaption></figure>'
@@ -2190,12 +2514,250 @@ def write_page(directory, label, sections, config, timings):
             'the W3 baseline, 400 Myr) and the terrain stages, before the climate and the global erosion. Uniform runoff, no climate. Windows are zooms of the same '
             'noise functions; their physics runs alone (no rivers pinned from the world), on the window plus a '
             'margin with a sea ring, cropped.')
+    if bundle is not None and bundle.grid_kind == 'cube':
+        note = (f'Seed 1; base: {config.get("base_bundle")}, a cube bundle of {bundle.face_cells} cells per face edge '
+                f'({bundle.recipe}). ' + ('The global domain runs on the cube (cube.enabled); its maps are drawn from '
+                                          'the lat-lon export.' if config.get('cube', {}).get('enabled', False)
+                                          else 'The sandbox runs on its lat-lon export.'))
     (directory / 'index.html').write_text(PAGE.format(label=label, note=note, sections=''.join(html),
                                                       config=json.dumps(config, indent=1),
                                                       timings=json.dumps(timings, indent=1)), encoding='utf-8')
 
 
 # ---------------------------------------------------------------- main
+
+def save_array(domain, directory, key, values, dtype=np.float32):
+    """<domain>-<key>.npy (lat-lon, cropped to the kept window) or <domain>-<key>-native.npy ((6, N, N), a cube)."""
+    if domain.kind == 'cube':
+        N = domain.grid.N
+        np.save(directory / f'{domain.name}-{key}-native.npy', np.asarray(values).astype(dtype).reshape(6, N, N))
+    else:
+        np.save(directory / f'{domain.name}-{key}.npy', crop(domain, values).astype(dtype))
+
+
+def domain_smooth(domain, field, sigma):
+    """A Gaussian of sigma fine cells on the domain (mode nearest on lat-lon; the slots on a cube)."""
+    if domain.kind == 'cube':
+        return domain.grid.smooth(field, sigma)
+    return ndimage.gaussian_filter(field, sigma, mode='nearest')
+
+
+def opening(domain, mask, steps):
+    """A morphological opening by `steps` 3 x 3 steps."""
+    if domain.kind == 'cube':
+        return domain.grid.dilate(domain.grid.erode(mask, steps), steps)
+    return ndimage.binary_opening(mask, structure=EIGHT, iterations=steps)
+
+
+def finish_physics(domain, fields, config, run_config, directory, band, nest_info, timing):
+    """The physics and everything after it on the domain (the sea restored, the coast and micro terms on the final
+    shore, the lakes, the filter): returns the arrays the maps draw."""
+    physics_started = time.perf_counter()
+    elevation, discharge, ice, totals, report = run_physics(domain, fields, run_config, directory)
+    timing['physics'] = time.perf_counter() - physics_started
+    timing['physics_report'] = report
+    # The physics' input surface (after the depression fill), for measuring what the physics changed.
+    save_array(domain, directory, 'elevation-procedural', fields['surface'])
+    for name, values in totals.items():  # per-cell totals for later mineral work
+        save_array(domain, directory, name, values)
+    if config['render'].get('save_extra', False) or nesting_on(config):  # for measurements (roadmap
+        # T1.6) and a nested child's inflow: the final routing's discharge (m3/s, the rivers drawn)
+        save_array(domain, directory, 'discharge', discharge)
+    if config['render'].get('save_extra', False):  # the depth relief.fill_depressions added (m)
+        save_array(domain, directory, 'fill_m', fields['surface'] - fields['stages']['filter'])
+    # The sea keeps its procedural depth: the marine deposition's straight walks are not what is judged.
+    # Land cut below the sea and connected to it (a fjord, a drowned river mouth) becomes sea.
+    procedural_sea = fields['sea'].copy()  # the open sea before the physics flooded its troughs
+    plan = schedule(run_config)
+    restored = fields['sea']
+    if plan and plan.get('keep_shelf', False):
+        # The shelf the lowstand exposed keeps the physics' surface (the valleys cut across it, drowned
+        # by the rise); only the sea deeper than the lowest level gets its procedural depth back. A shelf
+        # cell the physics left above the sea (a lowstand deposit) is land, as in the physics' routing.
+        restored = fields['sea'] & (fields['surface'] <= min(level for _, level in plan['sea_history']))
+        if plan['keep_shelf'] == 'incision':
+            # Only the cutting stays: the lowstand's rivers filled F-troughs' shallow bay with deposits
+            # that kept it land after the rise (sl-v1, the user: "the bay emptied"). The exposed shelf
+            # keeps the lower of the physics' surface and its procedural depth, so it is sea again.
+            shelf = fields['sea'] & ~restored
+            elevation = np.where(shelf, np.minimum(elevation, fields['surface']), elevation)
+    elevation = np.where(restored, fields['surface'], elevation)
+    sea = restored | connected_sea(domain, elevation <= 0.0, fields['sea'])
+    fields['sea'] = sea
+    if nest_info is not None:  # rule B's checks after the physics (nested_after_physics)
+        nest_info['after_physics'] = nested_after_physics(domain, fields, elevation, sea, discharge, nest_info)
+    coast = {**config['coast'], **band}
+    if coast['amplitude_m'] > 0 and coast.get('after_physics', False):
+        # The coast term again on the final shoreline: troughs the physics cut below the sea and the sea
+        # flooded have the smooth walls of an ice-carved valley (F-troughs' inlet), which the term before
+        # the physics never saw. Then the sea is flooded again from the sea it had.
+        elevation = elevation + coast_detail(domain, elevation, elevation, fields['coords'], fields['amplitude'],
+                                             fields['erodibility'], coast, config['seed'] + 1)
+        sea = connected_sea(domain, elevation <= 0.0, sea)
+        fields['sea'] = sea
+    micro = {**config.get('micro', {'enabled': False}), **band}  # a nested level: its band only
+    if micro['enabled'] and micro.get('when', 'after') == 'after':
+        # The shoreline texture on the final coast: drawn before the physics, 20 Myr of erosion and
+        # marine filling took its few-km headlands and pockets back to a smooth arc (F-troughs, v16).
+        moved, plain = fields['warped'], fields['plain']
+        # The open sea: the final sea less every part narrower than about open_width_km (a morphological
+        # opening), so the glacial troughs it flooded inland (G-coast) are not shores, while a bay is.
+        steps = max(1, int(round(micro['open_width_km'] / 2.0 / domain.fine_km)))
+        open_sea = opening(domain, sea, steps) & procedural_sea.any()
+        elevation = elevation + micro_texture(domain, elevation, sea, moved, plain, fields['ratio'], micro,
+                                              config['seed'], open_sea=open_sea)
+        sea = connected_sea(domain, elevation <= 0.0, sea)
+        fields['sea'] = sea
+    spec = config['filter']
+    result = {'filter_field': None}
+    if nest_info is not None and config['nesting'].get('project_after_physics', False):
+        started_projection = time.perf_counter()
+        elevation, nest_info['after_physics_projection'] = nested_project_after(domain, fields, elevation, sea,
+                                                                                discharge, config)
+        timing['projection_after_physics'] = time.perf_counter() - started_projection
+    save_array(domain, directory, 'elevation-physics', elevation)
+    result['elevation_physics'] = elevation
+    if nesting_on(config):  # a nested child's parent sea
+        save_array(domain, directory, 'sea', sea, dtype=bool)
+    lakes = config.get('lakes', {'enabled': False})
+    lake = np.zeros_like(sea)
+    levels = None
+    if lakes['enabled']:  # the closed depressions the physics left, before the filter (which spares them)
+        levels = find_lakes(domain, elevation, sea, lakes)
+        lake = np.isfinite(levels)
+        timing['lakes_before_filter'] = int(grid_label(domain, crop(domain, lake))[1])
+    if spec['enabled'] and spec.get('when', 'before') == 'after':  # fine texture on the eroded surface
+        field = filter_field(domain, fields, ice, spec, config['seed'])
+        detail = erosion_pass(domain, elevation, fields['coords'], fields['amplitude'], fields['erodibility'], spec,
+                              config['seed'], field=field)
+        land = ~sea & ~lake  # lakes are water to the filter, as the sea: no texture on their beds
+        if spec.get('mean_preserve', 'none') == 'smooth':
+            # Take out the filter's broad component (its mean over about a world cell, land only), so
+            # the averages over world cells stay close to the physics' (not exact: the pipeline's
+            # projection does that).
+            sigma = domain.k / 2.0
+            weight = domain_smooth(domain, land.astype(float), sigma)
+            broad = domain_smooth(domain, np.where(land, detail, 0.0), sigma) / np.maximum(weight, 1e-6)
+            detail = detail - broad
+        elevation = np.where(land, np.maximum(elevation + detail, 1.0), elevation)
+        if spec.get('fill_pits', False):
+            # filter.fill_pits (roadmap T1.6): the filter's lowering (its gullies and height_offset, both
+            # scaled by a strength that slope_fade raises with the slope) is deep on a slope and nil on the
+            # flatter floor below it, so the foot of the slope becomes a closed pit (G-coast: 7 % of the land,
+            # up to 1.2 km deep). They are filled as the relief's pits (sloped_fill: relief.fill_gradient with
+            # the fill noise) from the sea and the physics' lakes, which stand at their spill level before
+            # the filter.
+            water = sea | lake
+            outlets = elevation if levels is None else np.where(lake, levels, elevation)
+            filled = sloped_fill(domain, outlets, water, config['relief']['fill_gradient'], fields['fill_noise'])
+            raised = crop(domain, np.where(water, 0.0, filled - outlets))
+            timing['filter_pits_land_pct'] = round(100.0 * float((raised > 1.0).sum()) /
+                                                   max(float((~crop(domain, water)).sum()), 1.0), 2)
+            timing['filter_pits_max_m'] = round(float(raised.max()), 1)
+            elevation = np.where(water, elevation, filled)
+        if not domain.whole:
+            result['filter_field'] = field
+    save_array(domain, directory, 'elevation', elevation)
+    lake_surface = None
+    if lakes['enabled']:  # the physics' lakes at their spill level on the final surface
+        lake_surface = find_lakes(domain, elevation, sea, lakes, physics_lakes=lake)
+        save_array(domain, directory, 'lake-surface', lake_surface)
+        timing.update(lake_statistics(domain, elevation, lake_surface))
+    result.update(elevation=elevation, discharge=discharge, ice=ice, totals=totals, lake_surface=lake_surface)
+    return result
+
+
+STAGE_KEYS = ('base', 'seafloor', 'relief', 'uplands', 'hardness', 'coast', 'precipitation', 'filter', 'fill')
+
+
+def export_for_render(domain, fields, result, config, directory):
+    """A cube domain's arrays on its lat-lon export (cube_domain.export: bilinear for continuous fields, nearest for
+    the sea, the codes, the angles, the discharge and the lakes) and the lat-lon Domain the maps are drawn on.
+    Saves the elevations' and the lake surface's exports as <domain>-<name>.npy. Returns (view, fields, result)."""
+    columns = config.get('cube', {}).get('export_columns') or domain.columns
+    base = domain.base_face_cells
+    if columns % (4 * base):
+        raise ValueError(f'cube.export_columns {columns} is not a multiple of the base\'s {4 * base}')
+    view = Domain(domain.name, columns, columns // 2, 0.0, 0.0, columns // (4 * base), 4 * base, 2 * base,
+                  domain.radius_km, exaggeration=domain.exaggeration, physics=domain.physics)
+    stages = fields['stages']
+    arrays = {f'stage-{key}': (stages[key], 'bilinear') for key in STAGE_KEYS}
+    arrays.update({f'warp-{axis}': (stages['warp'][axis], 'bilinear') for axis in range(3)})
+    arrays.update({'stretch-ratio': (stages['stretch'][0], 'bilinear'), 'stretch-axis': (stages['stretch'][1], 'nearest'),
+                   'strike-theta': (stages['strike'][0], 'nearest'), 'strike-alignment': (stages['strike'][1], 'bilinear'),
+                   'sea': (fields['sea'].astype(np.float32), 'nearest'), 'surface': (fields['surface'], 'bilinear'),
+                   'procedural-sea': (fields['procedural_sea'].astype(np.float32), 'nearest')})
+    if fields['province'] is not None:
+        arrays.update({'stability': (fields['stability'], 'bilinear'), 'province': (fields['province'], 'nearest')})
+    if result.get('elevation') is not None:
+        arrays.update({'elevation': (result['elevation'], 'bilinear'), 'discharge': (result['discharge'], 'nearest'),
+                       'elevation-physics': (result['elevation_physics'], 'bilinear')})
+        if result['ice'] is not None:
+            arrays['ice'] = (result['ice'], 'bilinear')
+        if result['lake_surface'] is not None:
+            arrays['lake-surface'] = (result['lake_surface'], 'nearest')
+        arrays.update({f'total-{name}': (values, 'bilinear') for name, values in result['totals'].items()})
+    out = cube_domain.export(PHYSICS, domain, arrays, directory, columns)
+    vstages = {key: out[f'stage-{key}'] for key in STAGE_KEYS}
+    vstages.update(warp=np.stack([out[f'warp-{axis}'] for axis in range(3)]),
+                   stretch=(out['stretch-ratio'], out['stretch-axis']),
+                   strike=(out['strike-theta'], out['strike-alignment']))
+    vfields = {'stages': vstages, 'sea': out['sea'] > 0.5, 'surface': out['surface'],
+               'procedural_sea': out['procedural-sea'] > 0.5, 'stability': out.get('stability'),
+               'province': None if 'province' not in out else np.rint(out['province']).astype(np.uint8)}
+    vresult = {'filter_field': None}
+    if result.get('elevation') is not None:
+        vresult.update(elevation=out['elevation'], discharge=out['discharge'], ice=out.get('ice'),
+                       lake_surface=out.get('lake-surface'), elevation_physics=out['elevation-physics'],
+                       totals={name: out[f'total-{name}'] for name in result['totals']})
+        for key, values in (('elevation', out['elevation']), ('elevation-physics', out['elevation-physics']),
+                            ('lake-surface', out.get('lake-surface'))):
+            if values is not None:
+                np.save(directory / f'{domain.name}-{key}.npy', values.astype(np.float32))
+    np.save(directory / f'{domain.name}-elevation-procedural.npy', out['stage-fill'].astype(np.float32))
+    return view, vfields, vresult
+
+
+def render_domain(domain, fields, result, config, directory, physics_on, nest_info):
+    """The maps of a domain (on a cube: its lat-lon export, export_for_render). Returns the page's sections."""
+    images = []
+    province_images = []
+    if fields['province'] is not None:
+        province_images, _ = render_provinces(domain, {**fields, 'sea': fields['procedural_sea']}, directory)
+    if config['render'].get('before_physics', False) or not physics_on:
+        before = render(domain, fields['surface'], fields['procedural_sea'], None, directory, '-procedural')
+        images += [('relief before physics', before['relief'])]
+    if physics_on:
+        extra = []
+        if result['filter_field'] is not None:
+            save_map(domain, directory / f'{domain.name}-filter-field.png',
+                     colourize(crop(domain, result['filter_field']), FIELD_STOPS))
+            extra = [('filter strength field (black 0, white 1, orange 2 and more)', f'{domain.name}-filter-field.png')]
+        lakes = config.get('lakes', {'enabled': False})
+        rivers = config.get('rivers', {'enabled': False})
+        after = render(domain, result['elevation'], fields['sea'], result['discharge'], directory, ice=result['ice'],
+                       lake_surface=result['lake_surface'], rivers=rivers if rivers['enabled'] else None)
+        water = water_note(domain, lakes, rivers)
+        images = [(f'elevation{water}', after['elevation']), (f'relief (hillshade, NW light){water}', after['relief']),
+                  ('discharge (log, stretched from the median to the maximum)', after['discharge'])] + extra + \
+            render_totals(domain, result['totals'], fields['sea'], directory) + province_images + images
+    else:
+        images = [('elevation (procedural, no physics)', before['elevation'])] + province_images + images
+    if nest_info is not None:
+        start_images = render(domain, fields['surface'], fields['sea'], None, directory, '-start')
+        images.append(('start (rule B): the parent prolonged, the level\'s detail, the new pits filled, projected '
+                       'onto the parent\'s cell means', start_images['relief']))
+    title = 'Whole world' if domain.whole else f'Window {domain.name}'
+    sections = [(f'{title} ({domain.columns if domain.whole else domain.crop[3] - domain.crop[2]} columns, '
+                 f'{domain.fine_km:.2f} km cells, k {domain.k})', images)]
+    if config['render'].get('diagnostics', True):
+        sections.append((f'{title}: what gives the terrain its direction', render_diagnostics(domain, fields, config,
+                                                                                                directory)))
+    if domain.whole and config['render'].get('stages', True):
+        stage_images = render_stages(domain, fields, result['elevation'] if physics_on else None, config, directory)
+        sections.append(('Whole world, stage by stage (each map the surface so far)', stage_images))
+    return sections
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -2215,19 +2777,19 @@ def main():
     directory = ROOT / 'out' / 'scratch' / 'sandbox' / arguments.label
     directory.mkdir(parents=True, exist_ok=True)
     bundle = Bundle.open(ROOT / config['base_bundle'])
-    world = world_fields(bundle)
+    world = world_fields(bundle, native=cube_on(config, bundle))
     radius_m = float(bundle.manifest.get('parameters', {}).get('world.body.radius_km', 6371.0)) * 1000.0
     world['precipitation'] = precipitation(world, config['precipitation'], radius_m)
     if config['seafloor'].get('abyss', {}).get('enabled', False):
         world['elevation'] = damp_abyss(world, config['seafloor']['abyss'])
-    world['ocean'] = ocean_world(world, config['seafloor'], config['seed'], radius_m / 1000.0)
+    world['ocean'] = ocean_world(world, config['seafloor'], config['seed'], radius_m / 1000.0, directory)
     if config.get('platform', {}).get('enabled', False):
         world['provinces'] = provinces_world(world, config['platform'], 2.0 * math.pi * radius_m / 1000.0 / bundle.columns)
     names = arguments.domains.split(',') if arguments.domains else config['default_domains']
     names = run_order(config, names, arguments.parent_run)
     physics_on = config['physics']['enabled'] and not arguments.no_physics
     sections, timings = [], {}
-    for domain in make_domains(config, bundle, names):
+    for domain in make_domains(config, bundle, names, directory):
         started = time.perf_counter()
         parent_name = config['domains'][domain.name].get('parent') if nesting_on(config) else None
         run_config, nest_info, band = config, None, {}
@@ -2241,147 +2803,15 @@ def main():
         else:
             fields, timing = procedural(domain, world, config, config['seed'])
         timing.update(fields['fill_stats'])
-        images = []
-        province_images = []
-        if fields['province'] is not None:
-            province_images, timing['province_land_pct'] = render_provinces(domain, fields, directory)
-        if config['render'].get('before_physics', False) or not physics_on:
-            before = render(domain, fields['surface'], fields['sea'], None, directory, '-procedural')
-            if not physics_on:  # for scripts/sandbox/hypsometry.py and other measurements
-                np.save(directory / f'{domain.name}-elevation.npy', crop(domain, fields['surface']).astype(np.float32))
-            images += [('relief before physics', before['relief'])]
-        if physics_on:
-            physics_started = time.perf_counter()
-            elevation, discharge, ice, totals, report = run_physics(domain, fields, run_config, directory)
-            timing['physics'] = time.perf_counter() - physics_started
-            timing['physics_report'] = report
-            # The physics' input surface (after the depression fill), for measuring what the physics changed.
-            np.save(directory / f'{domain.name}-elevation-procedural.npy', crop(domain, fields['surface']).astype(np.float32))
-            for name, values in totals.items():  # per-cell totals for later mineral work
-                np.save(directory / f'{domain.name}-{name}.npy', crop(domain, values).astype(np.float32))
-            if config['render'].get('save_extra', False) or nesting_on(config):  # for measurements (roadmap
-                # T1.6) and a nested child's inflow: the final routing's discharge (m3/s, the rivers drawn)
-                np.save(directory / f'{domain.name}-discharge.npy', crop(domain, discharge).astype(np.float32))
-            if config['render'].get('save_extra', False):  # the depth relief.fill_depressions added (m)
-                np.save(directory / f'{domain.name}-fill_m.npy',
-                        crop(domain, fields['surface'] - fields['stages']['filter']).astype(np.float32))
-            # The sea keeps its procedural depth: the marine deposition's straight walks are not what is judged.
-            # Land cut below the sea and connected to it (a fjord, a drowned river mouth) becomes sea.
-            procedural_sea = fields['sea'].copy()  # the open sea before the physics flooded its troughs
-            plan = schedule(run_config)
-            restored = fields['sea']
-            if plan and plan.get('keep_shelf', False):
-                # The shelf the lowstand exposed keeps the physics' surface (the valleys cut across it, drowned
-                # by the rise); only the sea deeper than the lowest level gets its procedural depth back. A shelf
-                # cell the physics left above the sea (a lowstand deposit) is land, as in the physics' routing.
-                restored = fields['sea'] & (fields['surface'] <= min(level for _, level in plan['sea_history']))
-                if plan['keep_shelf'] == 'incision':
-                    # Only the cutting stays: the lowstand's rivers filled F-troughs' shallow bay with deposits
-                    # that kept it land after the rise (sl-v1, the user: "the bay emptied"). The exposed shelf
-                    # keeps the lower of the physics' surface and its procedural depth, so it is sea again.
-                    shelf = fields['sea'] & ~restored
-                    elevation = np.where(shelf, np.minimum(elevation, fields['surface']), elevation)
-            elevation = np.where(restored, fields['surface'], elevation)
-            labels, _ = ndimage.label(elevation <= 0.0, structure=np.ones((3, 3)))
-            touching = np.unique(labels[(labels > 0) & fields['sea']])
-            sea = restored | np.isin(labels, touching[touching > 0])
-            fields['sea'] = sea
-            if nest_info is not None:  # rule B's checks after the physics (nested_after_physics)
-                nest_info['after_physics'] = nested_after_physics(domain, fields, elevation, sea, discharge, nest_info)
-            coast = {**config['coast'], **band}
-            if coast['amplitude_m'] > 0 and coast.get('after_physics', False):
-                # The coast term again on the final shoreline: troughs the physics cut below the sea and the sea
-                # flooded have the smooth walls of an ice-carved valley (F-troughs' inlet), which the term before
-                # the physics never saw. Then the sea is flooded again from the sea it had.
-                x, y = fields['coords']
-                elevation = elevation + coast_detail(domain, elevation, elevation, x, y, fields['amplitude'],
-                                                     fields['erodibility'], coast, config['seed'] + 1)
-                labels, _ = ndimage.label(elevation <= 0.0, structure=np.ones((3, 3)))
-                touching = np.unique(labels[(labels > 0) & sea])
-                sea = np.isin(labels, touching[touching > 0])
-                fields['sea'] = sea
-            micro = {**config.get('micro', {'enabled': False}), **band}  # a nested level: its band only
-            if micro['enabled'] and micro.get('when', 'after') == 'after':
-                # The shoreline texture on the final coast: drawn before the physics, 20 Myr of erosion and
-                # marine filling took its few-km headlands and pockets back to a smooth arc (F-troughs, v16).
-                (xw, yw), (xp, yp) = fields['warped'], fields['plain']
-                # The open sea: the final sea less every part narrower than about open_width_km (a morphological
-                # opening), so the glacial troughs it flooded inland (G-coast) are not shores, while a bay is.
-                steps = max(1, int(round(micro['open_width_km'] / 2.0 / domain.fine_km)))
-                open_sea = ndimage.binary_opening(sea, structure=np.ones((3, 3)), iterations=steps) & procedural_sea.any()
-                elevation = elevation + micro_texture(domain, elevation, sea, xw, yw, xp, yp, fields['ratio'], micro,
-                                                      config['seed'], open_sea=open_sea)
-                labels, _ = ndimage.label(elevation <= 0.0, structure=np.ones((3, 3)))
-                touching = np.unique(labels[(labels > 0) & sea])
-                sea = np.isin(labels, touching[touching > 0])
-                fields['sea'] = sea
-            spec = config['filter']
-            extra = []
-            if nest_info is not None and config['nesting'].get('project_after_physics', False):
-                started_projection = time.perf_counter()
-                elevation, nest_info['after_physics_projection'] = nested_project_after(domain, fields, elevation, sea,
-                                                                                        discharge, config)
-                timing['projection_after_physics'] = time.perf_counter() - started_projection
-            np.save(directory / f'{domain.name}-elevation-physics.npy', crop(domain, elevation).astype(np.float32))
-            if nesting_on(config):  # a nested child's parent sea
-                np.save(directory / f'{domain.name}-sea.npy', crop(domain, sea))
-            lakes = config.get('lakes', {'enabled': False})
-            lake = np.zeros_like(sea)
-            levels = None
-            if lakes['enabled']:  # the closed depressions the physics left, before the filter (which spares them)
-                levels = find_lakes(domain, elevation, sea, lakes)
-                lake = np.isfinite(levels)
-                timing['lakes_before_filter'] = int(ndimage.label(crop(domain, lake), structure=np.ones((3, 3)))[1])
-            if spec['enabled'] and spec.get('when', 'before') == 'after':  # fine texture on the eroded surface
-                x, y = fields['coords']
-                field = filter_field(domain, fields, ice, spec, config['seed'])
-                detail = erosion_pass(domain, elevation, x, y, fields['amplitude'], fields['erodibility'], spec,
-                                      config['seed'], field=field)
-                land = ~sea & ~lake  # lakes are water to the filter, as the sea: no texture on their beds
-                if spec.get('mean_preserve', 'none') == 'smooth':
-                    # Take out the filter's broad component (its mean over about a world cell, land only), so
-                    # the averages over world cells stay close to the physics' (not exact: the pipeline's
-                    # projection does that).
-                    sigma = domain.k / 2.0
-                    weight = ndimage.gaussian_filter(land.astype(float), sigma, mode='nearest')
-                    broad = ndimage.gaussian_filter(np.where(land, detail, 0.0), sigma, mode='nearest') / \
-                        np.maximum(weight, 1e-6)
-                    detail = detail - broad
-                elevation = np.where(land, np.maximum(elevation + detail, 1.0), elevation)
-                if spec.get('fill_pits', False):
-                    # filter.fill_pits (roadmap T1.6): the filter's lowering (its gullies and height_offset, both
-                    # scaled by a strength that slope_fade raises with the slope) is deep on a slope and nil on the
-                    # flatter floor below it, so the foot of the slope becomes a closed pit (G-coast: 7 % of the land,
-                    # up to 1.2 km deep). They are filled as the relief's pits (sloped_fill: relief.fill_gradient with
-                    # the fill noise) from the sea and the physics' lakes, which stand at their spill level before
-                    # the filter.
-                    water = sea | lake
-                    outlets = elevation if levels is None else np.where(lake, levels, elevation)
-                    filled = sloped_fill(domain, outlets, water, config['relief']['fill_gradient'], fields['fill_noise'])
-                    raised = crop(domain, np.where(water, 0.0, filled - outlets))
-                    timing['filter_pits_land_pct'] = round(100.0 * float((raised > 1.0).sum()) /
-                                                           max(float((~crop(domain, water)).sum()), 1.0), 2)
-                    timing['filter_pits_max_m'] = round(float(raised.max()), 1)
-                    elevation = np.where(water, elevation, filled)
-                if not domain.whole:
-                    save_map(domain, directory / f'{domain.name}-filter-field.png',
-                             colourize(crop(domain, field), FIELD_STOPS))
-                    extra = [('filter strength field (black 0, white 1, orange 2 and more)', f'{domain.name}-filter-field.png')]
-            np.save(directory / f'{domain.name}-elevation.npy', crop(domain, elevation).astype(np.float32))
-            lake_surface = None
-            if lakes['enabled']:  # the physics' lakes at their spill level on the final surface
-                lake_surface = find_lakes(domain, elevation, sea, lakes, physics_lakes=lake)
-                np.save(directory / f'{domain.name}-lake-surface.npy', crop(domain, lake_surface).astype(np.float32))
-                timing.update(lake_statistics(domain, elevation, lake_surface))
-            rivers = config.get('rivers', {'enabled': False})
-            after = render(domain, elevation, sea, discharge, directory, ice=ice, lake_surface=lake_surface,
-                           rivers=rivers if rivers['enabled'] else None)
-            water = water_note(domain, lakes, rivers)
-            images = [(f'elevation{water}', after['elevation']), (f'relief (hillshade, NW light){water}', after['relief']),
-                      ('discharge (log, stretched from the median to the maximum)', after['discharge'])] + extra + \
-                render_totals(domain, totals, sea, directory) + province_images + images
+        fields['procedural_sea'] = fields['sea'].copy()
+        if fields['province'] is not None:  # shares of the procedural land by the cells' areas
+            timing['province_land_pct'] = province_shares(crop(domain, fields['province']), ~crop(domain, fields['sea']),
+                                                          crop(domain, domain.area_km2()))
+        result = {'elevation': None, 'filter_field': None}
+        if not physics_on:  # for scripts/sandbox/hypsometry.py and other measurements
+            save_array(domain, directory, 'elevation', fields['surface'])
         else:
-            images = [('elevation (procedural, no physics)', before['elevation'])] + province_images + images
+            result = finish_physics(domain, fields, config, run_config, directory, band, nest_info, timing)
         if nest_info is not None:
             (directory / f'{domain.name}-nest.json').write_text(json.dumps(nest_info, indent=1) + '\n', encoding='utf-8')
             start = nest_info['start_departure_m']
@@ -2398,23 +2828,22 @@ def main():
                               'inflow_m3_s': round(nest_info['inflow']['placed_m3_s_total'], 1),
                               'after_physics': {key: value for key, value in nest_info.get('after_physics', {}).items()
                                                 if key != 'inflow_continuity'}}
-            start_images = render(domain, fields['surface'], fields['sea'], None, directory, '-start')
-            images.append(('start (rule B): the parent prolonged, the level\'s detail, the new pits filled, projected '
-                           'onto the parent\'s cell means', start_images['relief']))
+        if domain.kind == 'cube':
+            if not physics_on:
+                np.save(directory / f'{domain.name}-elevation.npy',
+                        cube_domain.export(PHYSICS, domain, {'elevation': (fields['surface'], 'bilinear')}, directory,
+                                           config.get('cube', {}).get('export_columns'))['elevation'].astype(np.float32))
+            view, view_fields, view_result = export_for_render(domain, fields, result, config, directory)
+            timing['cube'] = {'face_cells': domain.grid.N, 'base_face_cells': domain.base_face_cells, 'k': domain.k,
+                              'cells': domain.grid.n, 'export_columns': view.columns}
+        else:
+            view, view_fields, view_result = domain, fields, result
+        sections += render_domain(view, view_fields, view_result, config, directory, physics_on, nest_info)
         timing['total'] = time.perf_counter() - started
         timings[domain.name] = {key: (round(value, 2) if isinstance(value, float) else value) for key, value in timing.items()}
-        title = 'Whole world' if domain.whole else f'Window {domain.name}'
-        sections.append((f'{title} ({domain.columns if domain.whole else domain.crop[3] - domain.crop[2]} columns, '
-                         f'{domain.fine_km:.2f} km cells, k {domain.k})', images))
-        if config['render'].get('diagnostics', True):
-            sections.append((f'{title}: what gives the terrain its direction', render_diagnostics(domain, fields, config,
-                                                                                                    directory)))
-        if domain.whole and config['render'].get('stages', True):
-            stage_images = render_stages(domain, fields, elevation if physics_on else None, config, directory)
-            sections.append(('Whole world, stage by stage (each map the surface so far)', stage_images))
         print(f'{domain.name}: {timings[domain.name]}', flush=True)
     (directory / 'config.json').write_text(json.dumps(config, indent=1), encoding='utf-8')
-    write_page(directory, arguments.label, sections, config, timings)
+    write_page(directory, arguments.label, sections, config, timings, bundle)
     print(directory / 'index.html')
 
 
