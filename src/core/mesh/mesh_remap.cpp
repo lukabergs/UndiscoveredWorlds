@@ -272,26 +272,29 @@ RemapWeights makeremap(const CellGrid& source, const CellGrid& destination, Rema
 
 BilinearStencil bilinearstencil(const CellGrid& grid, const Vec3& p)
 {
-    CellId global[4];
+    // Level keys of the full grid (sphere-mesh.md section 8): a window of any level
+    // resolves them with localofkey, without the level's full grid.
+    LevelKey global[4];
     bool present[4] = { true, true, true, true };
     double weight[4];
     if (grid.kind() == GridKind::cube)
     {
-        const int n = grid.facecells();
+        const std::int64_t n = grid.facecells();
         const FacePosition position = cubeposition(p);
         const double step = cubestep(n);
-        const double fi = position.a / step + 0.5 * n - 0.5, fj = 0.5 * n - position.b / step - 0.5;
-        const int i0 = static_cast<int>(std::floor(fi)), j0 = static_cast<int>(std::floor(fj));
-        const double tx = fi - i0, ty = fj - j0;
-        const int is[4] = { i0, i0 + 1, i0, i0 + 1 }, js[4] = { j0, j0, j0 + 1, j0 + 1 };
+        const double half = 0.5 * static_cast<double>(n);
+        const double fi = position.a / step + half - 0.5, fj = half - position.b / step - 0.5;
+        const std::int64_t i0 = static_cast<std::int64_t>(std::floor(fi)), j0 = static_cast<std::int64_t>(std::floor(fj));
+        const double tx = fi - static_cast<double>(i0), ty = fj - static_cast<double>(j0);
+        const std::int64_t is[4] = { i0, i0 + 1, i0, i0 + 1 }, js[4] = { j0, j0, j0 + 1, j0 + 1 };
         weight[0] = (1.0 - tx) * (1.0 - ty);
         weight[1] = tx * (1.0 - ty);
         weight[2] = (1.0 - tx) * ty;
         weight[3] = tx * ty;
         for (int m = 0; m < 4; m++)
         {
-            const int ci = std::clamp(is[m], 0, n - 1), cj = std::clamp(js[m], 0, n - 1);
-            const CellId base = cubeid(n, position.face, ci, cj);
+            const std::int64_t ci = std::clamp(is[m], std::int64_t{ 0 }, n - 1), cj = std::clamp(js[m], std::int64_t{ 0 }, n - 1);
+            const LevelKey base = cubekey(n, position.face, ci, cj);
             const bool outi = ci != is[m], outj = cj != js[m];
             int slot = 0;
             if (outi && outj)
@@ -304,9 +307,9 @@ BilinearStencil bilinearstencil(const CellGrid& grid, const Vec3& p)
                 global[m] = base;
             else
             {
-                const std::int32_t other = cubeneighbour(n, base, slot);
-                present[m] = other >= 0;
-                global[m] = other < 0 ? 0 : static_cast<CellId>(other);
+                const LevelKey other = cubekeyneighbour(n, base, slot);
+                present[m] = other != nokey;
+                global[m] = other == nokey ? 0 : other;
             }
         }
     }
@@ -319,7 +322,7 @@ BilinearStencil bilinearstencil(const CellGrid& grid, const Vec3& p)
         const double tx = fi - i0, ty = fj - j0;
         const int x0 = ((i0 % w) + w) % w, x1 = (x0 + 1) % w;
         const int y0 = std::clamp(j0, 0, h - 1), y1 = std::clamp(j0 + 1, 0, h - 1);
-        const auto id = [w](int x, int y) { return static_cast<CellId>(y) * static_cast<CellId>(w) + static_cast<CellId>(x); };
+        const auto id = [w](int x, int y) { return static_cast<LevelKey>(y) * static_cast<LevelKey>(w) + static_cast<LevelKey>(x); };
         global[0] = id(x0, y0);
         global[1] = id(x1, y0);
         global[2] = id(x0, y1);
@@ -335,7 +338,7 @@ BilinearStencil bilinearstencil(const CellGrid& grid, const Vec3& p)
     {
         if (!present[m])
             continue;
-        const CellId local = grid.localid(global[m]);
+        const CellId local = grid.localofkey(global[m]);
         if (local == nocell)
             continue;
         stencil.cell[stencil.count] = local;
