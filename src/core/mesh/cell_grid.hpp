@@ -9,7 +9,10 @@
 // 7 W, 8 NW in the cell's own frame (geographic on lat-lon; toward v and u on a
 // cube face, also across face edges); -1 where no neighbour exists. A subgrid
 // (a window) is a grid of the same kind over a subset of cells, local ids in
-// ascending global order, neighbours outside the subset -1.
+// ascending global order, neighbours outside the subset -1. Windows of a
+// refinement level (section 8) are built from 64-bit level keys without the
+// whole level: cubewindowgrid (a key set, ascending key order) and
+// latlonwindowgrid (a box of a level's lat-lon grid, row-major box order).
 
 #include <cmath>
 #include <cstddef>
@@ -22,6 +25,10 @@ namespace mesh
 using CellId = std::uint32_t;
 constexpr CellId nocell = 0xffffffffu;  // locate() outside a subgrid
 constexpr int slotcount = 8;            // neighbour slots 1..8; 0 is none
+// A cell's id at a refinement level (sphere-mesh.md section 8): on the cube
+// f N_L^2 + j N_L + i with N_L up to 2^30; on lat-lon J W_L + I (row-major, row 0 north).
+using LevelKey = std::uint64_t;
+constexpr LevelKey nokey = ~LevelKey{ 0 };
 
 struct Vec3
 {
@@ -54,6 +61,8 @@ enum class GridKind
     cube,
     latlon,
 };
+
+struct LatLonWindowBox;
 
 class CellGrid
 {
@@ -90,11 +99,19 @@ public:
     int column(CellId c) const;
     int row(CellId c) const;
 
-    // Windows: the global id of a local id (the id itself on a full grid).
+    // Windows: the global id of a local id (the id itself on a full grid; on a
+    // level window the key when it fits 32 bits, else nocell: use globalkey).
     bool issubgrid() const { return subgrid_; }
-    CellId globalid(CellId local) const { return subgrid_ ? globalids_[local] : local; }
+    CellId globalid(CellId local) const;
     // The local id of a global id, nocell when outside (the id itself on a full grid).
     CellId localid(CellId global) const;
+    // The level key of a local id (the global id on a full grid or a subgrid) and
+    // its reverse, nocell when outside: a binary search on a cube window, closed
+    // form on a lat-lon window.
+    LevelKey globalkey(CellId local) const;
+    CellId localofkey(LevelKey key) const;
+    // A cube window's tables computed on demand (sphere-mesh.md section 8).
+    bool iscompact() const { return compact_; }
 
     // The smallest centre spacing over every cell and cardinal slot (cellsalongarc's step).
     double minimumspacing_m() const { return minimumspacing_m_; }
@@ -103,8 +120,11 @@ private:
     friend std::shared_ptr<const CellGrid> makecubegrid(int, double);
     friend std::shared_ptr<const CellGrid> makelatlongrid(int, double);
     friend std::shared_ptr<const CellGrid> subgrid(const CellGrid&, const std::vector<CellId>&);
+    friend std::shared_ptr<const CellGrid> cubewindowgrid(int, double, const std::vector<LevelKey>&, bool);
+    friend std::shared_ptr<const CellGrid> latlonwindowgrid(int, double, const LatLonWindowBox&);
 
-    CellId locateglobal(const Vec3& p) const;
+    LevelKey locatekey(const Vec3& p) const;  // the level key of the full grid's cell
+    int analyticwidth() const { return latlonwindow_ ? windowcolumns_ : columns_; }
 
     GridKind kind_ = GridKind::latlon;
     int facecells_ = 0;
@@ -137,6 +157,32 @@ private:
     // A subgrid: the ascending global ids of its cells.
     bool subgrid_ = false;
     std::vector<CellId> globalids_;
+
+    // A cube window: the ascending level keys of its cells; compact keeps only
+    // keys, centres, areas, neighbours and reverses and computes the rest.
+    bool keywindow_ = false;
+    bool compact_ = false;
+    std::vector<LevelKey> keys_;
+
+    // A lat-lon window: a box of the level grid (columns_ x rows_), its first
+    // level column and row and its size; the analytic tables are per box row
+    // and box column.
+    bool latlonwindow_ = false;
+    std::int64_t windowcolumn0_ = 0;
+    int windowrow0_ = 0;
+    int windowcolumns_ = 0;
+    int windowrows_ = 0;
+};
+
+// A box of a level's lat-lon grid in level cells: columns column0 ..
+// column0 + columns - 1, each modulo the level's columns (the box may cross the
+// date line), rows row0 .. row0 + rows - 1 (no wrap over a pole).
+struct LatLonWindowBox
+{
+    std::int64_t column0 = 0;
+    int columns = 0;
+    int row0 = 0;
+    int rows = 0;
 };
 
 // The equiangular cubed sphere of N cells per face edge (N >= 1).
@@ -146,4 +192,20 @@ std::shared_ptr<const CellGrid> makelatlongrid(int columns, double radius_m);
 // A grid over a subset of a full grid's cells (sorted and deduplicated);
 // throws std::invalid_argument for a subgrid of a subgrid or an id out of range.
 std::shared_ptr<const CellGrid> subgrid(const CellGrid& grid, const std::vector<CellId>& globalids);
+
+// A window of the cube level with facecells_L cells per face edge (1 .. 2^30)
+// over a set of level keys (sorted and deduplicated here), built in closed form
+// from the keys: local ids in ascending key order, neighbours outside the set -1,
+// distance, face length and bearing those of the full level (the cube's own
+// formulas), areas exact. Compact (about 80 bytes per cell) computes latitude,
+// longitude, distance, face length and bearing on demand, bit-identical to the
+// stored mode. Throws std::invalid_argument for N_L out of range or a key >= 6 N_L^2.
+std::shared_ptr<const CellGrid> cubewindowgrid(int facecells, double radius_m, const std::vector<LevelKey>& keys,
+                                               bool compact = false);
+// A box of the cell-centred levelcolumns x levelcolumns/2 lat-lon grid, in
+// row-major box order (local id y columns + x), nothing wrapping inside the box:
+// the tables of landscape::finepatchmetric (latitude, row spacing, area, the
+// diagonal with the cell's own row beyond the box edge), longitudes as
+// makelatlongrid's. Throws std::invalid_argument for an empty or oversized box.
+std::shared_ptr<const CellGrid> latlonwindowgrid(int levelcolumns, double radius_m, const LatLonWindowBox& box);
 }

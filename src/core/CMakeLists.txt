@@ -9,6 +9,7 @@ add_library(uw_core STATIC
     mesh/cube_geometry.cpp
     mesh/mesh_geometry.cpp
     mesh/mesh_remap.cpp
+    mesh/window_grid.cpp
     parameters.cpp
     procedural_noise.cpp
     profiler.cpp

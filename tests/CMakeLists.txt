@@ -16,6 +16,7 @@ if(TARGET uw_climate_world)
     add_executable(world_tests
         core/climate_grid_tests.cpp
         core/mesh_tests.cpp
+        core/mesh_window_tests.cpp
         core/parallel_rows_tests.cpp
         io/climate_reference_tests.cpp
         io/climate_tiff_tests.cpp
