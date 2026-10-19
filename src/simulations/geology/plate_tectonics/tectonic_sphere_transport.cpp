@@ -116,59 +116,98 @@ struct Layout {
     std::vector<std::vector<int>> moments;  // per field
 };
 
+
+// A source's amounts of one field into its four targets by the field's own profile (the corner's
+// gap shared); false when the source holds none of the field.
+bool ownamounts(const Lattice& l, CellId c, const Entry& e, const std::vector<double>& values,
+                std::array<double, 4>& amount) {
+    const double q = values[c];
+    if (q == 0) return false;  // the limiter flattens both profiles: nothing moves
+    const auto& s = l.profile(c);
+    auto px = profile(values[s[0]], values[s[1]], q, values[s[2]], values[s[3]]);
+    auto py = profile(values[s[4]], values[s[5]], q, values[s[6]], values[s[7]]);
+    const double extent = -minimum(px) - minimum(py);
+    if (extent > q) {
+        const double factor = q / extent;
+        px.linear *= factor; px.quadratic *= factor;
+        py.linear *= factor; py.quadratic *= factor;
+    }
+    std::array<double, 4> weight{};
+    int missing = -1;
+    for (int t = 0; t < 4; ++t) {
+        const int dx = t & 1, dy = t >> 1;
+        const double average = q + px.linear * e.cx[dx] + px.quadratic * e.qx[dx]
+            + py.linear * e.cy[dy] + py.quadratic * e.qy[dy];
+        weight[t] = e.wx[dx] * e.wy[dy];
+        amount[t] = weight[t] * std::max(0.0, average) * l.area_m2(c);  // roundoff at zero only
+        if (e.target[t] == nocell) missing = t;
+    }
+    if (missing >= 0) {
+        // A cube corner: the diagonal's share goes to the other three by their weights, which
+        // weigh at least 1 - 0.95^2 (a substep moves at most 0.95 cells per axis).
+        double others = 0;
+        for (int t = 0; t < 4; ++t)
+            if (t != missing) others += weight[t];
+        const double gap = amount[missing];
+        amount[missing] = 0;
+        for (int t = 0; t < 4; ++t)
+            if (t != missing) amount[t] += gap * (weight[t] / others);
+    }
+    return true;
+}
+
 // One substep over the sources of region (ascending ids; entryof(k, region[k]) their entries).
 // current: dense fields, zero outside region; next: dense, zero on entry and on return. A
-// destination outside inside (when given) is dropped, or an error when strict. The result,
-// divided by the destinations' areas, replaces current on region.
+// destination outside inside (when given) is dropped, or an error when strict. With a plate's
+// reference at the substep's start (dense) and full (1 where the plate's coverage equals it),
+// field 0 is the coverage, and a source whose own and profile and neighbour subcells are not all
+// full moves every field by the reference's transfer fractions (each field's share of the
+// reference); the others move each field of its own by its profile. The result, divided by
+// the destinations' areas, replaces current on region.
 template <class EntryOf>
 void substep(const Lattice& l, const std::vector<CellId>& region, const EntryOf& entryof, const Layout& layout,
-             const std::vector<std::uint8_t>* inside, bool strict, std::vector<std::vector<double>>& current,
+             const std::vector<std::uint8_t>* inside, bool strict, const std::vector<double>* reference,
+             const std::vector<std::uint8_t>* full, std::vector<std::vector<double>>& current,
              std::vector<std::vector<double>>& next) {
+    const bool plates = reference != nullptr;
+    const auto allowed = [&](CellId target) {
+        if (!inside || (*inside)[target]) return true;
+        if (strict) throw std::logic_error("Sphere transport: rock beyond its plate's reach");
+        return false;
+    };
+    std::array<double, 4> amount{};
     for (std::size_t k = 0; k < region.size(); ++k) {
         const CellId c = region[k];
         const Entry& e = entryof(k, c);
-        const auto& s = l.profile(c);
-        for (const int f : layout.independent) {
-            const std::vector<double>& values = current[f];
-            const double q = values[c];
-            if (q == 0) continue;  // the limiter flattens both profiles: nothing moves
-            auto px = profile(values[s[0]], values[s[1]], q, values[s[2]], values[s[3]]);
-            auto py = profile(values[s[4]], values[s[5]], q, values[s[6]], values[s[7]]);
-            const double extent = -minimum(px) - minimum(py);
-            if (extent > q) {
-                const double factor = q / extent;
-                px.linear *= factor; px.quadratic *= factor;
-                py.linear *= factor; py.quadratic *= factor;
+        if (plates) {
+            const double covered = current[0][c];
+            if (covered == 0) continue;  // the plate holds nothing here
+            const auto& s = l.profile(c);
+            bool intact = (*full)[c] && (*full)[s[0]] && (*full)[s[3]] && (*full)[s[4]] && (*full)[s[7]];
+            for (int slot = 1; slot <= mesh::slotcount && intact; ++slot) {
+                const CellId n = l.neighbour(c, slot);
+                intact = n == nocell || (*full)[n];
             }
-            std::array<double, 4> amount{};
-            std::array<double, 4> weight{};
-            int missing = -1;
-            for (int t = 0; t < 4; ++t) {
-                const int dx = t & 1, dy = t >> 1;
-                const double average = q + px.linear * e.cx[dx] + px.quadratic * e.qx[dx]
-                    + py.linear * e.cy[dy] + py.quadratic * e.qy[dy];
-                weight[t] = e.wx[dx] * e.wy[dy];
-                amount[t] = weight[t] * std::max(0.0, average) * l.area_m2(c);  // roundoff at zero only
-                if (e.target[t] == nocell) missing = t;
-            }
-            if (missing >= 0) {
-                // A cube corner: the diagonal's share goes to the other three by their weights,
-                // which weigh at least 1 - 0.95^2 (a substep moves at most 0.95 cells per axis).
-                double others = 0;
-                for (int t = 0; t < 4; ++t)
-                    if (t != missing) others += weight[t];
-                const double gap = amount[missing];
-                amount[missing] = 0;
-                for (int t = 0; t < 4; ++t)
-                    if (t != missing) amount[t] += gap * (weight[t] / others);
-            }
-            for (int t = 0; t < 4; ++t) {
-                if (amount[t] == 0) continue;
-                const CellId target = e.target[t];
-                if (inside && !(*inside)[target]) {
-                    if (strict) throw std::logic_error("Sphere transport: rock beyond its plate's reach");
-                    continue;
+            const double r = (*reference)[c];
+            if (!intact && r > 0 && ownamounts(l, c, e, *reference, amount)) {
+                // At a margin every field moves by the reference's transfer fractions: coverage
+                // never exceeds the reference under rigid motion and a value is a convex
+                // combination of its donors'.
+                for (std::size_t f = 0; f < current.size(); ++f) {
+                    const double share = current[f][c] / r;
+                    if (share == 0) continue;
+                    for (int t = 0; t < 4; ++t)
+                        if (amount[t] != 0 && allowed(e.target[t])) next[f][e.target[t]] += amount[t] * share;
                 }
+                continue;
+            }
+        }
+        for (const int f : layout.independent) {
+            if (!ownamounts(l, c, e, current[f], amount)) continue;
+            const double q = current[f][c];
+            for (int t = 0; t < 4; ++t) {
+                if (amount[t] == 0 || !allowed(e.target[t])) continue;
+                const CellId target = e.target[t];
                 next[f][target] += amount[t];
                 for (const int m : layout.moments[f]) next[m][target] += amount[t] * (current[m][c] / q);
             }
@@ -343,9 +382,20 @@ Stencil::Stencil(std::shared_ptr<const Lattice> lattice, const Motion& motion) :
         substeps_ = needed;
     }
 
-    entries_.resize(count);
-    for (CellId c = 0; c < count; ++c)
-        entries_[c] = makeentry(l, c, displacement_[c][0] / substeps_, displacement_[c][1] / substeps_);
+    // Each plate's entries on its reach: on its own cells the subcell's motion (the rotation and
+    // the offset), elsewhere the plate's rotation alone (the domain's displacement).
+    for (std::size_t g = 0; g < groups_.size(); ++g) {
+        Group& group = groups_[g];
+        const std::vector<CellId>& domain = domains[g];
+        group.entries.resize(group.reach.size());
+        std::size_t j = 0;
+        for (std::size_t k = 0; k < group.reach.size(); ++k) {
+            const CellId c = group.reach[k];
+            while (domain[j] != c) ++j;
+            const auto& d = motion.plate[l.parent(c)] == group.plate ? displacement_[c] : rigid[g][j];
+            group.entries[k] = makeentry(l, c, d[0] / substeps_, d[1] / substeps_);
+        }
+    }
 
     // The rigid references: 1 on the domain moved by the plate's rotation alone, read on the reach.
     Layout one;
@@ -361,8 +411,13 @@ Stencil::Stencil(std::shared_ptr<const Lattice> lattice, const Motion& motion) :
             entries[k] = makeentry(l, domain[k], rigid[g][k][0] / substeps_, rigid[g][k][1] / substeps_);
         for (const CellId c : domain) { current[0][c] = 1; mark[c] = 1; }
         const auto entryof = [&](std::size_t k, CellId) -> const Entry& { return entries[k]; };
-        for (std::uint32_t step = 0; step < substeps_; ++step)
-            substep(l, domain, entryof, one, &mark, false, current, next);
+        group.domain = domain;
+        group.history.clear();
+        for (std::uint32_t step = 0; step < substeps_; ++step) {
+            substep(l, domain, entryof, one, &mark, false, nullptr, nullptr, current, next);
+            if (step + 1 < substeps_)
+                for (const CellId c : domain) group.history.push_back(current[0][c]);
+        }
         group.reference.resize(group.reach.size());
         for (std::size_t k = 0; k < group.reach.size(); ++k) group.reference[k] = current[0][group.reach[k]];
         for (const CellId c : domain) { current[0][c] = 0; mark[c] = 0; }
@@ -370,6 +425,23 @@ Stencil::Stencil(std::shared_ptr<const Lattice> lattice, const Motion& motion) :
 }
 
 std::array<double, 2> Stencil::displacement(CellId subcell) const { return displacement_[subcell]; }
+
+namespace {
+template <class T> std::size_t allocated(const std::vector<T>& v) { return v.capacity() * sizeof(T); }
+} // namespace
+
+std::size_t Lattice::bytes() const {
+    return sizeof(*this) + allocated(parent_) + allocated(centre_) + allocated(area_) + allocated(neighbour_)
+        + allocated(profile_);
+}
+
+std::size_t Stencil::bytes() const {
+    std::size_t total = sizeof(*this) + allocated(displacement_) + allocated(groups_);
+    for (const Group& g : groups_)
+        total += allocated(g.cells) + allocated(g.reach) + allocated(g.domain) + allocated(g.entries)
+            + allocated(g.reference) + allocated(g.history);
+    return total;
+}
 
 std::vector<PlateLayer> Stencil::transport(const std::vector<const std::vector<double>*>& fields,
                                            const std::vector<int>& momentof) const {
@@ -386,8 +458,8 @@ std::vector<PlateLayer> Stencil::transport(const std::vector<const std::vector<d
 
     std::vector<std::vector<double>> current(fields.size() + 1, std::vector<double>(count, 0));
     std::vector<std::vector<double>> next(fields.size() + 1, std::vector<double>(count, 0));
-    std::vector<std::uint8_t> mark(count, 0);
-    const auto entryof = [&](std::size_t, CellId c) -> const Entry& { return entries_[c]; };
+    std::vector<std::uint8_t> mark(count, 0), full(count, 0);
+    std::vector<double> reference(count, 0);
     std::vector<PlateLayer> layers;
     layers.reserve(groups_.size());
     for (const Group& group : groups_) {
@@ -396,8 +468,19 @@ std::vector<PlateLayer> Stencil::transport(const std::vector<const std::vector<d
             for (std::size_t f = 0; f < fields.size(); ++f) current[f + 1][c] = (*fields[f])[c];
         }
         for (const CellId c : group.reach) mark[c] = 1;
-        for (std::uint32_t step = 0; step < substeps_; ++step)
-            substep(l, group.reach, entryof, layout, &mark, true, current, next);
+        const auto entryof = [&](std::size_t k, CellId) -> const Entry& { return group.entries[k]; };
+        const std::size_t span = group.domain.size();
+        for (std::uint32_t step = 0; step < substeps_; ++step) {
+            for (std::size_t j = 0; j < span; ++j)
+                reference[group.domain[j]] = step == 0 ? 1 : group.history[(step - 1) * span + j];
+            for (const CellId c : group.reach) {
+                const double cov = current[0][c], r = reference[c];
+                full[c] = cov > 0 && std::abs(cov - r) <= 1e-12 * r;
+            }
+            substep(l, group.reach, entryof, layout, &mark, true, &reference, &full, current, next);
+        }
+        for (const CellId c : group.domain) reference[c] = 0;
+        for (const CellId c : group.reach) full[c] = 0;
 
         PlateLayer layer;
         layer.plate = group.plate;
@@ -419,14 +502,16 @@ std::vector<PlateLayer> Stencil::transport(const std::vector<const std::vector<d
                 kept[f] += value * coverage * area;
             }
         }
-        // Per field of its own, the scale that restores the plate's transported amount; its
-        // moments take the same scale, so their specific values stay those transported.
-        for (const int f : given.independent) {
+        // Per field, the scale that restores the plate's transported amount (the coverage
+        // divided by the reference changes it by the reference's ripple).
+        // Moments take their own scale: with their rock's, an age moment's total drifted by up
+        // to 2.7e-4 per update (E2D rework, 2026-10-19, AgeMomentDriftOver100Updates).
+        layer.scale.assign(fields.size(), 1.0);
+        for (std::size_t f = 0; f < fields.size(); ++f) {
             if (!(kept[f] > 0)) continue;
             const double scale = transported[f] / kept[f];
+            layer.scale[f] = scale;
             for (auto& v : layer.values[f]) v *= scale;
-            for (const int m : given.moments[f])
-                for (auto& v : layer.values[m]) v *= scale;
         }
         for (const CellId c : group.reach) {
             mark[c] = 0;
@@ -454,8 +539,12 @@ std::vector<double> Stencil::remap(const std::vector<double>& values,
     for (const auto* f : fields) current.push_back(*f);
     std::vector<CellId> all(count);
     std::iota(all.begin(), all.end(), CellId{0});
-    const auto entryof = [&](std::size_t, CellId c) -> const Entry& { return entries_[c]; };
-    for (std::uint32_t step = 0; step < substeps_; ++step) substep(l, all, entryof, layout, nullptr, false, current, next);
+    std::vector<Entry> entries(count);
+    for (CellId c = 0; c < count; ++c)
+        entries[c] = makeentry(l, c, displacement_[c][0] / substeps_, displacement_[c][1] / substeps_);
+    const auto entryof = [&](std::size_t, CellId c) -> const Entry& { return entries[c]; };
+    for (std::uint32_t step = 0; step < substeps_; ++step)
+        substep(l, all, entryof, layout, nullptr, false, nullptr, nullptr, current, next);
     for (std::size_t m = 0; m < moments.size(); ++m) *moments[m] = std::move(current[m + 1]);
     return std::move(current[0]);
 }

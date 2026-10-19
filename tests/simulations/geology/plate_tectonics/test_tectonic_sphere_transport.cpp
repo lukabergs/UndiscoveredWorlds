@@ -13,6 +13,8 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <limits>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -343,6 +345,272 @@ TEST(TectonicSphereTransport, ConvergingPlatesOverlapOnlyAlongTheirContact) {
     }
 }
 
+namespace {
+// A motion scaled so that its largest index displacement is target lattice cells per update.
+st::Motion scaled(const std::shared_ptr<const st::Lattice>& lattice, st::Motion motion, double target) {
+    const double largest = st::Stencil(lattice, motion).maximumdisplacement();
+    const double factor = target / largest;
+    for (auto& w : motion.rotation) w = factor * w;
+    for (auto& t : motion.offset_m) t = factor * t;
+    return motion;
+}
+
+// A layer's coverage or field on the whole lattice (zero where the plate is absent).
+std::vector<double> dense(const st::Lattice& l, const st::PlateLayer& layer, int field) {
+    std::vector<double> v(l.subcellcount(), 0);
+    for (std::size_t k = 0; k < layer.cells.size(); ++k)
+        v[layer.cells[k]] = field < 0 ? layer.coverage[k] : layer.values[static_cast<std::size_t>(field)][k];
+    return v;
+}
+
+// The minimum and maximum of v over each subcell's rings-step 8-neighbourhood, restricted to
+// the subcells where use is set (+-infinity where none is).
+void neighbourhood(const st::Lattice& l, const std::vector<double>& v, const std::vector<std::uint8_t>& use, int rings,
+                   std::vector<double>& lo, std::vector<double>& hi) {
+    const double inf = std::numeric_limits<double>::infinity();
+    lo.assign(l.subcellcount(), inf);
+    hi.assign(l.subcellcount(), -inf);
+    for (st::CellId c = 0; c < l.subcellcount(); ++c)
+        if (use[c]) lo[c] = hi[c] = v[c];
+    for (int r = 0; r < rings; ++r) {
+        auto nlo = lo, nhi = hi;
+        for (st::CellId c = 0; c < l.subcellcount(); ++c)
+            for (int k = 1; k <= 8; ++k) {
+                const st::CellId m = l.neighbour(c, k);
+                if (m == st::nocell) continue;
+                nlo[c] = std::min(nlo[c], lo[m]);
+                nhi[c] = std::max(nhi[c], hi[m]);
+            }
+        lo.swap(nlo);
+        hi.swap(nhi);
+    }
+}
+
+// A smooth field on the sphere.
+double smooth(const Vec3& p) {
+    const Vec3 a = mesh::normalise({0.2, 0.9, -0.4}), b = mesh::normalise({-0.6, 0.1, 0.8});
+    return 1000 + 600 * mesh::dot(p, a) * mesh::dot(p, a) + 300 * mesh::dot(p, b) + 150 * std::sin(3 * p.z);
+}
+
+bool cornercell(int m, int i, int j) { return (i == 0 || i == m - 1) && (j == 0 || j == m - 1); }
+bool edgecell(int m, int i, int j) { return !cornercell(m, i, j) && (i == 0 || i == m - 1 || j == 0 || j == m - 1); }
+} // namespace
+
+// Two plates split by y = 0 turning oppositely about Z at about 1.6 and 3.2 subcells per update
+// (2 and 4 substeps), carrying a varying field: overlap only along the converging contact, gaps
+// only along the diverging one, and every value within its plate's donors (the values of the
+// plate's cells within substeps + 2 rings) before the plate's total-restoring scale (reported):
+// exactly where the plate's coverage is fractional, within a stated margin inside the plate (the
+// field's own profile keeps smooth extrema).
+TEST(TectonicSphereTransport, ConvergingPlatesKeepVaryingValuesWithinTheirDonors) {
+    for (const auto [n, s] : {std::pair{8, 2}, std::pair{32, 4}})
+        for (const double target : {1.6, 3.2}) {
+            const auto lattice = st::Lattice::make(n, s, radius_m);
+            const st::Lattice& l = *lattice;
+            const auto parents = mesh::makecubegrid(n, radius_m);
+            st::Motion motion;
+            motion.rotation = {Vec3{0, 0, 1e-3}, Vec3{0, 0, -1e-3}};
+            motion.plate.resize(l.cellcount());
+            for (st::CellId c = 0; c < l.cellcount(); ++c) motion.plate[c] = parents->centre(c).y < 0 ? 0U : 1U;
+            motion = scaled(lattice, motion, target);
+            const st::Stencil stencil(lattice, motion);
+            EXPECT_EQ(stencil.substeps(), target < 2 ? 2U : 4U);
+            std::vector<double> field(l.subcellcount());
+            for (st::CellId c = 0; c < l.subcellcount(); ++c) field[c] = smooth(l.centre(c));
+            const double mass = total(l, field);
+            const auto layers = stencil.transport({&field});
+            ASSERT_EQ(layers.size(), 2U);
+            std::vector<double> sum(l.subcellcount(), 0);
+            double amount = 0, edgeexcess = 0, innerexcess = 0, scaling = 0;
+            for (std::uint32_t p = 0; p < 2; ++p) {
+                const auto& layer = layers[p];
+                scaling = std::max(scaling, std::abs(layer.scale[0] - 1));
+                std::vector<std::uint8_t> own(l.subcellcount(), 0);
+                for (st::CellId c = 0; c < l.subcellcount(); ++c) own[c] = motion.plate[l.parent(c)] == p;
+                std::vector<double> lo, hi;
+                neighbourhood(l, field, own, static_cast<int>(stencil.substeps()) + 2, lo, hi);
+                for (std::size_t k = 0; k < layer.cells.size(); ++k) {
+                    const st::CellId c = layer.cells[k];
+                    const double v = layer.values[0][k], cov = layer.coverage[k];
+                    sum[c] += cov;
+                    amount += v * cov * l.area_m2(c);
+                    // Before the plate's total-restoring scale.
+                    const double unscaled = v / layer.scale[0];
+                    const double excess = std::max(lo[c] - unscaled, unscaled - hi[c]) / hi[c];
+                    if (cov < 1 - 1e-9) edgeexcess = std::max(edgeexcess, excess);
+                    else innerexcess = std::max(innerexcess, excess);
+                }
+            }
+            const double step = mesh::cubestep(l.subfacecells());
+            const auto distance = [](const Vec3& p, bool east) {
+                return (east ? p.x >= 0 : p.x <= 0) ? std::asin(std::min(1.0, std::abs(p.y)))
+                                                     : std::acos(std::min(1.0, std::abs(p.z)));
+            };
+            const double band = (target + 4) * step;
+            int overlap = 0, gap = 0, stray = 0;
+            double elsewhere = 0;
+            for (st::CellId c = 0; c < l.subcellcount(); ++c) {
+                const Vec3& p = l.centre(c);
+                const bool converging = distance(p, true) <= band, diverging = distance(p, false) <= band;
+                if (sum[c] > 1 + 1e-6) { ++overlap; stray += !converging; }
+                else if (sum[c] < 1 - 1e-6) { ++gap; stray += !diverging; }
+                if (!converging && !diverging) elsewhere = std::max(elsewhere, std::abs(sum[c] - 1));
+            }
+            std::printf("converging N %d s %d, %.1f subcells (%u substeps): %d overlapping, %d gap subcells, %d stray; "
+                        "|coverage - 1| elsewhere %.1e; values beyond their donors before the scale (relative): "
+                        "fractional coverage %.1e, inside %.1e; |scale - 1| %.1e; amount error %.1e\n", n, s, target,
+                        stencil.substeps(), overlap, gap, stray, elsewhere, edgeexcess, innerexcess, scaling,
+                        std::abs(amount / mass - 1));
+            EXPECT_GT(overlap, 0);
+            EXPECT_GT(gap, 0);
+            EXPECT_EQ(stray, 0);
+            EXPECT_LT(elsewhere, 1e-9);
+            EXPECT_LE(edgeexcess, 1e-12);
+            // Inside, each field's own profile keeps smooth extrema: about twice the largest
+            // measured excess (N 8: 6.6e-4, N 32: 1.3e-5; 2026-10-19).
+            EXPECT_LE(innerexcess, n == 8 ? 1.5e-3 : 3e-5);
+            EXPECT_NEAR(amount, mass, mass * 1e-9);
+        }
+}
+
+// One rigid plate over the sphere at about 1.6 and 3.2 subcells per update: the transported
+// smooth field against its exact pull-back (the field at the back-rotated centre), by class.
+TEST(TectonicSphereTransport, RigidPlateFollowsTheExactPullBack) {
+    for (const auto [n, s] : {std::pair{8, 2}, std::pair{32, 4}})
+        for (const double target : {1.6, 3.2}) {
+            const auto lattice = st::Lattice::make(n, s, radius_m);
+            const st::Lattice& l = *lattice;
+            const st::Motion motion = scaled(lattice, rigid(l, 1e-3 * mesh::normalise({0.3, -0.5, 0.8})), target);
+            const st::Stencil stencil(lattice, motion);
+            std::vector<double> field(l.subcellcount());
+            for (st::CellId c = 0; c < l.subcellcount(); ++c) field[c] = smooth(l.centre(c));
+            const auto layers = stencil.transport({&field});
+            const auto moved = dense(l, layers[0], 0);
+            const int m = l.subfacecells();
+            double interior = 0, edge = 0, corner = 0;
+            for (st::CellId c = 0; c < l.subcellcount(); ++c) {
+                const double exact = smooth(rotate(-1.0 * motion.rotation[0], l.centre(c)));
+                const double error = std::abs(moved[c] - exact) / exact;
+                int f = 0, i = 0, j = 0;
+                mesh::cubeindices(m, c, f, i, j);
+                if (cornercell(m, i, j)) corner = std::max(corner, error);
+                else if (edgecell(m, i, j)) edge = std::max(edge, error);
+                else interior = std::max(interior, error);
+            }
+            std::printf("pull-back N %d s %d, %.1f subcells (%u substeps): max relative error interior %.2e, edge "
+                        "%.2e, corner %.2e\n", n, s, target, stencil.substeps(), interior, edge, corner);
+            // Bounds: about twice the largest measured value of 2026-10-19 (E2D rework) over both
+            // speeds (N 8: 1.9e-2, 2.6e-2, 2.0e-2; N 32: 2.8e-3, 2.7e-3, 3.2e-3).
+            const bool coarse = n == 8;
+            EXPECT_LT(interior, coarse ? 4e-2 : 6e-3);
+            EXPECT_LT(edge, coarse ? 6e-2 : 6e-3);
+            EXPECT_LT(corner, coarse ? 5e-2 : 7e-3);
+        }
+}
+
+// One plate with tangent offsets converging on the equator within 20 degrees of it, at about 1.6
+// and 3.2 subcells per update: coverage above 1 only in the shortening band, below 1 only in it
+// or at its edges (the outermost moving rows leave the still ones; moving along meridians toward
+// the equator also stretches the parallels, about 0.5 % per update at 12 degrees, seen along the
+// parent columns' edges), 1 outside it, and the amounts conserved.
+TEST(TectonicSphereTransport, ConvergingOffsetsShortenOnlyTheirBand) {
+    for (const auto [n, s] : {std::pair{8, 2}, std::pair{32, 4}})
+        for (const double target : {1.6, 3.2}) {
+            const auto lattice = st::Lattice::make(n, s, radius_m);
+            const st::Lattice& l = *lattice;
+            const auto parents = mesh::makecubegrid(n, radius_m);
+            const double edge = 20 * pi / 180;
+            st::Motion motion = rigid(l, {0, 0, 0});
+            motion.offset_m.resize(l.cellcount());
+            for (st::CellId c = 0; c < l.cellcount(); ++c) {
+                const double lat = parents->latitude_rad(c);
+                motion.offset_m[c] = std::abs(lat) < edge ? (-1000 * std::sin(lat) / std::sin(edge)) * parents->north(c) : Vec3{};
+            }
+            motion = scaled(lattice, motion, target);
+            const st::Stencil stencil(lattice, motion);
+            EXPECT_EQ(stencil.substeps(), target < 2 ? 2U : 4U);
+            std::vector<double> field(l.subcellcount());
+            for (st::CellId c = 0; c < l.subcellcount(); ++c) field[c] = smooth(l.centre(c));
+            const double mass = total(l, field);
+            const auto layers = stencil.transport({&field});
+            ASSERT_EQ(layers.size(), 1U);
+            const auto& layer = layers[0];
+            // The band's edge follows the parent cells: half a parent beyond 20 degrees at most.
+            const double margin = (target + s + 4) * mesh::cubestep(l.subfacecells());
+            int shortening = 0, extension = 0, stray = 0;
+            double amount = 0, elsewhere = 0;
+            for (std::size_t k = 0; k < layer.cells.size(); ++k) {
+                const st::CellId c = layer.cells[k];
+                const double lat = std::abs(mesh::latitudeof(l.centre(c))), cov = layer.coverage[k];
+                amount += layer.values[0][k] * cov * l.area_m2(c);
+                if (cov > 1 + 1e-6) { ++shortening; stray += lat > edge + margin; }
+                else if (cov < 1 - 1e-6) { ++extension; stray += lat > edge + margin; }
+                if (lat > edge + margin) elsewhere = std::max(elsewhere, std::abs(cov - 1));
+            }
+            EXPECT_EQ(layer.cells.size(), l.subcellcount());
+            std::printf("offsets N %d s %d, %.1f subcells (%u substeps): %d shortening, %d extension subcells, %d "
+                        "stray; |coverage - 1| outside the band %.1e; amount error %.1e\n", n, s, target,
+                        stencil.substeps(), shortening, extension, stray, elsewhere, std::abs(amount / mass - 1));
+            EXPECT_GT(shortening, 0);
+            EXPECT_EQ(stray, 0);
+            EXPECT_LT(elsewhere, 1e-9);
+            EXPECT_NEAR(amount, mass, mass * 1e-9);
+        }
+}
+
+// A rotating plate shortened by converging offsets for 100 updates, carrying rock and an age
+// moment (rock x age, ages 100 and 300): the moment total's drift per update and the ages'
+// range. The next update starts from value x coverage on every subcell.
+TEST(TectonicSphereTransport, AgeMomentDriftOver100Updates) {
+    const auto lattice = st::Lattice::make(8, 2, radius_m);
+    const st::Lattice& l = *lattice;
+    const auto parents = mesh::makecubegrid(8, radius_m);
+    const double edge = 20 * pi / 180;
+    st::Motion motion = rigid(l, 1e-3 * mesh::normalise({0.3, -0.5, 0.8}));
+    motion.offset_m.resize(l.cellcount());
+    for (st::CellId c = 0; c < l.cellcount(); ++c) {
+        const double lat = parents->latitude_rad(c);
+        motion.offset_m[c] = std::abs(lat) < edge ? (-2000 * std::sin(lat) / std::sin(edge)) * parents->north(c) : Vec3{};
+    }
+    motion = scaled(lattice, motion, 1.6);
+    const st::Stencil stencil(lattice, motion);
+    Random random;
+    std::vector<double> rock(l.subcellcount()), moment(l.subcellcount());
+    for (std::size_t c = 0; c < rock.size(); ++c) {
+        rock[c] = 100 + 27000 * random.uniform();
+        moment[c] = rock[c] * (random.uniform() < 0.5 ? 100 : 300);
+    }
+    double rockdrift = 0, momentdrift = 0, lowest = 1e30, highest = 0;
+    for (int t = 0; t < 100; ++t) {
+        const double rockmass = total(l, rock), momentmass = total(l, moment);
+        const auto layers = stencil.transport({&rock, &moment}, {-1, 0});
+        ASSERT_EQ(layers.size(), 1U);
+        const auto& layer = layers[0];
+        std::fill(rock.begin(), rock.end(), 0.0);
+        std::fill(moment.begin(), moment.end(), 0.0);
+        for (std::size_t k = 0; k < layer.cells.size(); ++k) {
+            const st::CellId c = layer.cells[k];
+            rock[c] = layer.values[0][k] * layer.coverage[k];
+            moment[c] = layer.values[1][k] * layer.coverage[k];
+            if (rock[c] > 0) {
+                lowest = std::min(lowest, moment[c] / rock[c]);
+                highest = std::max(highest, moment[c] / rock[c]);
+            }
+        }
+        rockdrift = std::max(rockdrift, std::abs(total(l, rock) / rockmass - 1));
+        momentdrift = std::max(momentdrift, std::abs(total(l, moment) / momentmass - 1));
+    }
+    std::printf("100 updates: largest drift per update of the rock total %.1e, of the age moment total %.1e; ages %.12g "
+                "to %.12g\n", rockdrift, momentdrift, lowest, highest);
+    RecordProperty("moment_drift_per_update", std::to_string(momentdrift));
+    EXPECT_LT(rockdrift, 1e-9);
+    EXPECT_LT(momentdrift, 1e-9);
+    // Each moment restores its own total, so an age moves by the ratio of its moment's scale to
+    // its rock's (measured 2.6e-4 of the range over 100 updates at N 8): bounds 1e-3.
+    EXPECT_GE(lowest, 100 * (1 - 1e-3));
+    EXPECT_LE(highest, 300 * (1 + 1e-3));
+}
+
 // Run once: tectonics_tests --gtest_also_run_disabled_tests --gtest_filter=*Timing*
 TEST(TectonicSphereTransport, DISABLED_TimingAgainstTheTorusKernel) {
     using clock = std::chrono::steady_clock;
@@ -370,6 +638,7 @@ TEST(TectonicSphereTransport, DISABLED_TimingAgainstTheTorusKernel) {
     std::vector<double> second(field), third(field), fourth(field);
     double build = 1e30, sphere = 1e30, one = 1e30, four = 1e30;
     std::uint32_t substeps = 0;
+    std::size_t stencilbytes = 0;
     for (int repeat = 0; repeat < 3; ++repeat) {
         auto t0 = clock::now();
         const st::Stencil stencil(lattice, motion);
@@ -381,6 +650,7 @@ TEST(TectonicSphereTransport, DISABLED_TimingAgainstTheTorusKernel) {
         const auto layers4 = stencil.transport({&field, &second, &third, &fourth});
         auto t4 = clock::now();
         substeps = stencil.substeps();
+        stencilbytes = stencil.bytes();
         build = std::min(build, seconds(t1 - t0));
         sphere = std::min(sphere, seconds(t2 - t1) / substeps);
         one = std::min(one, seconds(t3 - t2) / substeps);
@@ -411,6 +681,11 @@ TEST(TectonicSphereTransport, DISABLED_TimingAgainstTheTorusKernel) {
                 "subcell; raw remap %.1f ns per subcell and substep; per-plate transport, one field (and the coverage) "
                 "%.1f, four fields %.1f per field, ns per subcell and substep; torus 1024 x 512: remap %.1f ns per "
                 "subcell and substep\n", l.subcellcount(), substeps, nbuild, nsphere, none, nfour, ntorus);
+    std::printf("allocated: lattice %.1f MB, stencil %.1f MB (transport's working arrays: 2 x (fields + 1) x %.1f MB "
+                "and a %.1f MB mark, freed on return)\n", l.bytes() / 1e6, stencilbytes / 1e6,
+                l.subcellcount() * sizeof(double) / 1e6, l.subcellcount() / 1e6);
+    RecordProperty("lattice_bytes", std::to_string(l.bytes()));
+    RecordProperty("stencil_bytes", std::to_string(stencilbytes));
     RecordProperty("sphere_stencil_ns", std::to_string(nbuild));
     RecordProperty("sphere_remap_ns", std::to_string(nsphere));
     RecordProperty("sphere_transport_one_field_ns", std::to_string(none));
