@@ -7,9 +7,10 @@
 // of hydrology.flow_routing (flowrouting::gatherinputs, route and writeroutingfields:
 // flow_direction, drainage_area, discharge, filled_elevation, depression_id, runoff)
 // on the exported filled surface, so pits the remap left are filled, where the world
-// was routed (a drainage area somewhere); a lake open on the world is raised to its
-// export spill level so the export's closure agrees with the world's (lake_surface; a
-// lake closed on the world keeps its level); then hydrology.rivers (applyriverstage:
+// was routed (a drainage area somewhere), the export keeping the world's open or closed
+// answer for every lake: a closed lake's cells are filled no higher than its surface
+// before the routing, and a lake open on the world is raised to its export spill level
+// after it (lake_surface); then hydrology.rivers (applyriverstage:
 // river_direction, river_flow_*, the mouths and, after an erosion run, the
 // distributaries delta_*) where the world has river flows. Deterministic from the
 // world seed (the routing's draws).

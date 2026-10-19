@@ -40,24 +40,37 @@ int exportcolumns(const mesh::CellGrid& grid)
 }
 
 // The routing recomputed on an export keeps the world's open or closed answer for its lakes
-// (sphere-mesh.md section 6). The export's Priority-Flood can spill above the world's lake
-// level (the mean over a narrow outlet), which the closure rule (closeddepressioncells: the
-// highest lake surface more than 0.01 m below the highest filled level) would read as a
-// closed lake. An export depression none of whose lake cells lies on a closed cell of the
-// world (the world cell at the lake cell's centre) is open: its lake cells below its spill
-// level (its highest filled elevation) are raised to it. A depression with a lake cell on a
-// closed world cell keeps its levels.
-void keepopenlakesopen(planet& latlon, const planet& world)
+// (sphere-mesh.md section 6), by the closure rule (closeddepressioncells: the highest lake
+// surface more than 0.01 m below the highest filled level). A lake cell of the export is
+// closed when the world cell at its centre lies in a closed depression of the world.
+std::vector<std::uint8_t> closedlakecells(const planet& latlon, const planet& world)
+{
+    const std::vector<std::uint8_t> closed = physical_layers::closeddepressioncells(world);
+    const mesh::CellGrid& grid = latlon.grid();
+    const mesh::CellGrid& source = world.grid();
+    std::vector<std::uint8_t> cells(latlon.cellcount(), 0);
+    for (mesh::CellId c = 0; c < latlon.cellcount(); c++)
+    {
+        if (latlon.lakesurfacefloat(c) == 0.0f)
+            continue;
+        const mesh::CellId s = source.locate(grid.centre(c));
+        cells[c] = s != mesh::nocell && closed[s] != 0 ? 1 : 0;
+    }
+    return cells;
+}
+
+// After the export's routing: its Priority-Flood can spill above the world's level of an open
+// lake (the mean over a narrow outlet), which the rule would read as closed. An export
+// depression without a closed lake cell (closedlakecells) is open: its lake cells below its
+// spill level (its highest filled elevation) are raised to it. A depression with one keeps
+// its levels.
+void keepopenlakesopen(planet& latlon, const std::vector<std::uint8_t>& closedlakes)
 {
     struct Level
     {
         float spill = 0.0f;
-        bool lake = false;
         bool closed = false;
     };
-    const std::vector<std::uint8_t> closed = physical_layers::closeddepressioncells(world);
-    const mesh::CellGrid& grid = latlon.grid();
-    const mesh::CellGrid& source = world.grid();
     const worldgrid<std::int32_t>& depression = latlon.depressionid();
     const worldgrid<float>& filled = latlon.filledelevation();
     std::unordered_map<std::int32_t, Level> levels;
@@ -68,11 +81,7 @@ void keepopenlakesopen(planet& latlon, const planet& world)
             continue;
         Level& level = levels.try_emplace(id, Level{ filled[c] }).first->second;
         level.spill = std::max(level.spill, filled[c]);
-        if (latlon.lakesurfacefloat(c) == 0.0f)
-            continue;
-        level.lake = true;
-        const mesh::CellId s = source.locate(grid.centre(c));
-        if (s != mesh::nocell && closed[s] != 0)
+        if (closedlakes[c] != 0)
             level.closed = true;
     }
     for (mesh::CellId c = 0; c < latlon.cellcount(); c++)
@@ -110,15 +119,22 @@ void recomputeexportrouting(planet& latlon, const planet& world)
         return;
     const bool rivers = anyriverflow(view);
 
-    // hydrology.flow_routing on the exported filled surface (never below the exported terrain).
+    // hydrology.flow_routing on the exported filled surface (never below the exported terrain),
+    // except that a closed lake's cells are filled no higher than their lake surface: the mean of
+    // the world's filled surface would raise them to its spill and drop the closed depression.
     const flowrouting::Inputs inputs = flowrouting::gatherinputs(view);
+    const std::vector<std::uint8_t> closedlakes = closedlakecells(view, world);
     std::vector<float> surface(inputs.elevation.size());
     const worldgrid<float>& filled = view.filledelevation();
     for (std::size_t cell = 0; cell < surface.size(); cell++)
-        surface[cell] = std::max(filled[static_cast<mesh::CellId>(cell)], inputs.elevation[cell]);
+    {
+        const mesh::CellId c = static_cast<mesh::CellId>(cell);
+        const float level = closedlakes[cell] != 0 ? std::min(filled[c], view.lakesurfacefloat(c)) : filled[c];
+        surface[cell] = std::max(level, inputs.elevation[cell]);
+    }
     const flowrouting::Routing routing = flowrouting::route(inputs, &surface, &inputs.sea);
     flowrouting::writeroutingfields(latlon, inputs, routing);
-    keepopenlakesopen(latlon, world);
+    keepopenlakesopen(latlon, closedlakes);
 
     // hydrology.rivers on the recomputed routing, where the world has rivers.
     if (rivers)
