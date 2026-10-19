@@ -50,8 +50,10 @@ uv run --offline scripts/uw.py tectonics experiment --duration 20 --repeat --exp
 The check of one refactoring step (headless build, the three minimal seed-1 bundles with `--audit-access`, comparison with the previous step's, `parameters.py --check`, `check_layout.py`, `process_access.py --check`):
 
 ```
-uv run --offline python scripts/evaluation/step_check.py <label> --reference <previous label> [--desktop] [--social]
+uv run --offline python scripts/evaluation/step_check.py <label> --reference <previous label> [--desktop] [--social] [--grid latlon]
 ```
+
+The world grid is `world_pipeline`'s default, the cube (`--grid cube`, N = W / 4: N 32 at the minimal 128 columns), since T8 W3.2; `--grid latlon` runs on 128 x 64 lat-lon, the grid of every reference made before W3.2 (lat-lon parity). Imported recipes (imported-world, earth-climate, earth-hydrology) read their maps on lat-lon and remap the terrain onto the cube. A cube reference and a lat-lon reference are never compared with each other.
 
 A label is used once: the check refuses a directory that already holds any `<label>-*` entry, a log written there by hand included, so keep your own logs in a subdirectory.
 

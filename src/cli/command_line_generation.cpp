@@ -24,6 +24,7 @@
 #include "io/raster_imports.hpp"
 #include "pipeline/physical_layers.hpp"
 #include "world/planet_bundle.hpp"
+#include "world/planet_export.hpp"
 #include "pipeline/world_processes.hpp"
 #include "pipeline/world_recipes.hpp"
 #include "pipeline/world_generation_debug.hpp"
@@ -82,8 +83,9 @@ void printcommandlineusage()
     printclimateoptionsusage(cout);
     printtectonicoptionsusage(cout);
     cout << "  --resolution <width>    Set an even global width and derive height as width/2.\n";
-    cout << "  --grid latlon|cube      The world's cell grid (default latlon). cube: the cubed sphere of N = width/4\n";
-    cout << "                           cells per face edge (width a multiple of 4); only cube-ready processes run on it.\n";
+    cout << "  --grid latlon|cube      The world's cell grid (default cube: the cubed sphere of N = width/4 cells per\n";
+    cout << "                           face edge, width a multiple of 4). Imported maps are read on lat-lon and\n";
+    cout << "                           remapped onto the cube. --from-bundle without --grid takes the bundle's grid.\n";
     cout << "  --import-land <tiff>   Import a land height map instead of generating terrain.\n";
     cout << "  --import-sea <tiff>     Import a sea depth map instead of generating terrain.\n";
     cout << "  --import-lakes <png>    run with earth-hydrology or imported-world: a 2:1 lake mask (255 lake, 0 not; north row first, from 180 W)\n";
@@ -317,6 +319,7 @@ bool parsecommandlineoptions(const vector<string>& arguments, CommandLineGenerat
                         options.grid = mesh::GridKind::cube;
                     else
                         throw invalid_argument("grid");
+                    options.hasGrid = true;
                 }
                 else if (argument == "--map-resolution" || argument == "--wind-map-resolution")
                 {
@@ -507,14 +510,32 @@ RecipeRunResult runrecipeonterrain(planet& world, const WorldRecipe& recipe, Gen
 }
 }
 
-RecipeRunResult runimportedworldrecipe(planet& world, const WorldRecipe& recipe, const GenerationExecutionContext& context,
-    const RecipeRunOptions& runoptions)
+namespace
+{
+// Moves the imported terrain of a lat-lon world onto the cube of the same export columns
+// (N = W / 4): base elevation by its rule (mean), the imported lake mask nearest and kept
+// on land only, as on import. Every other field is still empty before an imported recipe.
+void moveimportsontocube(planet& world)
+{
+    const int columns = world.width() + 1;
+    const std::unique_ptr<planet> latlon = exportlatlon(world, columns);   // a copy on its own grid
+    world.setgrid(mesh::GridKind::cube, columns);
+    importfields(world, *latlon, { worldmodel::FieldId::base_elevation, worldmodel::FieldId::imported_lake });
+    worldgrid<std::uint8_t>& lakes = world.importedlake();
+    for (mesh::CellId c = 0; c < world.cellcount(); c++)
+        if (lakes[c] != 0 && world.basebelowsea(c))
+            lakes[c] = 0;
+}
+
+// An imported recipe with the caller's scratch: on a cube world it holds climate's lat-lon
+// shadow, which the bundle and the save export from (sphere-mesh.md sections 7 and 10).
+RecipeRunResult runimportedrecipe(planet& world, const WorldRecipe& recipe, GenerationScratch& scratch,
+    const GenerationExecutionContext& context, const RecipeRunOptions& runoptions)
 {
     world.setmaxelevation(200000);
     // Land and sea counts describe the imported terrain; climate stages read them.
     getlandandseatotals(world);
 
-    GenerationScratch scratch;
     initializegenerationscratch(scratch);
     makecontinentalshelves(world, world.continentalshelves(), 4);
 
@@ -523,6 +544,14 @@ RecipeRunResult runimportedworldrecipe(planet& world, const WorldRecipe& recipe,
     parameters.seaLevel = world.sealevel();
 
     return runrecipeonterrain(world, recipe, scratch, parameters, context, runoptions);
+}
+}
+
+RecipeRunResult runimportedworldrecipe(planet& world, const WorldRecipe& recipe, const GenerationExecutionContext& context,
+    const RecipeRunOptions& runoptions)
+{
+    GenerationScratch scratch;
+    return runimportedrecipe(world, recipe, scratch, context, runoptions);
 }
 
 void completeimportedworldgeneration(planet& world, bool dodeltas, const SocialGenerationOptions& socialoptions, boolshapetemplate smalllake[], boolshapetemplate largelake[], boolshapetemplate landshape[], vector<vector<bool>>& okmountains, const ImportedClimateMaps* importedclimate, bool climateOnly)
@@ -710,34 +739,28 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
         fast_srand(world->seed());
     }
 
-    if (options.grid == mesh::GridKind::cube)
+    if (frombundle)
     {
-        // Map imports fill a lat-lon grid; imports on a cube are a W3 item (terrain-roadmap.md, T8).
-        if (importedworld)
+        // A bundle fixes the grid kind (sphere-mesh.md section 7); a --grid given must agree with it.
+        if (options.hasGrid && world->grid().kind() != options.grid)
         {
-            cerr << "--grid cube cannot import maps yet (--import-land, --import-sea or an imported recipe): "
-                    "imported terrain needs --grid latlon.\n";
+            cerr << "--grid " << (options.grid == mesh::GridKind::cube ? "cube" : "latlon")
+                 << " does not match the bundle's grid: the bundle's grid applies (leave --grid out).\n";
             return 1;
         }
-        // A bundle fixes the grid kind (sphere-mesh.md section 7): a cube world comes from a cube bundle.
-        if (frombundle)
+    }
+    else if (options.grid == mesh::GridKind::cube)
+    {
+        const int columns = world->width() + 1;
+        if (columns % 4 != 0)
         {
-            if (world->grid().kind() != mesh::GridKind::cube)
-            {
-                cerr << "--grid cube cannot start from a lat-lon bundle: the bundle's grid applies.\n";
-                return 1;
-            }
+            cerr << "--grid cube needs a resolution that is a multiple of 4 (N = W / 4), not " << columns
+                 << " (--grid latlon for other widths).\n";
+            return 1;
         }
-        else
-        {
-            const int columns = world->width() + 1;
-            if (columns % 4 != 0)
-            {
-                cerr << "--grid cube needs a resolution that is a multiple of 4 (N = W / 4), not " << columns << ".\n";
-                return 1;
-            }
+        // Imported maps are read on the lat-lon grid of these columns and remapped onto the cube after the import.
+        if (!importedworld)
             world->setgrid(mesh::GridKind::cube, columns);
-        }
     }
 
     applyclimateoptions(options.climate, world->climatesimulation());
@@ -1037,6 +1060,10 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
             updatereport("Imported lakes: " + to_string(lakecells) + " land cells from " + options.importLakesPath);
         }
 
+        // A cube world: the maps were read on the lat-lon grid of its export columns and are remapped in.
+        if (options.grid == mesh::GridKind::cube)
+            moveimportsontocube(*world);
+
         GenerationExecutionContext context;
         context.climateOnly = recipe.name == "earth-climate" || recipe.name == "earth-hydrology";
         context.dodeltas = options.deltas;
@@ -1047,7 +1074,7 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
         context.okmountains = &okmountains;
         context.evolverCheckpoint = evolvercheckpoint;   // imported recipes have no evolver of the time model today
 
-        runresult = runimportedworldrecipe(*world, recipe, context, runoptions);
+        runresult = runimportedrecipe(*world, recipe, scratch, context, runoptions);
     }
     else
     {

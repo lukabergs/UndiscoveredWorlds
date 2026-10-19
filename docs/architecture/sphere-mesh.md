@@ -6,8 +6,8 @@ Written 2026-10-18 night (W0 of `terrain-roadmap.md` §3 T8; Opus 5.5 orchestrat
 
 Every algorithm that walks cells is written once against `mesh::CellGrid`, a set of tables (centres, areas, neighbours, metric). The tables have two builders:
 
-- **`cube`**: the equiangular cubed sphere (§2). The engine always runs on it; the world runs on it from W3 on (`--grid cube`, the default after W3).
-- **`latlon`**: the cell-centred `W x W/2` grid of today, with tables that reproduce `landscape::SphereMetric` exactly. It is the grid of Earth data, of exports and renders, of climate's process grids, of `.uww`, the desktop and the legacy regional map; and during W2 it is the world grid (`--grid latlon`, the default until W3), so a module ported to the table can be checked for parity against today's results where the port is mechanical.
+- **`cube`**: the equiangular cubed sphere (§2). The engine always runs on it; the world runs on it from W3 on (`--grid cube`, the CLI default since W3.2; imported maps are read on lat-lon at the export columns and remapped in, §6).
+- **`latlon`**: the cell-centred `W x W/2` grid of today, with tables that reproduce `landscape::SphereMetric` exactly. It is the grid of Earth data, of exports and renders, of climate's process grids, of `.uww`, the desktop and the legacy regional map; and it stays selectable as the world grid (`--grid latlon`, the default until W3.2) for lat-lon parity checks (`step_check.py --grid latlon`) and Earth-raster work; the desktop keeps generating lat-lon worlds until a desktop port.
 
 Why not a cube-only code base: Earth data, renders and the legacy consumers are lat-lon anyway, and a port checked by parity on lat-lon before the grid switch separates "the port is correct" from "the cube changes the world". The lat-lon world grid is not a second simulation: the same code runs on either table.
 
@@ -78,7 +78,7 @@ Why not a cube-only code base: Earth data, renders and the legacy consumers are 
 
 `src/world/planet_export.{hpp,cpp}`:
 - `exportlatlon(const planet& world, int W) -> planet`: a lat-lon planet of `W x W/2` with every field: floats by `remapmean` (or `remaptotal` where the field catalogue marks a field extensive), codes, masks and ids by `remapnearest`, direction fields recomputed by the lat-lon flow routing on the exported filled elevation; records (settlements, ...) by locating their cells. It feeds `.uww`, the desktop, the legacy regional map, the climate adapter (§10) and renders.
-- `importfields(planet& world, const planet& latlon, field ids)`: the reverse for the named fields (climate's outputs).
+- `importfields(planet& world, const planet& latlon, field ids)`: the reverse for the named fields (climate's outputs, and since W3.2 the imported terrain: on a cube world the CLI reads `--import-land`/`--import-sea` and the imported recipes' Earth maps on the lat-lon grid of the export columns, then moves `base_elevation` (mean) and `imported_lake` (nearest, cleared at sea) onto the cube).
 - The field catalogue (`src/core/world/world_fields.cpp`) gains per field a remap rule (`mean`, `total`, `nearest`, `direction`) used by both.
 
 ## 7. Bundle v2 (frozen)

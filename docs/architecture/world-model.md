@@ -32,7 +32,8 @@ The model separates four things that the current code mixes.
 ```text
 World                  one planet at one point in its history
 ├─ PlanetBody          radius, gravity, rotation, tilt, orbit, tides (constants)
-├─ SurfaceGrid         cell-centred W × W/2; models may run on their own grids
+├─ SurfaceGrid         a mesh::CellGrid: the cubed sphere of N = W/4 (default)
+│                      or cell-centred W × W/2; models may run on their own grids
 ├─ Geosphere           elevation, crust type/age/thickness, sediment, landforms;
 │  │                   plates, boundaries, deforming regions, mineral deposits
 │  └─ Mantle           prescribed flow field, plumes (planned), heat flow
@@ -96,6 +97,15 @@ river flow keep their integer types until the code that produces them is
 reworked; category codes and masks are discrete and stay integer or boolean. A
 process that moves from an integer accessor to the float one changes its results
 and needs a new baseline for its module.
+
+The world grid is a `mesh::CellGrid` of one of two kinds
+(`docs/architecture/sphere-mesh.md`): since T8 W3.2 `world_pipeline` runs on the
+cubed sphere of N = W/4 cells per face edge by default (`--grid cube`), and
+`--grid latlon` keeps the `W x W/2` grid for lat-lon parity checks and Earth-raster
+work. Imported recipes (imported-world, earth-climate, earth-hydrology) read their
+lat-lon maps at W columns and remap the terrain onto the cube; a cube world's
+bundle carries its lat-lon export at W columns, and `.uww` and the desktop stay
+lat-lon (the desktop generates lat-lon worlds).
 
 The catalogue is `src/core/world/world_fields.hpp` (one X-macro list). Other
 code refers to fields by `worldmodel::FieldId`; bundles and reports use the

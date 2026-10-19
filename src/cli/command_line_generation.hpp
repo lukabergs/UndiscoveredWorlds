@@ -48,9 +48,12 @@ struct CommandLineGenerationOptions
     int worldWidth = 0;
     int worldHeight = 0;
     int resolution = 0;
-    // --grid latlon|cube: the world's cell grid (docs/architecture/sphere-mesh.md);
-    // the cube has N = W / 4 cells per face edge, so W must be a multiple of 4.
-    mesh::GridKind grid = mesh::GridKind::latlon;
+    // --grid latlon|cube: the world's cell grid (docs/architecture/sphere-mesh.md), cube by
+    // default; the cube has N = W / 4 cells per face edge, so W must be a multiple of 4.
+    // Imported maps are read on lat-lon and remapped onto a cube world; without --grid,
+    // --from-bundle takes the bundle's grid.
+    mesh::GridKind grid = mesh::GridKind::cube;
+    bool hasGrid = false;
     ClimateRunOptions climate;
     std::string savePath;
     std::string bundlePath;      // Run bundle directory (--bundle); empty writes none.

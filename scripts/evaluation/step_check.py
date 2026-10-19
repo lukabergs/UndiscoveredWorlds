@@ -1,11 +1,12 @@
 """Check of one refactoring step at the minimal configuration.
 
     uv run --offline scripts/evaluation/step_check.py LABEL [--reference LABEL] [--desktop] [--social]
-                                                       [--directory out/scratch/phase5]
+                                                       [--grid cube|latlon] [--directory out/scratch/phase5]
 
 Builds the headless preset (and the desktop preset with --desktop), makes the three seed-1
-bundles on 128 x 64 (tectonics 50 Myr; climate on 32 columns with 2 coupling iterations;
---audit-access) as <directory>/<LABEL>-<recipe>, compares each with the bundle of the
+bundles at 128 export columns (tectonics 50 Myr; climate on 32 columns with 2 coupling iterations;
+--audit-access) as <directory>/<LABEL>-<recipe>, on the world_pipeline default grid, the cube of
+N 32 (--grid latlon: on 128 x 64 lat-lon, for lat-lon parity), compares each with the bundle of the
 reference label, then runs parameters.py --check, check_layout.py and process_access.py --check on the stored
 report sets. --social adds a procedural world with society (<LABEL>-social).
 Build and run output goes to <directory>/<LABEL>-*.log. Exit status: 0 when every build,
@@ -59,6 +60,8 @@ def main():
     parser.add_argument('--reference')
     parser.add_argument('--desktop', action='store_true')
     parser.add_argument('--social', action='store_true')
+    parser.add_argument('--grid', choices=('cube', 'latlon'), default='cube',
+                        help='the world grid (default cube, the world_pipeline default; latlon for lat-lon parity)')
     parser.add_argument('--directory', default='out/scratch/phase5')
     arguments = parser.parse_args()
     directory = ROOT / arguments.directory
@@ -76,12 +79,13 @@ def main():
 
     executable = paths.executable('world_pipeline')
     runs = dict(RECIPES)
+    grid = ['--grid', 'latlon'] if arguments.grid == 'latlon' else []
     if arguments.social:
         runs.update(SOCIAL)
     for name, options in runs.items():
         bundle = directory / f'{label}-{name}'
         start = time.time()
-        status = logged([str(executable), 'run'] + options + COMMON + ['--bundle', str(bundle)], directory / f'{label}-{name}.log',
+        status = logged([str(executable), 'run'] + options + COMMON + grid + ['--bundle', str(bundle)], directory / f'{label}-{name}.log',
                         cwd=DATA_ROOT)
         print(f'{name} run exit {status} in {time.time() - start:.0f} s')
         passed = passed and status == 0
