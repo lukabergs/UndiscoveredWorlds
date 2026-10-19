@@ -2,7 +2,10 @@
 // fields by cell id on a cube planet, (x, y) and cell id agreeing on lat-lon,
 // and every process cube-ready (since T8 W2-FE).
 
+#include <filesystem>
+#include <fstream>
 #include <memory>
+#include <sstream>
 #include <string>
 
 #include <gtest/gtest.h>
@@ -12,6 +15,7 @@
 #include "pipeline/world_stages.hpp"
 #include "world/planet.hpp"
 #include "world/planet_fields.hpp"
+#include "world/world_setup.hpp"
 
 namespace
 {
@@ -132,4 +136,68 @@ TEST(PlanetGrid, MaxRiverFlowReadsEveryCubeCell)
     world->setmaxriverflow();
     EXPECT_EQ(world->maxriverflow(), 400);
     EXPECT_EQ(world->sharedgrid().get(), &world->grid());
+}
+
+// A .uww of version 18 (T8 E5): its tectonic records held raster centroids (cell centres at whole
+// numbers, y south), lengths in equatorial cells and southward y velocities; loading converts
+// them to degrees, km and northward components, the record table and the cell field alike.
+TEST(PlanetGrid, Version18SaveConvertsTheTectonicRecords)
+{
+    constexpr int columns = 64;
+    auto holder = std::make_unique<planet>();
+    planet& world = *holder;
+    initialiseworld(world);
+    world.setwidth(columns - 1);
+    TectonicBoundarySegment segment;
+    segment.id = 1;
+    segment.centroidLongitudeDeg = 10.0f;  // the version 18 meaning: raster x
+    segment.centroidLatitudeDeg = 5.0f;    // raster y
+    segment.lengthKm = 3.0f;               // equatorial cells
+    world.settectonicboundarysegments(std::vector<TectonicBoundarySegment>{ segment });
+    TectonicDeformingRegion region;
+    region.id = 1;
+    region.centroidLongitudeDeg = 40.0f;
+    region.centroidLatitudeDeg = 20.0f;
+    region.averageInterpolatedVelocityX = 0.5f;
+    region.averageInterpolatedVelocityY = 0.25f;  // southward
+    world.settectonicdeformingregions(std::vector<TectonicDeformingRegion>{ region });
+    world.settectonicdeformationvelocityx(7, 3, 0.75f);
+    world.settectonicdeformationvelocityy(7, 3, 0.5f);  // southward
+
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / "uw-planet-grid-v18.uww";
+    world.saveworld(path.string());
+    // The layout of 18 and 19 is the same: the version line makes the file a version 18 save.
+    std::string text;
+    {
+        std::ifstream in(path, std::ios::binary);
+        std::ostringstream all;
+        all << in.rdbuf();
+        text = all.str();
+    }
+    ASSERT_TRUE(text.compare(0, 2, "19") == 0 && (text[2] == '\n' || text[2] == '\r'));
+    text.replace(0, 2, "18");
+    {
+        std::ofstream out(path, std::ios::binary);
+        out << text;
+    }
+
+    auto loadedholder = std::make_unique<planet>();
+    planet& loaded = *loadedholder;
+    initialiseworld(loaded);
+    ASSERT_TRUE(loaded.loadworld(path.string()));
+    std::filesystem::remove(path);
+    ASSERT_EQ(loaded.tectonicboundarysegments().size(), 1u);
+    ASSERT_EQ(loaded.tectonicdeformingregions().size(), 1u);
+    const TectonicBoundarySegment& s = loaded.tectonicboundarysegments()[0];
+    EXPECT_NEAR(s.centroidLongitudeDeg, 10.5f / columns * 360.0f - 180.0f, 1e-4f);
+    EXPECT_NEAR(s.centroidLatitudeDeg, 90.0f - 5.5f / (columns / 2) * 180.0f, 1e-4f);
+    const double cellkm = 2.0 * 3.14159265358979323846 * loaded.grid().radius_m() / 1000.0 / columns;
+    EXPECT_NEAR(s.lengthKm, 3.0 * cellkm, 1e-3 * cellkm);
+    const TectonicDeformingRegion& r = loaded.tectonicdeformingregions()[0];
+    EXPECT_NEAR(r.centroidLongitudeDeg, 40.5f / columns * 360.0f - 180.0f, 1e-4f);
+    EXPECT_NEAR(r.centroidLatitudeDeg, 90.0f - 20.5f / (columns / 2) * 180.0f, 1e-4f);
+    EXPECT_FLOAT_EQ(r.averageInterpolatedVelocityX, 0.5f);
+    EXPECT_FLOAT_EQ(r.averageInterpolatedVelocityY, -0.25f);
+    EXPECT_FLOAT_EQ(loaded.tectonicdeformationvelocityx(7, 3), 0.75f);
+    EXPECT_FLOAT_EQ(loaded.tectonicdeformationvelocityy(7, 3), -0.5f);
 }

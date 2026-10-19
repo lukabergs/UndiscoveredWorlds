@@ -4,7 +4,9 @@
 #include "simulations/geology/plate_tectonics/tectonic_api.hpp"
 #include "simulations/geology/mineral_systems/tectonic_frame_reader.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_recipe.hpp"
+#include <algorithm>
 #include <cmath>
+#include <string>
 
 using namespace mineralsystems;
 
@@ -75,4 +77,46 @@ TEST(TectonicMineralIntegration, ReadsColumnDisplacementAndDeterministicTopology
         if (deposit.fate == DepositFate::preserved) remaining += deposit.remainingGoldT();
     EXPECT_NEAR(supplied, remaining + minerals.budget().erodedGoldT + minerals.budget().subductedGoldT,
                 supplied * 1e-10);
+}
+
+// One engine update (T8 E5 review): away from plate boundaries, beyond the reach of the
+// distributed deformation, a cell's published displacement is its plate's rigid motion, so
+// shift - (omega dt) x R c is no larger than the (vanishing) deformation offset there. A unit
+// error in omega, dt or the spacing of the published displacement shows as a residual of the
+// order of the rigid motion itself.
+TEST(TectonicMineralIntegration, DisplacementAwayFromBoundariesIsThePlateRotation)
+{
+    auto scenario = tectonics::scenario::baseline();
+    scenario.seed = 1;
+    scenario.sphere_face_cells = 16;
+    scenario.evolution_duration_myr = 4;
+    lithosphere engine(scenario);
+    engine.update();
+    TectonicFrameReader reader;
+    const TectonicFrame& frame = reader.read(&engine);
+    ASSERT_NE(frame.materialShift, nullptr);
+    ASSERT_EQ(frame.plateRotation.size(), frame.plates.size());
+    const double radius_m = frame.grid->radius_m();
+    const double spacing_km = frame.spacingKm;
+    // The deformation's reach: twice its peak distance, plus two cells.
+    const double reach_km = 2.0 * scenario.deformation_peak_km + 2.0 * spacing_km;
+    int interior = 0;
+    double largestresidual = 0.0, largestrigid = 0.0;
+    for (std::size_t cell = 0; cell < frame.cellCount(); ++cell)
+    {
+        const std::uint32_t owner = frame.plateIndex[cell];
+        if (owner >= frame.plateRotation.size() || frame.boundaryDistance[cell] * spacing_km <= reach_km)
+            continue;
+        const mesh::Vec3 rigid = mesh::cross(frame.plateRotation[owner], radius_m * frame.grid->centre(static_cast<mesh::CellId>(cell)));
+        const double residual = mesh::length(frame.materialShift[cell] - rigid);
+        ASSERT_LE(residual, 1e-3 * mesh::length(rigid) + 1e-9 * spacing_km * 1000.0) << "cell " << cell;
+        largestresidual = std::max(largestresidual, residual);
+        largestrigid = std::max(largestrigid, mesh::length(rigid));
+        ++interior;
+    }
+    RecordProperty("interior_cells", interior);
+    RecordProperty("largest_residual_m", std::to_string(largestresidual));
+    RecordProperty("largest_rigid_m", std::to_string(largestrigid));
+    EXPECT_GT(interior, 50);
+    EXPECT_GT(largestrigid, 1.0);  // the plates move (metres per update)
 }

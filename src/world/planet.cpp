@@ -2045,6 +2045,12 @@ bool planet::loadworld(string filename)
         readdata(infile, geosphere_.tectonicdeformationratemap);
         readdata(infile, geosphere_.tectonicdeformationvelocityxmap);
         readdata(infile, geosphere_.tectonicdeformationvelocityymap);
+        if (fileversion < 19)
+        {
+            // Before 19 the deformation velocity's y component pointed south; it is northward since.
+            for (mesh::CellId c = 0; c < grid_->cellcount(); c++)
+                geosphere_.tectonicdeformationvelocityymap[c] = -geosphere_.tectonicdeformationvelocityymap[c];
+        }
 
         if (fileversion >= 16)
         {
