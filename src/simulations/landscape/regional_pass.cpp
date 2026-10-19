@@ -81,6 +81,10 @@ void checkregionalinputs(const RegionalGlobalInputs& inputs, const RegionalWindo
     if (!(inputs.radius_m > 0.0) || !std::isfinite(inputs.sealevel))
         throw std::invalid_argument("runregionalpass: the radius must be positive and the sea level finite");
     const std::size_t globalsize = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+    // The world's level-0 grid (the G gather and the bounded catchments read it; T8 W2-W2b).
+    if (inputs.grid == nullptr || inputs.grid->kind() != mesh::GridKind::latlon || inputs.grid->columns() != width ||
+        inputs.grid->cellcount() != globalsize)
+        throw std::invalid_argument("runregionalpass: the inputs need the world's W x H lat-lon grid");
     checksize(inputs.elevation_m, globalsize, "elevation_m");
     checksize(inputs.network.sea, globalsize, "network.sea");
     checksize(inputs.runoff_mm_yr, globalsize, "runoff_mm_yr");

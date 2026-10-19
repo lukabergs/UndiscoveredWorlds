@@ -8,6 +8,7 @@
 #include <stdexcept>
 
 #include "core/deterministic_random.hpp"
+#include "simulations/landscape/level_blocks.hpp"
 #include "simulations/landscape/refinement_levels.hpp"
 #include "simulations/landscape/regional_coast.hpp"
 #include "simulations/landscape/regional_edges.hpp"
@@ -357,19 +358,15 @@ void correctsignedblockmeans(const RegionalGlobalInputs& inputs, const RegionalW
     const int finewidth = window.domainfinewidth(), fineheight = window.domainfineheight();
     const int dcolumns = window.domaincolumns, drows = window.domainrows;
     const double sealevel = static_cast<double>(inputs.sealevel);
-    std::vector<double> residual(static_cast<std::size_t>(dcolumns) * static_cast<std::size_t>(drows));
-    for (int dr = 0; dr < drows; dr++)
-        for (int dc = 0; dc < dcolumns; dc++)
-        {
-            // Summed in row-major order inside the block, as correctblockmeans sums.
-            double sum = 0.0;
-            for (int y = dr * k; y < (dr + 1) * k; y++)
-                for (int x = dc * k; x < (dc + 1) * k; x++)
-                    sum += static_cast<double>(fine[at(x, y, finewidth)]);
-            const std::size_t global = at(wrapcolumn(window.domaincolumn0 + dc, width), window.domainrow0 + dr, width);
-            residual[at(dc, dr, dcolumns)] =
-                static_cast<double>(inputs.elevation_m[global]) - sum / (static_cast<double>(k) * k);
-        }
+    // The domain's blocks over the per-face quadtree (level_blocks.hpp; keys only, the radius nominal),
+    // in the domain's row-major order of global cells, as correctblockmeans takes them.
+    const WindowBlocks blocks = windowblocks(*regionalwindowgrid(window, 1.0), k);
+    if (blocks.count() != static_cast<std::size_t>(dcolumns) * static_cast<std::size_t>(drows))
+        throw std::logic_error("correctsignedblockmeans: the domain's blocks are not its global cells");
+    std::vector<double> residual(blocks.count());
+    for (std::size_t b = 0; b < blocks.count(); b++)
+        // Summed in ascending key order inside the block (its row-major order), as correctblockmeans sums.
+        residual[b] = static_cast<double>(inputs.elevation_m[blocks.parents[b]]) - blockmean(blocks, b, fine);
 
     // On the global grid for `bicubic`, the two cells beyond the domain's edges taking the
     // nearest domain cell's value (correctblockmeans' ring).
@@ -1159,7 +1156,7 @@ void noiselevel(const LevelContext& context, LevelState& state)
     const RegionalParameters& parameters = context.parameters;
     const int parentscale = context.parent == nullptr ? 1 : static_cast<int>(levelscale(context.factor, context.level - 1));
     const double share = levelnoiseshare(context.window.scale, parentscale, parameters.noisepersistence);
-    state.noiseband_m = upsample(noiserelief(inputs, parameters), inputs.width, inputs.height, context.window);
+    state.noiseband_m = upsample(noiserelief(inputs, parameters), *inputs.grid, context.grid);  // G on the window grid
     for (float& band : state.noiseband_m)
         band = static_cast<float>(share * (parameters.noiseamplitude_m +
                                            parameters.noiserelieffraction * std::max(0.0, static_cast<double>(band))));

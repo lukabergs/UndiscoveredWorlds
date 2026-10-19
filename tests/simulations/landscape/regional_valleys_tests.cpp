@@ -54,6 +54,7 @@ RegionalGlobalInputs chainworld()
     RegionalGlobalInputs inputs;
     inputs.width = 8;
     inputs.height = 4;
+    inputs.grid = mesh::makelatlongrid(8, radius_m);
     inputs.radius_m = radius_m;
     inputs.sealevel = 0.0f;
     const std::size_t size = 32;

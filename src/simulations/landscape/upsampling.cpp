@@ -7,6 +7,9 @@
 #include <stdexcept>
 #include <string>
 
+#include "core/mesh/window_grid.hpp"
+#include "simulations/landscape/level_blocks.hpp"
+
 // Erosion plan step E2a (docs/architecture/erosion-hydrology-plan.md, Phase E, and
 // section 6, "Faithful upsampling").
 
@@ -110,6 +113,42 @@ std::vector<float> upsample(const std::vector<float>& field, int width, int heig
     return fine;
 }
 
+std::vector<float> upsample(const std::vector<float>& field, const mesh::CellGrid& levelzero, const mesh::CellGrid& window)
+{
+    if (field.size() != levelzero.cellcount() || levelzero.kind() != window.kind())
+        throw std::invalid_argument("upsample: the field must hold one value per level-0 cell, the grids one kind");
+    const std::size_t count = window.cellcount();
+    std::vector<float> fine(count);
+    if (window.kind() == mesh::GridKind::cube)
+    {
+        const int n = levelzero.facecells();
+        if (n < 1 || window.facecells() % n != 0)
+            throw std::invalid_argument("upsample: the window's level must refine level 0 by a whole factor");
+        const auto value = [&](mesh::LevelKey key) {
+            const mesh::CellId cell = levelzero.localofkey(key);
+            if (cell == mesh::nocell)
+                throw std::invalid_argument("upsample: a stencil node lies outside the level-0 grid");
+            return field[cell];
+        };
+        for (mesh::CellId c = 0; c < count; c++)
+            fine[c] = static_cast<float>(mesh::applystencil(mesh::cubicstencil(n, window.centre(c)), value));
+        return fine;
+    }
+    const int width = levelzero.columns(), height = levelzero.rows();
+    if (levelzero.issubgrid() || width < 1 || window.columns() % width != 0)
+        throw std::invalid_argument("upsample: level 0 must be the whole lat-lon grid, the window a whole refinement of it");
+    const int k = window.columns() / width;
+    const mesh::LevelKey columns = static_cast<mesh::LevelKey>(window.columns());
+    for (mesh::CellId c = 0; c < count; c++)
+    {
+        const mesh::LevelKey key = window.globalkey(c);
+        const double gx = globalunits(static_cast<std::int64_t>(key % columns), k);
+        const double gy = globalunits(static_cast<std::int64_t>(key / columns), k);
+        fine[c] = static_cast<float>(bicubic(field, width, height, gx, gy));
+    }
+    return fine;
+}
+
 void correctblockmeans(const std::vector<float>& field, int width, int height, const RegionalWindow& window, int passes,
                        std::vector<float>& fine)
 {
@@ -120,25 +159,21 @@ void correctblockmeans(const std::vector<float>& field, int width, int height, c
     if (passes < 0 || fine.size() != static_cast<std::size_t>(finewidth) * static_cast<std::size_t>(fineheight))
         throw std::invalid_argument("correctblockmeans: passes must not be negative and fine must cover the domain");
     const int dcolumns = window.domaincolumns, drows = window.domainrows;
-    std::vector<double> residual(static_cast<std::size_t>(dcolumns) * static_cast<std::size_t>(drows));
+    // The domain's blocks over the per-face quadtree (level_blocks.hpp): each global cell of the domain
+    // (its key, the level-0 id) with its k x k fine cells, in the domain's row-major order of global
+    // cells, so block b is domain cell (b mod domaincolumns, b div domaincolumns). Keys only: the
+    // window grid's radius is nominal.
+    const WindowBlocks blocks = windowblocks(*regionalwindowgrid(window, 1.0), k);
+    if (blocks.count() != static_cast<std::size_t>(dcolumns) * static_cast<std::size_t>(drows))
+        throw std::logic_error("correctblockmeans: the domain's blocks are not its global cells");
+    std::vector<double> residual(blocks.count());
     std::vector<float> residualfield(field.size());
     for (int pass = 0; pass < passes; pass++)
     {
         // The residual of every domain cell: the mean of its k x k block, summed in
-        // row-major order (the absolute order inside a block), minus the global value.
-        for (int dr = 0; dr < drows; dr++)
-            for (int dc = 0; dc < dcolumns; dc++)
-            {
-                double sum = 0.0;
-                for (int y = dr * k; y < (dr + 1) * k; y++)
-                    for (int x = dc * k; x < (dc + 1) * k; x++)
-                        sum += static_cast<double>(
-                            fine[static_cast<std::size_t>(y) * static_cast<std::size_t>(finewidth) + static_cast<std::size_t>(x)]);
-                const std::size_t global = static_cast<std::size_t>(window.domainrow0 + dr) * static_cast<std::size_t>(width) +
-                                           static_cast<std::size_t>(wrapcolumn(static_cast<std::int64_t>(window.domaincolumn0) + dc, width));
-                residual[static_cast<std::size_t>(dr) * static_cast<std::size_t>(dcolumns) + static_cast<std::size_t>(dc)] =
-                    sum / (static_cast<double>(k) * k) - static_cast<double>(field[global]);
-            }
+        // ascending key order (the block's row-major order), minus the global value.
+        for (std::size_t b = 0; b < blocks.count(); b++)
+            residual[b] = blockmean(blocks, b, fine) - static_cast<double>(field[blocks.parents[b]]);
 
         // The residuals on the global grid for `bicubic`: the domain's cells, and the
         // two global cells beyond its edges that the stencil reaches, which take the

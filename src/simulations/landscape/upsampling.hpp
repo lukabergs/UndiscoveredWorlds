@@ -28,6 +28,16 @@ double bicubic(const std::vector<float>& field, int width, int height, double gx
 // (domainfinewidth() x domainfineheight(), row-major, north row first).
 std::vector<float> upsample(const std::vector<float>& field, int width, int height, const RegionalWindow& window);
 
+// G (sphere-mesh.md section 8, "Cube rules"; T8 W2-W2b): a level-0 field (one value per cell of
+// `levelzero`, by its cell id) gathered at every cell of a window grid by the 4 x 4 Catmull-Rom
+// stencil, in the window's local order. On lat-lon `bicubic` at the cell's centre in global units
+// ((I + 0.5) / k, (J + 0.5) / k from its key, k = the window level's columns over W: columns wrap,
+// rows clamp at the poles), upsample's values bit for bit; on the cube mesh::cubicstencil at the
+// cell's centre on the level-0 cube (true-position ghosts beyond a face edge), applied relative to
+// its first node. Throws std::invalid_argument for a field of another size, grids of different
+// kinds or a window level that is not a whole multiple of level 0.
+std::vector<float> upsample(const std::vector<float>& field, const mesh::CellGrid& levelzero, const mesh::CellGrid& window);
+
 // A domain warp (erosion plan Phase R, R0 contract; R2 fills it): the displacement of
 // every domain fine cell's sampling position, in global cell units (dx eastwards, dy
 // southwards, as gx and gy grow), a pure function of the fine cell's absolute

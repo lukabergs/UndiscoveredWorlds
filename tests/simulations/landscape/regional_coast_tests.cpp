@@ -64,6 +64,7 @@ RegionalGlobalInputs seaworld()
     RegionalGlobalInputs inputs;
     inputs.width = 32;
     inputs.height = 16;
+    inputs.grid = mesh::makelatlongrid(32, radius_m);
     inputs.sealevel = sealevel;
     inputs.network.width = 32;
     inputs.network.height = 16;
@@ -334,6 +335,7 @@ RegionalGlobalInputs straightcoast()
     RegionalGlobalInputs inputs;
     inputs.width = 32;
     inputs.height = 16;
+    inputs.grid = mesh::makelatlongrid(32, radius_m);
     inputs.radius_m = radius_m;
     inputs.sealevel = sealevel;
     inputs.seed = 1;

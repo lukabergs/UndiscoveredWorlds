@@ -11,6 +11,7 @@
 #include <string>
 #include <utility>
 
+#include "simulations/landscape/level_blocks.hpp"
 #include "simulations/landscape/regional_surface.hpp"
 #include "simulations/landscape/regional_valleys.hpp"
 #include "simulations/landscape/regional_water.hpp"
@@ -229,23 +230,19 @@ void correctparentmeans(const LevelWindow& parent, const std::vector<float>& par
     const int columns = patch.columns, rows = patch.rows;
     const bool wholeturn = static_cast<std::int64_t>(level.domaincolumns) >= level.levelwidth();
     const ChildOffsets offsets = childoffsets(factor);
-    const double children = static_cast<double>(factor) * factor;
-    std::vector<float> residual(static_cast<std::size_t>(columns) * static_cast<std::size_t>(rows));
+    // The domain's blocks over the per-face quadtree (level_blocks.hpp): every domain parent by its key
+    // with its children, in the domain's row-major parent order, so block b is patch cell b.
+    const WindowBlocks blocks = windowblocks(*levelkeygrid(level), factor);
+    if (blocks.count() != static_cast<std::size_t>(columns) * static_cast<std::size_t>(rows))
+        throw std::logic_error("correctparentmeans: the domain's blocks are not its parent cells");
+    std::vector<float> residual(blocks.count());
     const auto column = [&](int c) { return wholeturn ? ((c % columns) + columns) % columns : std::clamp(c, 0, columns - 1); };
     for (int pass = 0; pass < passes; pass++)
     {
-        // The residual of every domain parent: the mean of its children, summed in row-major
-        // order (the absolute order inside a parent), minus the parent value.
-        for (int pr = 0; pr < rows; pr++)
-            for (int pc = 0; pc < columns; pc++)
-            {
-                double sum = 0.0;
-                for (int y = pr * factor; y < (pr + 1) * factor; y++)
-                    for (int x = pc * factor; x < (pc + 1) * factor; x++)
-                        sum += static_cast<double>(fine[level.index(x, y)]);
-                residual[at(pc, pr, columns)] =
-                    static_cast<float>(sum / children - static_cast<double>(patch.values[at(pc, pr, columns)]));
-            }
+        // The residual of every domain parent: the mean of its children, summed in ascending key
+        // order (the absolute row-major order inside a parent), minus the parent value.
+        for (std::size_t b = 0; b < blocks.count(); b++)
+            residual[b] = static_cast<float>(blockmean(blocks, b, fine) - static_cast<double>(patch.values[b]));
         // Interpolated at the child centres (the two parents beyond the domain's edge take
         // the nearest domain parent's residual) and subtracted.
         for (int y = 0; y < level.domainrows; y++)
@@ -293,7 +290,7 @@ void presmoothinglevel(const LevelContext& context, LevelState& state)
         const LevelWindow& level = *context.levelwindow;
         correctparentmeans(parent.window, parent.elevation_m, level, context.parameters.meanpasses, start.start_m);
         start.blockmeanerror_m = levelparentmeanerror(level, start.start_m, parent.window, parent.elevation_m);
-        start.lapsebase_m = upsample(context.inputs.elevation_m, context.inputs.width, context.inputs.height, context.window);
+        start.lapsebase_m = upsample(context.inputs.elevation_m, *context.inputs.grid, context.grid);  // G on the window grid
     }
     if (state.diagnostics != nullptr)
         state.diagnostics->blockmeanerror_m = start.blockmeanerror_m;

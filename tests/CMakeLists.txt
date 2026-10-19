@@ -41,6 +41,7 @@ if(TARGET uw_climate_world)
         simulations/landscape/glacial_tests.cpp
         simulations/landscape/isostasy_tests.cpp
         simulations/landscape/lake_balance_tests.cpp
+        simulations/landscape/level_blocks_tests.cpp
         simulations/landscape/ocean_mask_tests.cpp
         simulations/landscape/refinement_grid_tests.cpp
         simulations/landscape/refinement_levels_tests.cpp

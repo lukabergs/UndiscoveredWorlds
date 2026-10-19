@@ -12,6 +12,7 @@ add_library(uw_landscape STATIC
     glacial.cpp
     isostasy.cpp
     lake_balance.cpp
+    level_blocks.cpp
     ocean_mask.cpp
     opensimplex2s.cpp
     refinement_grid.cpp

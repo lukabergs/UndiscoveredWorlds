@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "simulations/landscape/level_blocks.hpp"
 #include "simulations/landscape/refinement_levels.hpp"
 #include "simulations/landscape/regional_pass.hpp"
 #include "simulations/landscape/upsampling.hpp"
@@ -56,24 +57,51 @@ void checkpair(const LevelWindow& level, std::size_t fieldsize, const LevelWindo
         throw std::invalid_argument(prefix + "every parent cell of the level's domain must lie in the parent's kept box");
 }
 
-// v_c of the domain's parent cell (p, q).
-double parentvalue(const LevelWindow& level, const LevelWindow& parent, const std::vector<float>& parentfield, int p, int q)
+// The level's blocks over the per-face quadtree (level_blocks.hpp, T8 W2-W2b): every parent of the
+// domain by its key with its children's local ids (ascending key: the row-major absolute order), in
+// the domain's row-major parent order, so block b is the domain's parent cell (p, q) = (b mod
+// domainparentcolumns(), b div domainparentcolumns()); and v_c of each, the parent field at the
+// parent key's local id on the parent window's key grid.
+struct ParentBlocks
 {
-    const int x = parent.localcolumn(level.parentcolumn(p * level.factor));
-    const int y = static_cast<int>(parent.localrow(level.parentrow(q * level.factor)));
-    return static_cast<double>(parentfield[parent.index(x, y)]);
+    WindowBlocks blocks;
+    std::vector<double> parentvalue;
+    int columns = 0;  // domainparentcolumns()
+
+    std::size_t block(int p, int q) const
+    {
+        return static_cast<std::size_t>(q) * static_cast<std::size_t>(columns) + static_cast<std::size_t>(p);
+    }
+};
+
+ParentBlocks parentblocks(const LevelWindow& level, const LevelWindow& parent, const std::vector<float>& parentfield)
+{
+    ParentBlocks result;
+    result.blocks = windowblocks(*levelkeygrid(level), level.factor);
+    result.columns = level.domainparentcolumns();
+    if (result.blocks.count() != static_cast<std::size_t>(level.domainparentcolumns()) *
+                                     static_cast<std::size_t>(level.domainparentrows()))
+        throw std::logic_error("parentblocks: the domain's blocks are not its parent cells");
+    const std::shared_ptr<const mesh::CellGrid> parentgrid = levelkeygrid(parent);
+    result.parentvalue.resize(result.blocks.count());
+    for (std::size_t b = 0; b < result.blocks.count(); b++)
+    {
+        const mesh::CellId local = parentgrid->localofkey(result.blocks.parents[b]);
+        if (local == mesh::nocell)
+            throw std::logic_error("parentblocks: a parent lies outside the parent window");
+        result.parentvalue[b] = static_cast<double>(parentfield[local]);
+    }
+    return result;
 }
 
+// v_c of the domain's parent cell (p, q).
+double parentvalue(const ParentBlocks& parents, int p, int q) { return parents.parentvalue[parents.block(p, q)]; }
+
 // The unweighted mean of the children of the domain's parent cell (p, q), in double, the
-// children in row-major order.
-double childmean(const LevelWindow& level, const std::vector<float>& field, int p, int q)
+// children in ascending key (row-major) order.
+double childmean(const ParentBlocks& parents, const std::vector<float>& field, int p, int q)
 {
-    const int f = level.factor;
-    double sum = 0.0;
-    for (int y = q * f; y < (q + 1) * f; y++)
-        for (int x = p * f; x < (p + 1) * f; x++)
-            sum += static_cast<double>(field[level.index(x, y)]);
-    return sum / (static_cast<double>(f) * f);
+    return blockmean(parents.blocks, parents.block(p, q), field);
 }
 
 // The kept box's parent cells in the domain's parent indices: p in first .. first + count - 1.
@@ -147,21 +175,20 @@ void checkbounds(const LevelWindow& level, const ProjectionBounds& bounds, const
                                         ": a rate is negative or not finite, or a headroom negative or NaN");
 }
 
-double largestmeanerror(const LevelWindow& level, const std::vector<float>& field, const LevelWindow& parent,
-                        const std::vector<float>& parentfield)
+double largestmeanerror(const LevelWindow& level, const std::vector<float>& field, const ParentBlocks& parents)
 {
     const KeptParents kept = keptparents(level);
     double largest = 0.0;
     for (int q = kept.row0; q < kept.row0 + kept.rows; q++)
         for (int p = kept.column0; p < kept.column0 + kept.columns; p++)
-            largest = std::max(largest, std::fabs(childmean(level, field, p, q) - parentvalue(level, parent, parentfield, p, q)));
+            largest = std::max(largest, std::fabs(childmean(parents, field, p, q) - parentvalue(parents, p, q)));
     return largest;
 }
 
 // The largest |lambda_c| and |lambda_c - lambda_c'| (kept parents adjacent east-west or
 // north-south) over the kept box's parents, lambda_c = v_c - mean_C(c)(field).
-void lambdastatistics(const LevelWindow& level, const std::vector<float>& field, const LevelWindow& parent,
-                      const std::vector<float>& parentfield, double& largest, double& largeststep)
+void lambdastatistics(const LevelWindow& level, const std::vector<float>& field, const ParentBlocks& parents,
+                      double& largest, double& largeststep)
 {
     const KeptParents kept = keptparents(level);
     std::vector<double> lambda(static_cast<std::size_t>(kept.columns) * static_cast<std::size_t>(kept.rows));
@@ -170,8 +197,8 @@ void lambdastatistics(const LevelWindow& level, const std::vector<float>& field,
     };
     for (int j = 0; j < kept.rows; j++)
         for (int i = 0; i < kept.columns; i++)
-            lambdaat(i, j) = parentvalue(level, parent, parentfield, kept.column0 + i, kept.row0 + j) -
-                             childmean(level, field, kept.column0 + i, kept.row0 + j);
+            lambdaat(i, j) = parentvalue(parents, kept.column0 + i, kept.row0 + j) -
+                             childmean(parents, field, kept.column0 + i, kept.row0 + j);
     largest = 0.0;
     largeststep = 0.0;
     for (int j = 0; j < kept.rows; j++)
@@ -267,6 +294,7 @@ ProjectionReport projectlevel(const LevelWindow& level, std::vector<float>& fiel
     const int count = f * f;
     const double children = static_cast<double>(f) * f;
     const int pcolumns = level.domainparentcolumns(), prows = level.domainparentrows();
+    const ParentBlocks parents = parentblocks(level, parent, parentfield);
     const KeptParents kept = keptparents(level);
     auto inkept = [&](int p, int q) {
         return p >= kept.column0 && p < kept.column0 + kept.columns && q >= kept.row0 && q < kept.row0 + kept.rows;
@@ -286,12 +314,11 @@ ProjectionReport projectlevel(const LevelWindow& level, std::vector<float>& fiel
     for (int q = 0; q < prows; q++)
         for (int p = 0; p < pcolumns; p++)
         {
-            // The children in row-major absolute order.
-            int n = 0;
-            for (int y = q * f; y < (q + 1) * f; y++)
-                for (int x = p * f; x < (p + 1) * f; x++)
-                    cells[static_cast<std::size_t>(n++)] = level.index(x, y);
-            const double lambdac = parentvalue(level, parent, parentfield, p, q) - childmean(level, field, p, q);
+            // The children in ascending key (row-major absolute) order.
+            const mesh::CellId* members = parents.blocks.childrenof(parents.block(p, q));
+            for (int n = 0; n < count; n++)
+                cells[static_cast<std::size_t>(n)] = members[n];
+            const double lambdac = parentvalue(parents, p, q) - childmean(parents, field, p, q);
             std::fill(shift.begin(), shift.end(), 0.0);
             if (lambdac != 0.0)
             {
@@ -396,7 +423,7 @@ ProjectionReport projectlevel(const LevelWindow& level, std::vector<float>& fiel
             if (q + 1 < kept.row0 + kept.rows)
                 report.maxlambdastep_m = std::max(report.maxlambdastep_m, std::fabs(lambdaat(p, q) - lambdaat(p, q + 1)));
         }
-    report.maxparentmeanerror_m = largestmeanerror(level, field, parent, parentfield);
+    report.maxparentmeanerror_m = largestmeanerror(level, field, parents);
 
     // The border step: edge-adjacent kept cells in different parents, both moved. Inside the
     // kept box such a pair straddles a parent edge: x + 1 a multiple of factor (east-west)
@@ -455,7 +482,8 @@ SmoothingReport smoothparentmeans(const LevelWindow& level, std::vector<float>& 
     };
     SmoothingReport report;
     report.passes = passes;
-    lambdastatistics(level, field, parent, parentfield, report.maxlambdabefore_m, report.maxlambdastepbefore_m);
+    const ParentBlocks parents = parentblocks(level, parent, parentfield);
+    lambdastatistics(level, field, parents, report.maxlambdabefore_m, report.maxlambdastepbefore_m);
     if (passes == 0)
     {
         report.maxlambdaafter_m = report.maxlambdabefore_m;
@@ -493,18 +521,20 @@ SmoothingReport smoothparentmeans(const LevelWindow& level, std::vector<float>& 
         for (int q = 0; q < prows; q++)
             for (int p = 0; p < pcolumns; p++)
             {
-                const double lambdac = parentvalue(level, parent, parentfield, p, q) - childmean(level, field, p, q);
+                const double lambdac = parentvalue(parents, p, q) - childmean(parents, field, p, q);
                 double rates = 0.0;
                 if (lambdac != 0.0)
-                    for (int y = q * f; y < (q + 1) * f; y++)
-                        for (int x = p * f; x < (p + 1) * f; x++)
-                        {
-                            const std::size_t cell = level.index(x, y);
-                            const double room = lambdac > 0.0 ? static_cast<double>(bounds.up_m[cell]) - total[cell]
-                                                              : static_cast<double>(bounds.down_m[cell]) + total[cell];
-                            if (bounds.rate[cell] > 0.0f && room > 0.0)
-                                rates += static_cast<double>(bounds.rate[cell]);
-                        }
+                {
+                    const mesh::CellId* members = parents.blocks.childrenof(parents.block(p, q));
+                    for (std::size_t n = 0; n < parents.blocks.perparent(); n++)
+                    {
+                        const std::size_t cell = members[n];
+                        const double room = lambdac > 0.0 ? static_cast<double>(bounds.up_m[cell]) - total[cell]
+                                                          : static_cast<double>(bounds.down_m[cell]) + total[cell];
+                        if (bounds.rate[cell] > 0.0f && room > 0.0)
+                            rates += static_cast<double>(bounds.rate[cell]);
+                    }
+                }
                 mu[static_cast<std::size_t>(q) * static_cast<std::size_t>(pcolumns) + static_cast<std::size_t>(p)] =
                     rates > 0.0 ? lambdac * children / rates : 0.0;
             }
@@ -542,7 +572,7 @@ SmoothingReport smoothparentmeans(const LevelWindow& level, std::vector<float>& 
             }
         }
     }
-    lambdastatistics(level, field, parent, parentfield, report.maxlambdaafter_m, report.maxlambdastepafter_m);
+    lambdastatistics(level, field, parents, report.maxlambdaafter_m, report.maxlambdastepafter_m);
     const int x0 = level.keptcolumnoffset(), y0 = level.keptrowoffset();
     for (int y = y0; y < y0 + level.rows; y++)
         for (int x = x0; x < x0 + level.columns; x++)
@@ -554,7 +584,7 @@ double levelparentmeanerror(const LevelWindow& level, const std::vector<float>& 
                             const std::vector<float>& parentfield)
 {
     checkpair(level, field.size(), parent, parentfield.size(), "levelparentmeanerror");
-    return largestmeanerror(level, field, parent, parentfield);
+    return largestmeanerror(level, field, parentblocks(level, parent, parentfield));
 }
 
 ResampledField resampleto(const std::vector<LevelWindow>& windows, const std::vector<std::vector<float>>& fields,

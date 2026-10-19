@@ -101,6 +101,7 @@ TEST_F(Landscape, RegionalGlacialCatchmentSumsUpstreamGlaciatedArea)
     RegionalGlobalInputs inputs;
     inputs.width = 8;
     inputs.height = 4;
+    inputs.grid = mesh::makelatlongrid(8, radius_m);
     inputs.radius_m = radius_m;
     inputs.sealevel = 0.0f;
     inputs.seed = 1;
