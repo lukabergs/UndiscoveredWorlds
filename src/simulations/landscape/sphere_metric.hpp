@@ -34,6 +34,7 @@
 //   engine drops its torus.
 // Planet-free: no world class, no tuning header.
 
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -89,8 +90,16 @@ struct SphereMetric
     {
         return static_cast<std::size_t>(y) * static_cast<std::size_t>(width) + static_cast<std::size_t>(x);
     }
-    int column(std::size_t cell) const { return static_cast<int>(cell % static_cast<std::size_t>(width)); }
-    int row(std::size_t cell) const { return static_cast<int>(cell / static_cast<std::size_t>(width)); }
+    int column(std::size_t cell) const
+    {
+        assert(width > 0 && "SphereMetric::column: the row API has no meaning on a cube");
+        return static_cast<int>(cell % static_cast<std::size_t>(width));
+    }
+    int row(std::size_t cell) const
+    {
+        assert(width > 0 && "SphereMetric::row: the row API has no meaning on a cube");
+        return static_cast<int>(cell / static_cast<std::size_t>(width));
+    }
 
     double area_m2(std::size_t cell) const
     {

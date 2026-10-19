@@ -193,6 +193,37 @@ TEST_F(Landscape, SphereMetricViewsALatLonGrid)
     }
 }
 
+// A copy of the whole-sphere metric without its grid computes, from its row fields,
+// exactly what the grid's tables give (W 128 and 256).
+TEST_F(Landscape, SphereMetricGridlessCopyMatchesTheGrid)
+{
+    for (int columns : { 128, 256 })
+    {
+        const landscape::SphereMetric metric(columns, columns / 2, radius);
+        ASSERT_TRUE(metric.grid);
+        landscape::SphereMetric rows = metric;
+        rows.grid.reset();
+        ASSERT_EQ(rows.size(), metric.size());
+        for (std::size_t cell = 0; cell < metric.size(); cell++)
+        {
+            EXPECT_EQ(rows.area_m2(cell), metric.area_m2(cell));
+            for (int direction = 1; direction <= landscape::directioncount; direction++)
+            {
+                const std::int32_t next = metric.neighbourid(cell, direction);
+                EXPECT_EQ(rows.neighbourid(cell, direction), next);
+                EXPECT_EQ(rows.distance_m(cell, direction), metric.distance_m(cell, direction));
+                EXPECT_EQ(rows.facelength_m(cell, direction), metric.facelength_m(cell, direction));
+                if (next < 0)
+                    continue;  // tangentoffset is undefined without a neighbour
+                const landscape::TangentOffset a = rows.tangentoffset(cell, direction);
+                const landscape::TangentOffset b = metric.tangentoffset(cell, direction);
+                EXPECT_EQ(a.east, b.east);
+                EXPECT_EQ(a.north, b.north);
+            }
+        }
+    }
+}
+
 TEST_F(Landscape, SphereMetricDiagonalDistance)
 {
     const landscape::SphereMetric metric(width, height, radius);

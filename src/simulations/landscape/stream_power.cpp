@@ -12,6 +12,8 @@
 #include <string>
 #include <vector>
 
+#include "core/mesh/cube_geometry.hpp"
+
 // The scheme of step A2 (docs/architecture/erosion-hydrology-plan.md, section 3,
 // Kernels). Per land cell i, with a_i its own area, A_i its drainage area,
 // L_i its receiver distance (an outlet's to its sea cell), Q_i its discharge in
@@ -75,6 +77,82 @@ bool ownsface(int direction, int reversedirection, std::size_t cell, std::size_t
     const auto rank = [](int slot) { return slot == eastdirection || slot == southdirection ? 0 : 1; };
     const int own = rank(direction), other = rank(reversedirection);
     return own != other ? own < other : cell < neighbour;
+}
+
+// The non-orthogonal correction of the hillslope flux on a cube (W2-L follow-up, as
+// the engine's column diffusion, terrain-roadmap.md E2B). The two-point flux
+// (z_i - z_j) / d through a face is the normal gradient only where the line between
+// the centres is orthogonal to the face, which on a cube holds at face centres
+// only. With n the face's unit normal (from cell i towards j) and e the unit vector
+// along that line, both in the tangent plane at the edge's midpoint, n = alpha e + s
+// (minimum correction), so grad z . n = alpha (z_j - z_i) / d + grad z . s, the
+// second term taken from the mean of the two cells' least-squares gradients
+// (deferred correction: the gradients of the elevations the step starts from).
+// Latitude-longitude faces are orthogonal (s = 0, alpha = 1) and keep the two-point
+// flux unchanged.
+struct FaceCorrection
+{
+    double alpha = 1.0;
+    mesh::Vec3 skew;
+};
+
+FaceCorrection cubefacecorrection(const mesh::CellGrid& grid, std::size_t cell, int slot, std::size_t other)
+{
+    const int n = grid.facecells();
+    int face = 0, column = 0, row = 0;
+    mesh::cubeindices(n, grid.globalid(static_cast<mesh::CellId>(cell)), face, column, row);
+    mesh::Vec3 from, to;  // the shared edge, as in makecubegrid
+    if (slot == northdirection || slot == southdirection)
+    {
+        const double b = mesh::cubeedgeb(n, slot == northdirection ? row : row + 1);
+        from = mesh::cubepoint(face, mesh::cubeedgea(n, column), b);
+        to = mesh::cubepoint(face, mesh::cubeedgea(n, column + 1), b);
+    }
+    else
+    {
+        const double a = mesh::cubeedgea(n, slot == eastdirection ? column + 1 : column);
+        from = mesh::cubepoint(face, a, mesh::cubeedgeb(n, row + 1));
+        to = mesh::cubepoint(face, a, mesh::cubeedgeb(n, row));
+    }
+    const mesh::Vec3 middle = mesh::normalise(from + to);
+    const mesh::Vec3 offset = grid.centre(static_cast<mesh::CellId>(other)) - grid.centre(static_cast<mesh::CellId>(cell));
+    mesh::Vec3 normal = mesh::normalise(mesh::cross(to - from, middle));
+    if (mesh::dot(normal, offset) < 0.0)
+        normal = -1.0 * normal;
+    const mesh::Vec3 along = mesh::normalise(offset - mesh::dot(offset, middle) * middle);
+    FaceCorrection correction;
+    correction.alpha = mesh::dot(along, normal);
+    correction.skew = normal - correction.alpha * along;
+    return correction;
+}
+
+// The least-squares gradient (a 3-D tangent vector, m per m) of z at a land cell
+// from its land neighbours; zero with fewer than three or a degenerate set.
+mesh::Vec3 cellgradient(const SphereMetric& metric, const std::vector<uint8_t>& land, const std::vector<double>& z,
+                        std::size_t cell)
+{
+    double ee = 0.0, en = 0.0, nn = 0.0, ez = 0.0, nz = 0.0;
+    int count = 0;
+    for (int direction = 1; direction <= directioncount; direction++)
+    {
+        const std::int32_t next = metric.neighbourid(cell, direction);
+        if (next < 0 || land[static_cast<std::size_t>(next)] == 0)
+            continue;
+        const TangentOffset offset = metric.tangentoffset(cell, direction);
+        const double dz = z[static_cast<std::size_t>(next)] - z[cell];
+        ee += offset.east * offset.east;
+        en += offset.east * offset.north;
+        nn += offset.north * offset.north;
+        ez += offset.east * dz;
+        nz += offset.north * dz;
+        count++;
+    }
+    const double det = ee * nn - en * en;
+    if (count < 3 || !(det > 1.0e-12 * ee * nn))
+        return {};
+    const double east = (ez * nn - nz * en) / det, north = (nz * ee - ez * en) / det;
+    const mesh::CellId c = static_cast<mesh::CellId>(cell);
+    return east * metric.grid->east(c) + north * metric.grid->north(c);
 }
 
 void checksize(std::size_t actual, std::size_t expected, const char* name)
@@ -362,6 +440,16 @@ StreamPowerBudget stepstreampower(const SphereMetric& metric, const FlowGraph& g
             double volume;
         };
         std::vector<Transfer> transfers;
+        // A cube corrects for its non-orthogonal faces (cubefacecorrection).
+        const bool cube = metric.grid && metric.grid->kind() == mesh::GridKind::cube;
+        std::vector<mesh::Vec3> slope;
+        if (cube)
+        {
+            slope.resize(cells);
+            for (std::size_t i = 0; i < cells; i++)
+                if (graph.land[i] != 0)
+                    slope[i] = cellgradient(metric, graph.land, z, i);
+        }
         for (std::size_t i = 0; i < cells; i++)
         {
             if (graph.land[i] == 0)
@@ -374,6 +462,29 @@ StreamPowerBudget stepstreampower(const SphereMetric& metric, const FlowGraph& g
                 const std::size_t j = static_cast<std::size_t>(neighbour);
                 if (graph.land[j] == 0 || !ownsface(direction, metric.reverse(i, direction), i, j))
                     continue;
+                if (cube)
+                {
+                    // The normal slope from i towards j (downhill positive); a face moves at
+                    // most hillslopefacelimit of the normal drop over the centre distance.
+                    const FaceCorrection correction = cubefacecorrection(*metric.grid, i, direction, j);
+                    const double distance = metric.distance_m(i, direction);
+                    const mesh::Vec3 mean = 0.5 * (slope[i] + slope[j]);
+                    const double normal = correction.alpha * (z[i] - z[j]) / distance - mesh::dot(mean, correction.skew);
+                    if (normal == 0.0)
+                        continue;
+                    const std::size_t high = normal > 0.0 ? i : j;
+                    const std::size_t low = high == i ? j : i;
+                    double gradient = std::fabs(normal);
+                    const double limit =
+                        hillslopefacelimit * gradient * distance * std::min(metric.area_m2(high), metric.area_m2(low));
+                    if (parameters.criticalslope > 0.0)
+                        gradient = std::max(0.0, gradient - parameters.criticalslope);
+                    if (gradient <= 0.0)
+                        continue;
+                    const double flux = diffusivity * dt * gradient * metric.facelength_m(i, direction);
+                    transfers.push_back({ high, low, std::min(limit, flux) });
+                    continue;
+                }
                 if (z[i] == z[j])
                     continue;
                 const std::size_t high = z[i] > z[j] ? i : j;

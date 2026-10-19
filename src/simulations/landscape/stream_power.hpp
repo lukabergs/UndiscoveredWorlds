@@ -10,7 +10,9 @@
 //   tolerance (G = 0 reproduces the detachment-limited scheme exactly);
 // - hillslope: linear diffusion with coefficient kappa, explicit, with the per-face
 //   flux limiter of the former climate_erosion.cpp (a face moves at most a fixed
-//   fraction of the drop times the smaller area);
+//   fraction of the drop times the smaller area); on a cube the two-point flux of
+//   each face gets a non-orthogonal correction from the cells' least-squares
+//   gradients (stream_power.cpp, cubefacecorrection), none on latitude-longitude;
 // - sea cells: sediment that reaches an outlet is routed down the seabed's steepest
 //   descent (the graph's sea receivers) and deposited with an e-folding length, the
 //   remainder at the walk's end, so eroded = land deposited + marine deposited.
