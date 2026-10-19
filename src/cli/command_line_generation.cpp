@@ -25,6 +25,8 @@
 #include "pipeline/physical_layers.hpp"
 #include "world/planet_bundle.hpp"
 #include "world/planet_export.hpp"
+#include "world/planet_fields.hpp"
+#include "core/mesh/mesh_remap.hpp"
 #include "pipeline/world_processes.hpp"
 #include "pipeline/world_recipes.hpp"
 #include "pipeline/world_generation_debug.hpp"
@@ -513,14 +515,30 @@ RecipeRunResult runrecipeonterrain(planet& world, const WorldRecipe& recipe, Gen
 namespace
 {
 // Moves the imported terrain of a lat-lon world onto the cube of the same export columns
-// (N = W / 4): base elevation by its rule (mean), the imported lake mask nearest and kept
-// on land only, as on import. Every other field is still empty before an imported recipe.
+// (N = W / 4) by class: each cube cell is sea where more than half of its area overlaps
+// imported sea (ties to land, as remapbyclass), and its base elevation is the area mean over
+// the overlapping source cells of its own class only (FieldRemap::remapmeanbyclass), so the
+// cube's coast is the imported coast at the cube's resolution. The imported lake mask moves
+// by nearest and is cleared at sea against that coast, as on import. Every other field is
+// still empty before an imported recipe.
 void moveimportsontocube(planet& world)
 {
     const int columns = world.width() + 1;
     const std::unique_ptr<planet> latlon = exportlatlon(world, columns);   // a copy on its own grid
     world.setgrid(mesh::GridKind::cube, columns);
-    importfields(world, *latlon, { worldmodel::FieldId::base_elevation, worldmodel::FieldId::imported_lake });
+    const mesh::CellGrid& source = latlon->grid();
+    const mesh::CellGrid& destination = world.grid();
+    const std::vector<std::uint8_t> sea = seamask(*latlon);
+    const std::vector<float> sourceclass(sea.begin(), sea.end());
+    const std::vector<float> seashare = mesh::remapmean(mesh::makeremap(source, destination), source, destination, sourceclass);
+    std::vector<float> destinationclass(seashare.size());
+    for (std::size_t c = 0; c < seashare.size(); c++)
+        destinationclass[c] = seashare[c] > 0.5f ? 1.0f : 0.0f;
+    const FieldRemap remap(source, destination);
+    if (!loadplanetfield(world, remap.remapmeanbyclass(readplanetfield(*latlon, worldmodel::FieldId::base_elevation),
+            sourceclass, destinationclass)))
+        throw std::runtime_error("the cube world does not load the imported base elevation");
+    importfields(world, *latlon, { worldmodel::FieldId::imported_lake });
     worldgrid<std::uint8_t>& lakes = world.importedlake();
     for (mesh::CellId c = 0; c < world.cellcount(); c++)
         if (lakes[c] != 0 && world.basebelowsea(c))

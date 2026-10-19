@@ -96,6 +96,14 @@ def settings(spec, register, resolution):
     return arguments, scenario, list(registered.get('arguments', [])), width, values, recipe, recipe_path
 
 
+def latlon_grid(arguments):
+    """True when the tool's arguments select the lat-lon world grid (--grid latlon); world_pipeline's default is the cube."""
+    arguments = [str(argument) for argument in arguments]
+    return '--grid=latlon' in arguments or any(
+        argument == '--grid' and index + 1 < len(arguments) and arguments[index + 1] == 'latlon'
+        for index, argument in enumerate(arguments))
+
+
 def expand(arguments, resolution, directory, values):
     """Profile arguments with {width}, {height}, {directory} (the run directory) and recipe values filled in."""
     values = dict(values, directory=directory.as_posix())
@@ -170,6 +178,9 @@ def main():
     arguments, scenario, extra, resolution, values, recipe, recipe_path = settings(spec, args.register, args.resolution)
     seeded = spec.get('seeded', True)
     given = arguments + scenario + extra + native
+    if resolution is not None and resolution % 4 and not latlon_grid(given):
+        raise SystemExit(f'--resolution {resolution}: the cube world grid (the default) needs a multiple of 4 '
+                         '(N = W / 4); pass --grid latlon for other even widths')
     for group in spec.get('required_options', []):
         if not any(option in given for option in group):
             raise SystemExit(f"{args.module} runs require {' or '.join(group)} (a native option or a registered argument)")

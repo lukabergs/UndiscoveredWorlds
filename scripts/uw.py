@@ -219,6 +219,11 @@ def main():
         parser.error(f'{args.module} commands: {", ".join(COMMANDS[args.module])}')
     if args.resolution is not None and (args.resolution < 2 or args.resolution % 2):
         parser.error('--resolution must be an even width')
+    latlon = '--grid=latlon' in extra or any(
+        argument == '--grid' and index + 1 < len(extra) and extra[index + 1] == 'latlon' for index, argument in enumerate(extra))
+    if args.resolution is not None and args.resolution % 4 and not latlon and args.module != 'regional':
+        parser.error('--resolution must be a multiple of 4 on the cube world grid (the default, N = W / 4); '
+                     'pass --grid latlon for other even widths')
     if args.output:
         runs.refuse_archive(args.output)
     if args.command == 'ledger':
