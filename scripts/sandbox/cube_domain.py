@@ -7,8 +7,8 @@ slot reads the cell itself):
 - smooth(values, sigma): repeated 3 x 3 means (each pass adds a variance of 2/3 cell^2 per axis), the
   Gaussian of the raster code;
 - label(mask): 8-connected components (scipy.sparse.csgraph);
-- distance_km(sources, cutoff_km): the great-circle length of the shortest path over the slots to the
-  nearest source (a bounded relaxation with a cutoff, Dijkstra without), the raster code's distance transform;
+- distance_km(sources, cutoff_km): the great-circle distance to the nearest source cell (its id carried through a
+  relaxation over the slots; Dijkstra seeds it without a cutoff), the raster code's distance transform;
 - minimum and maximum over (2 r + 1)-cell neighbourhoods (r passes over the slots), dilation and erosion;
 - gradient(values): (d/d east, d/d north) per km, least squares over the neighbours' tangent offsets;
 - locate(points) and bilinear(values, points): the closed-form point location of section 2 and the bilinear
@@ -157,23 +157,42 @@ class CubeGrid:
         labels[cells] = order[component]
         return labels, int(count)
 
+    def great_circle_km(self, cells, others):
+        """Great-circle distance (km) between the centres of two arrays of cell ids (2 asin(chord / 2): exact near 0)."""
+        chord = np.linalg.norm(self.centre[cells] - self.centre[others], axis=-1)
+        return 2.0 * self.radius_km * np.arcsin(np.minimum(chord / 2.0, 1.0))
+
     def distance_km(self, sources, cutoff_km=None):
-        """Great-circle length (km) of the shortest slot path from each cell to the nearest source cell (0 on one,
-        inf with no source). With cutoff_km, cells farther than it are inf (a bounded relaxation)."""
+        """Great-circle distance (km) from each cell's centre to the centre of its nearest source cell (0 on one, inf
+        with no source): the nearest source is carried through a relaxation over the slots (each cell takes the source
+        of a neighbour when that source is nearer to it), started from the sources themselves within cutoff_km (cells
+        farther than it inf), or without a cutoff from Dijkstra's nearest source over the slot paths, then relaxed
+        until no cell changes."""
         sources = np.asarray(sources, dtype=bool)
         if not sources.any():
             return np.full(self.n, np.inf)
         if cutoff_km is None:
-            return csgraph.dijkstra(self.graph(), directed=True, indices=np.flatnonzero(sources), min_only=True)
-        distance = np.where(sources, 0.0, np.inf)
-        step = float(np.min(self.slot_km))
-        for _ in range(int(math.ceil(cutoff_km / step)) + 1):
-            candidate = (distance[self.safe] + self.slot_km).min(1)
-            updated = np.minimum(distance, candidate)
-            if np.array_equal(updated, distance):
+            _, _, nearest = csgraph.dijkstra(self.graph(), directed=True, indices=np.flatnonzero(sources),
+                                             min_only=True, return_predecessors=True)
+            nearest = np.where(nearest >= 0, nearest, -1).astype(np.int64)
+            passes = 64
+        else:
+            nearest = np.where(sources, np.arange(self.n), -1)
+            passes = int(math.ceil(cutoff_km / float(np.min(self.slot_km)))) + 2
+        cells = np.arange(self.n)
+        distance = np.where(nearest >= 0, self.great_circle_km(cells, np.maximum(nearest, 0)), np.inf)
+        for _ in range(passes):
+            offered = nearest[self.safe]                                         # (n, 8) the neighbours' sources
+            reach = np.where(offered >= 0, self.great_circle_km(cells[:, None], np.maximum(offered, 0)), np.inf)
+            best = np.argmin(reach, axis=1)
+            better = reach[cells, best] < distance
+            if not better.any():
                 break
-            distance = updated
-        return np.where(distance <= cutoff_km, distance, np.inf)
+            nearest = np.where(better, offered[cells, best], nearest)
+            distance = np.where(better, reach[cells, best], distance)
+        if cutoff_km is not None:
+            distance = np.where(distance <= cutoff_km, distance, np.inf)
+        return distance
 
     # -------------------------------------------------------------- location and sampling
 

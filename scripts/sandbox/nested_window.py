@@ -115,7 +115,7 @@ def prepare_world(config):
     world['precipitation'] = ts.precipitation(world, config['precipitation'], radius_m)
     if config['seafloor'].get('abyss', {}).get('enabled', False):
         world['elevation'] = ts.damp_abyss(world, config['seafloor']['abyss'])
-    world['ocean'] = ts.ocean_world(world, config['seafloor'], config['seed'], radius_m / 1000.0)
+    world['ocean'] = ts.ocean_world(world, ts.seafloor_spec(config), config['seed'], radius_m / 1000.0)
     if config.get('platform', {}).get('enabled', False):
         world['provinces'] = ts.provinces_world(world, config['platform'], 2.0 * math.pi * radius_m / 1000.0 / bundle.columns)
     return bundle, world
@@ -166,6 +166,7 @@ def main():
 
     parent_directory = SANDBOX / arguments.parent
     config = load_config(parent_directory, arguments.config, arguments.set)
+    ts.use_noise_divisor(config)
     nest = config['nest']
     ts.PHYSICS = Path(arguments.exe)
     directory = SANDBOX / arguments.label

@@ -64,13 +64,33 @@ def prepare(world, config, radius_km=RADIUS_KM):
     return world
 
 
-def layers(fields):
-    """The pointwise layers of a procedural pass, by name."""
+def layers(fields, domain, world, config):
+    """The pointwise layers of a procedural pass, by name, and the sea floor's and the coast's position functions:
+    the segments (shifted positions and trough), the seamounts, the hills bank on the shifted positions, the coast
+    term's displacement noise and the micro texture's."""
     stages = fields["stages"]
     out = {name: stages[name] for name in POINTWISE}
     out.update({f"warp{axis}": stages["warp"][axis] for axis in range(3)}, theta=stages["strike"][0],
                alignment=stages["strike"][1], amplitude=fields["amplitude"], stability=fields["stability"],
                province=fields["province"], fill_noise=fields["fill_noise"])
+    seed = config["seed"]
+    spec = ts.seafloor_spec(config)
+    sampler = ts.make_sampler(domain, world)
+    points = domain.points()
+    oceanic = np.clip(sampler(world["ocean"]["oceanic"]), 0.0, 1.0)
+    doubled = sampler(world["ocean"]["doubled"].real) + 1j * sampler(world["ocean"]["doubled"].imag)
+    theta = 0.5 * np.angle(doubled)
+    shifted, trough = ts.segment_shift(domain, points, theta, np.ones_like(oceanic), spec, seed)
+    out.update({f"segments{axis}": shifted[axis] for axis in range(3)}, trough=trough,
+               seamounts=ts.seamounts(points, spec["seamounts"], seed, domain.radius_km),
+               hills=ts.oriented_fbm(shifted, theta, np.ones_like(oceanic), {**spec["hills"], **ts.bank_options(spec)},
+                                     seed + 121, domain))
+    coast = config["coast"]
+    warp_spec = {**coast, "wavelength_km": coast["warp_wavelength_km"], "octaves": coast["warp_octaves"]}
+    out["coast_displacement"] = ts.fbm(fields["coords"], warp_spec, seed + 71, domain)
+    micro = config["micro"]
+    moved = fields["plain"] + micro["warp_fraction"] * (fields["warped"] - fields["plain"])
+    out["micro_displacement"] = ts.fbm(moved, micro, seed + 75, domain)
     return out
 
 
@@ -86,31 +106,33 @@ class OverlapTest(unittest.TestCase):
         class Grid:  # what make_domains reads of a bundle
             columns, rows, manifest, grid_kind = bundle_columns, bundle_rows, {}, "latlon"
         domains = ts.make_domains(config, Grid, ["A", "B"])
-        results = [layers(ts.procedural(domain, world, config, config["seed"])[0]) for domain in domains]
+        results = [layers(ts.procedural(domain, world, config, config["seed"])[0], domain, world, config)
+                   for domain in domains]
         a, b = domains
-        r0, r1 = max(a.row0, b.row0), min(a.row0 + a.rows, b.row0 + b.rows)
-        c0, c1 = max(a.column0, b.column0), min(a.column0 + a.columns, b.column0 + b.columns)
+        trim = 2  # cells away from either window's edge
+        r0, r1 = max(a.row0, b.row0) + trim, min(a.row0 + a.rows, b.row0 + b.rows) - trim
+        c0, c1 = max(a.column0, b.column0) + trim, min(a.column0 + a.columns, b.column0 + b.columns) - trim
         self.assertGreater(r1 - r0, 0)
         self.assertGreater(c1 - c0, 0)
         for name in results[0]:
             first_cells = results[0][name][r0 - a.row0:r1 - a.row0, c0 - a.column0:c1 - a.column0]
             second_cells = results[1][name][r0 - b.row0:r1 - b.row0, c0 - b.column0:c1 - b.column0]
             self.assertTrue(np.array_equal(first_cells, second_cells), f"{name} differs on the shared cells")
-            if name in ("relief_noise", "warp0", "hardness"):
+            if name in ("relief_noise", "warp0", "hardness", "segments0", "hills", "coast_displacement"):
                 self.assertGreater(float(np.std(first_cells)), 0.0, name)   # not a constant overlap
 
     def test_synthetic_world(self):
         config = ts.load_config(ts.DEFAULT_CONFIG, [])
-        world = prepare(synthetic_latlon_world(32), config)
-        # Scale 64 on 32 columns: 19.5 km cells, so the relief's 300 km octaves are drawn (none fade out).
-        self.check_overlap(config, world, 32, 16, [10, 4, 12, 6], [11, 5, 13, 7], 64)
+        world = prepare(synthetic_latlon_world(128), config)
+        # Scale 64 on 128 columns: 4.9 km cells, so the sea-floor hills (20 km) are drawn too (none fade out).
+        self.check_overlap(config, world, 128, 64, [40, 16, 41, 17], [41, 17, 42, 18], 64)
 
     @unittest.skipUnless((BASE_V9 / "manifest.json").is_file(), "base-v9 is not in the main tree")
     def test_base_v9(self):
         config = ts.load_config(ts.DEFAULT_CONFIG, [f"base_bundle={BASE_V9.as_posix()}"])
         bundle = Bundle.open(BASE_V9)
         world = prepare(ts.world_fields(bundle), config)
-        self.check_overlap(config, world, bundle.columns, bundle.rows, [160, 64, 164, 67], [163, 66, 167, 69], 16)
+        self.check_overlap(config, world, bundle.columns, bundle.rows, [160, 64, 161, 65], [161, 65, 162, 66], 64)
 
 
 @unittest.skipUnless(EXE.is_file(), f"{EXE} is not built")
@@ -161,10 +183,18 @@ class CubeTest(unittest.TestCase):
         source[0] = True
         distance = self.grid.distance_km(source)
         neighbour = self.grid.neighbours[0, 2]
-        self.assertAlmostEqual(distance[neighbour], self.grid.slot_km[0, 2], places=6)
+        self.assertAlmostEqual(distance[neighbour], self.grid.slot_km[0, 2], places=4)
         self.assertTrue(np.isfinite(distance).all())
+        # The great-circle distance to the nearest source, exact for one source.
+        exact = self.grid.great_circle_km(np.arange(self.grid.n), np.zeros(self.grid.n, dtype=np.int64))
+        self.assertLess(np.abs(distance - exact).max(), 1e-6)
         bounded = self.grid.distance_km(source, cutoff_km=1500.0)
-        self.assertTrue(np.array_equal(np.isfinite(bounded), distance <= 1500.0))
+        self.assertTrue(np.array_equal(np.isfinite(bounded), exact <= 1500.0))
+        self.assertLess(np.abs(bounded - exact)[np.isfinite(bounded)].max(), 1e-6)
+        two = source.copy()
+        two[200] = True
+        nearest = np.minimum(exact, self.grid.great_circle_km(np.arange(self.grid.n), np.full(self.grid.n, 200)))
+        self.assertLess(np.abs(self.grid.distance_km(two) - nearest).max(), 1e-6)
         east, north = self.grid.gradient(RADIUS_KM * self.grid.centre[:, 2])   # z: d/dnorth = cos(latitude)
         interior = np.abs(np.degrees(self.grid.latitude)) < 60.0
         self.assertLess(np.abs(north - np.cos(self.grid.latitude))[interior].max(), 0.05)

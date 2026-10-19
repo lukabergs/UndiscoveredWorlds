@@ -17,10 +17,13 @@ evaluated at the cells' unit vectors times the radius (km; Domain.points: a lat-
 fine column and row, so two windows sharing a cell evaluate it from the same numbers and their overlaps are
 bit-identical). The gradient noise is 3-D (a quintic-faded lattice in km over wavelength; each isotropic octave
 rotated by a fixed rotation); a noise stretched along a direction (the strike's bank, the hardness bands, the sea
-floor's hills) is a bank of fixed 3-D axes (a Fibonacci set over the half sphere of axes, 0.75 B^2 of them for the
-config's B orientations) weighted by max(0, 2 (s . a)^2 - 1)^sharpness, s the local strike's unit tangent, so the
-2-D bank's cos 2(theta - phi) weight; ridge-transform segments are cut along the great circle normal to each bank
-axis (the arc length about it); the warp moves points on the local east and south tangents; seamounts are a 3-D
+floor's hills) is a bank of fixed 3-D axes (a Fibonacci set over the half sphere of axes, structure.bank_axis_factor
+B^2 of them for the config's B orientations), each drawing its noise on positions squeezed about its axis (Mercator
+latitude about the axis over the stretch: the same anisotropy wherever it acts) and weighted by the 2-D bank's
+max(0, cos 2 delta)^(sharpness x structure.bank_sharpness_factor), delta between the strike and the axis's tangent
+projection, faded where the axis leaves the tangent plane (scripts/sandbox/bank_stretch.py measures the visible
+stretch against the 2-D bank); ridge-transform segments are cut along the circles of latitude about each bank axis
+into a whole number of segments; the warp moves points on the local east and south tangents; seamounts are a 3-D
 lattice of candidates kept within half a spacing of the sphere; the erosion filter's Phacelle noise is the 3-D
 lattice version with its stripes in the tangent plane. Displacement resamplings (the coast and micro terms) and the
 raster filters stay on the domain's grid. Angles (theta) are from the cell's local east toward its south.
@@ -170,12 +173,30 @@ import overlays  # noqa: E402
 DEFAULT_CONFIG = ROOT / 'configs' / 'sandbox' / 'terrain.json'
 PHYSICS = ROOT / 'out' / 'build' / 'headless' / 'bin' / 'Release' / 'terrain_sandbox.exe'
 NOISE_STD = 0.22  # standard deviation of one octave of the 2-D gradient noise below, measured
-# fbm's divisor for the 3-D gradient noise: one octave's standard deviation is 0.191 against the 2-D noise's 0.176
-# (both measured on 2e6 random points, seeds 1, 7, 131), so 0.22 x 0.191 / 0.176 keeps every fbm's spread as it was.
+# fbm's divisor for the 3-D gradient noise (config noise.divisor_3d; this the default): 0.22 times the ratio of one
+# octave's standard deviation in 3-D to that in 2-D, so every fbm keeps the spread it had with the 2-D noise
+# (scripts/sandbox/noise_divisor.py measures it: 0.191 / 0.176 on 2e6 random points, seeds 1, 7, 131).
 NOISE_STD3 = 0.239
 
 
 # ---------------------------------------------------------------- configuration
+
+def seafloor_spec(config):
+    """The seafloor group with the structure group's bank options (bank_options; its segment and hills banks)."""
+    return {**config['seafloor'], **bank_options(config['structure'])}
+
+
+def bank_options(spec):
+    """The 3-D banks' options of a group: bank_axis_factor (members per 2-D orientation squared) and
+    bank_sharpness_factor (the 3-D weight's exponent over the 2-D sharpness)."""
+    return {key: spec[key] for key in ('bank_axis_factor', 'bank_sharpness_factor') if key in spec}
+
+
+def use_noise_divisor(config):
+    """fbm's divisor from noise.divisor_3d (measured by scripts/sandbox/noise_divisor.py)."""
+    global NOISE_STD3
+    NOISE_STD3 = float(config.get('noise', {}).get('divisor_3d', NOISE_STD3))
+
 
 def load_config(path, overrides):
     """The config with GROUP.KEY=VALUE overrides; a numeric part indexes a list (history.phases.1.glacial_ratio=35)."""
@@ -935,11 +956,13 @@ def octave_rotation(octave):
     return np.eye(3) + math.sin(angle) * k + (1.0 - math.cos(angle)) * (k @ k)
 
 
-def bank_axes(count):
-    """The bank's fixed 3-D axes for a 2-D bank of `count` orientations: max(count, round(0.75 count^2)) points of a
-    Fibonacci set over the upper half sphere (an axis and its opposite are one), so the spacing of the 2-D bank's
-    pi / count holds in every direction of every tangent plane."""
-    members = max(count, int(round(0.75 * count * count)))
+BANK_TAPER = (0.6, 0.8)  # a member's weight fades in as its axis's tangent share |t| (cos psi) rises through these
+
+
+def bank_axes(count, factor=0.75):
+    """The bank's fixed 3-D axes for a 2-D bank of `count` orientations: max(count, round(factor count^2)) points of a
+    Fibonacci set over the upper half sphere (an axis and its opposite are one; factor: structure.bank_axis_factor)."""
+    members = max(count, int(round(factor * count * count)))
     index = np.arange(members) + 0.5
     z = index / members
     phi = index * 2.399963229728653
@@ -947,22 +970,49 @@ def bank_axes(count):
     return np.stack([r * np.cos(phi), r * np.sin(phi), z], axis=1)
 
 
-def fbm(points, spec, seed, domain, stretch=1.0, axis=None):
+def axis_frame(axis):
+    """Two unit vectors completing a bank axis to an orthonormal frame."""
+    first = np.cross(axis, [0.0, 0.0, 1.0] if abs(axis[2]) < 0.9 else [1.0, 0.0, 0.0])
+    first = first / np.linalg.norm(first)
+    return first, np.cross(axis, first)
+
+
+def member_weight(direction, normal, axis, sharpness):
+    """A bank member's weight where the wanted direction is `direction` (unit tangents, 3, ...): the 2-D bank's
+    max(0, cos 2 delta)^sharpness with delta the angle between the direction and the axis's tangent projection,
+    times smoothstep(|t|, BANK_TAPER) of the projection's length |t| = cos psi (psi the point's latitude about the
+    axis), so a member acts only where its axis lies near the tangent plane. Returns (weight, |t|)."""
+    radial = axis[0] * normal[0] + axis[1] * normal[1] + axis[2] * normal[2]
+    tangent = np.sqrt(np.maximum(1.0 - radial * radial, 0.0))
+    along = (axis[0] * direction[0] + axis[1] * direction[1] + axis[2] * direction[2]) / np.maximum(tangent, 1e-12)
+    w = np.maximum(0.0, 2.0 * along * along - 1.0) ** sharpness * smoothstep(tangent, *BANK_TAPER)
+    return w, tangent
+
+
+def squeezed(points, axis, stretch):
+    """Positions (3, ...) mapped so a noise drawn on them is stretched by `stretch` along the meridians about the axis
+    (the axis's tangent projection) and has the same anisotropy everywhere: the latitude psi about the axis goes to
+    psi' with Mercator y' = y / stretch (tan psi' = sinh(asinh(tan psi) / stretch)), the longitude about the axis
+    kept. Features also shrink by cos psi' / cos psi overall (1.25 at psi 37 degrees, the taper's end)."""
+    z = axis[0] * points[0] + axis[1] * points[1] + axis[2] * points[2]
+    perp = points - z * np.asarray(axis)[:, None].reshape((3,) + (1,) * (points.ndim - 1))
+    rho = np.maximum(np.sqrt((perp * perp).sum(0)), 1e-9)
+    radius = np.sqrt(rho * rho + z * z)
+    y = np.arcsinh(z / rho) / stretch
+    return (radius / (np.cosh(y) * rho)) * perp + (radius * np.tanh(y)) * \
+        np.asarray(axis)[:, None].reshape((3,) + (1,) * (points.ndim - 1))
+
+
+def fbm(points, spec, seed, domain):
     """Fractal sum with unit standard deviation (about) at points (3, ...) in km: the cells' unit vectors times
-    the radius, or positions moved from them. Each isotropic octave is rotated by a fixed rotation (octave_rotation);
-    with an axis (a unit 3-vector) and a stretch, features are stretched along the axis by `stretch` (the coordinate
-    along it divided by the stretch; octaves shifted, not rotated). With spec['band_parent_km'] (a nested level,
-    rule B) only the level's band of octaves is summed (band_weight), with the normalisation of the whole sum on this
-    grid, so the band is the part of this grid's noise the parent lacks."""
+    the radius, or positions moved from them. Each octave is rotated by a fixed rotation (octave_rotation). With
+    spec['band_parent_km'] (a nested level, rule B) only the level's band of octaves is summed (band_weight), with
+    the normalisation of the whole sum on this grid, so the band is the part of this grid's noise the parent lacks."""
     points = np.asarray(points, dtype=np.float64)
     total = np.zeros(points.shape[1:])
     norm = 0.0
     wavelength, amplitude = spec['wavelength_km'], 1.0
     banded = spec.get('band_parent_km') is not None
-    if axis is not None:
-        a = np.asarray(axis, dtype=np.float64)
-        along = (a[0] * points[0] + a[1] * points[1] + a[2] * points[2]) * (1.0 / stretch - 1.0)
-        points = np.stack([points[0] + along * a[0], points[1] + along * a[1], points[2] + along * a[2]])
     for octave in range(spec['octaves']):
         fade = octave_fade(wavelength, domain, spec.get('min_cells', 2.5))
         if banded and fade > 0.0 and band_weight(wavelength, spec) <= 0.0:
@@ -971,12 +1021,8 @@ def fbm(points, spec, seed, domain, stretch=1.0, axis=None):
             amplitude *= spec.get('gain', 0.5)
             continue
         if fade > 0.0:
-            if axis is None:
-                q = octave_rotation(octave) / wavelength
-                u = np.stack([q[r, 0] * points[0] + q[r, 1] * points[1] + q[r, 2] * points[2] for r in range(3)])
-            else:  # a stretched octave keeps the stretch's axis: shifted, not rotated
-                u = np.stack([points[0] / wavelength + 0.37 * octave, points[1] / wavelength + 0.61 * octave,
-                              points[2] / wavelength + 0.83 * octave])
+            q = octave_rotation(octave) / wavelength
+            u = np.stack([q[r, 0] * points[0] + q[r, 1] * points[1] + q[r, 2] * points[2] for r in range(3)])
             weight = amplitude * fade * (band_weight(wavelength, spec) if banded else 1.0)
             total += weight * gradient_noise3(u, seed * 131 + octave)
         norm += (amplitude * fade) ** 2
@@ -997,28 +1043,36 @@ def axis_tangent(domain, theta):
     return np.cos(theta) * east - np.sin(theta) * north
 
 
+def domain_normals(domain):
+    """The cells' outward unit normals (3, ...)."""
+    points = domain.points()
+    return points / np.sqrt((points * points).sum(0))
+
+
 def oriented_fbm(points, theta, alignment, spec, seed, domain):
-    """Isotropic fBm blended into a bank of fBm stretched along the strike: bank member b is stretched along its
-    fixed axis a_b (bank_axes of the config's orientations), weight max(0, 2 (s . a_b)^2 - 1)^sharpness with s the
-    strike's unit tangent (the 2-D bank's max(0, cos 2(theta - phi_b))^sharpness); `alignment` 0..1 mixes the
-    isotropic sum into the bank's. theta: the shortening axis (radians from east toward south)."""
+    """Isotropic fBm blended into a bank of fBm stretched along the strike: bank member b has a fixed axis a_b
+    (bank_axes of the config's orientations and spec['bank_axis_factor']) and draws its noise on the positions
+    squeezed about it (squeezed: stretched by spec['stretch'] along the axis's tangent projection, the same
+    anisotropy wherever it acts), weight member_weight (the 2-D bank's max(0, cos 2(theta - phi_b))^sharpness with
+    the projection's direction, faded where the axis leaves the tangent plane); `alignment` 0..1 mixes the isotropic
+    sum into the bank's. theta: the shortening axis (radians from east toward south)."""
     isotropic = fbm(points, spec, seed, domain)
     count = spec.get('orientations', 6)
     if count == 0 or not np.any(alignment > 0):
         return isotropic
     points = np.asarray(points, dtype=np.float64)
     strike = strike_tangent(domain, theta)
+    normal = domain_normals(domain)
     bank = np.zeros(points.shape[1:])
     weights = np.zeros(points.shape[1:])
     aligned = alignment > 0
-    for b, a in enumerate(bank_axes(count)):
-        cosine = a[0] * strike[0] + a[1] * strike[1] + a[2] * strike[2]
-        w = np.maximum(0.0, 2.0 * cosine * cosine - 1.0) ** spec.get('sharpness', 4.0)
+    for b, a in enumerate(bank_axes(count, spec.get('bank_axis_factor', 0.75))):
+        w, _ = member_weight(strike, normal, a, spec.get('sharpness', 4.0) * spec.get('bank_sharpness_factor', 1.0))
         active = aligned & (w > 1e-3)  # evaluated only where the member carries weight
         if not np.any(active):
             continue
-        bank[active] += w[active] * fbm(points[:, active], spec, seed * 7 + 101 + b, domain,
-                                        stretch=spec.get('stretch', 4.0), axis=a)
+        moved = squeezed(points[:, active], a, spec.get('stretch', 4.0))
+        bank[active] += w[active] * fbm(moved, spec, seed * 7 + 101 + b, domain)
         weights[active] += w[active] ** 2
     bank = bank / np.sqrt(np.maximum(weights, 1e-12))
     a = np.clip(alignment, 0.0, 1.0)
@@ -1052,7 +1106,7 @@ def procedural(domain, world, config, seed):
     if config['seafloor'].get('shelf', {}).get('enabled', False):
         base = shelf_profile(base, np.clip(sampler(world['ocean']['oceanic']), 0.0, 1.0), config['seafloor']['shelf'])
     if config['seafloor']['enabled']:
-        base, ocean_age, spreading = seafloor(domain, world, world['ocean'], base, sampler, config['seafloor'], seed)
+        base, ocean_age, spreading = seafloor(domain, world, world['ocean'], base, sampler, seafloor_spec(config), seed)
     timings['base'] = time.perf_counter() - started
 
     started = time.perf_counter()
@@ -1304,7 +1358,9 @@ def hardness(domain, world, spec, structure, points, theta, banded, sampler, see
     value += spec['mosaic']['sigma'] * fbm(points, spec['mosaic'], seed + 32, domain)
     bands = spec['bands']
     layered = oriented_fbm(points, theta, np.ones_like(banded), {**bands, 'orientations': structure['orientations'],
-                                                                 'sharpness': structure['sharpness']}, seed + 31, domain)
+                                                                 'sharpness': structure['sharpness'],
+                                                                 **bank_options(structure)},
+                            seed + 31, domain)
     contrast = bands['contrast']
     variation = np.clip(0.5 + 0.7 * fbm(points, bands['variation'], seed + 33, domain), 0.0, 1.0)
     value += bands['amplitude'] * banded * variation * np.tanh(contrast * layered) / math.tanh(contrast)
@@ -1606,20 +1662,22 @@ def sample_fine(ocean, domain, points):
 
 
 def segment_shift(domain, points, theta, oceanic, spec, seed):
-    """Ridge-transform segments: for a bank of fixed spreading axes d_b (bank_axes of spec['orientations'],
-    weighted by max(0, 2 (t . d_b)^2 - 1)^sharpness, t the local spreading direction's unit tangent, so the 2-D
-    bank's cos^sharpness 2(theta - phi_b)), the along-ridge coordinate (the arc length about d_b: the great circle
-    normal to d_b is where the member is tangent, along a ridge) is cut into segments segment_km long, each shifted
-    along d_b by up to offset_km. Returns the shifted positions and the fracture-zone trough (0 to 1, scaled by its
-    transform's offset). fracture_warp (sea-v6): the segments are cut on positions moved by a noise of amplitude_km,
-    so the fracture zones curve and wander instead of running as straight, evenly spaced lines (the user: window
-    O's lines looked artificial); fracture_patch: the trough comes and goes along its length, as Earth's fracture
-    zones do."""
+    """Ridge-transform segments: for a bank of fixed spreading axes d_b (bank_axes of spec['orientations'] and
+    spec['bank_axis_factor'], weighted by member_weight of the local spreading direction: the 2-D bank's
+    cos^sharpness 2(theta - phi_b), faded where d_b leaves the tangent plane), the ridge runs along the circles of
+    latitude about d_b and the spreading along its meridians. The longitude about d_b is cut into round(2 pi R /
+    segment_km) equal segments (whole around the circle, numbered modulo their count, so no cut at +-pi), each
+    shifted along d_b's tangent projection by up to offset_km. Returns the shifted positions and the fracture-zone
+    trough (0 to 1, scaled by its transform's offset). fracture_warp (sea-v6): the segments are cut on positions moved
+    by a noise of amplitude_km, so the fracture zones curve and wander instead of running as straight, evenly spaced
+    lines (the user: window O's lines looked artificial); segment_jitter: the spacing varied by a noise periodic
+    around the circle; fracture_patch: the trough comes and goes along its length, as Earth's fracture zones do."""
     points = np.asarray(points, dtype=np.float64)
     shape = points.shape[1:]
     shift = np.zeros((3,) + shape)
     trough, weights = np.zeros(shape), np.zeros(shape)
     east, north = domain.frame()
+    normal = domain_normals(domain)
     warp = spec.get('fracture_warp')
     if warp:
         moved = points + warp['amplitude_km'] * (fbm(points, warp, seed + 130, domain) * east -
@@ -1627,37 +1685,41 @@ def segment_shift(domain, points, theta, oceanic, spec, seed):
     else:
         moved = points
     spreading = axis_tangent(domain, theta)
-    length = spec['segment_km']
     radius = domain.radius_km
-    for b, d in enumerate(bank_axes(spec['orientations'])):
-        cosine = d[0] * spreading[0] + d[1] * spreading[1] + d[2] * spreading[2]
-        w = np.maximum(0.0, 2.0 * cosine * cosine - 1.0) ** spec['sharpness']
+    count = max(1, int(round(2.0 * math.pi * radius / spec['segment_km'])))
+    for b, d in enumerate(bank_axes(spec['orientations'], spec.get('bank_axis_factor', 0.75))):
+        w, tangent = member_weight(spreading, normal, d, spec['sharpness'] * spec.get('bank_sharpness_factor', 1.0))
         active = (oceanic > 0.01) & (w > 1e-3)
         if not np.any(active):
             continue
-        first = np.cross(d, [0.0, 0.0, 1.0] if abs(d[2]) < 0.9 else [1.0, 0.0, 0.0])
-        first /= np.linalg.norm(first)
-        second = np.cross(d, first)
+        first, second = axis_frame(d)
         pa = moved[:, active]
-        around = np.arctan2(second[0] * pa[0] + second[1] * pa[1] + second[2] * pa[2],
-                            first[0] * pa[0] + first[1] * pa[1] + first[2] * pa[2])
-        along_ridge = radius * around / length
+        x1 = first[0] * pa[0] + first[1] * pa[1] + first[2] * pa[2]
+        x2 = second[0] * pa[0] + second[1] * pa[1] + second[2] * pa[2]
+        rho = np.maximum(np.hypot(x1, x2), 1e-9)
+        along_ridge = np.arctan2(x2, x1) / (2.0 * math.pi) * count  # in segments, -count/2 .. count/2
         jitter = spec.get('segment_jitter', 0.0)
-        if jitter > 0.0:  # irregular spacing: the along-ridge coordinate stretched by a 1-D noise of itself
-            along_ridge = along_ridge + jitter * gradient_noise(along_ridge * 0.6, np.full_like(along_ridge, 7.3 * b),
-                                                                seed + 133)
-        segment = np.floor(along_ridge).astype(np.int64)
+        if jitter > 0.0:  # irregular spacing: a noise around the circle (periodic), 0.6 lattice cells per segment
+            circle = count * 0.6 / (2.0 * math.pi)
+            along_ridge = along_ridge + jitter * gradient_noise3(
+                np.stack([circle * x1 / rho, circle * x2 / rho, np.full_like(x1, 7.3 * b)]), seed + 133)
+        segment = np.mod(np.floor(along_ridge).astype(np.int64), count)
         bank = np.full_like(segment, b)
         offset = spec['offset_km'] * erosion_filter.cell_hash(segment, bank, seed + 120)[0]
         wa = w[active]
+        direction = d[:, None] - (d[0] * normal[0][active] + d[1] * normal[1][active] +
+                                  d[2] * normal[2][active]) * normal[:, active]
+        direction = direction / np.maximum(tangent[active], 1e-12)
         for axis in range(3):
-            shift[axis][active] += wa * offset * d[axis]
+            shift[axis][active] += wa * offset * direction[axis]
         # A fracture zone's trough scales with its transform's offset: the jump between the two segments it
         # separates (a comb of equal troughs at every boundary read as artificial, sea-v1).
         boundary = np.round(along_ridge).astype(np.int64)
-        jump = np.abs(erosion_filter.cell_hash(boundary, bank, seed + 120)[0] -
-                      erosion_filter.cell_hash(boundary - 1, bank, seed + 120)[0]) / 2.0
-        edge = np.abs(along_ridge - boundary) * length  # km to the nearest segment boundary
+        jump = np.abs(erosion_filter.cell_hash(np.mod(boundary, count), bank, seed + 120)[0] -
+                      erosion_filter.cell_hash(np.mod(boundary - 1, count), bank, seed + 120)[0]) / 2.0
+        # km to the nearest segment boundary along the circle of latitude (its radius R cos psi)
+        edge = np.abs(along_ridge - boundary) * (2.0 * math.pi * radius / count) * rho / \
+            np.sqrt(rho * rho + (d[0] * pa[0] + d[1] * pa[1] + d[2] * pa[2]) ** 2)
         trough[active] += wa * jump * np.exp(-(edge / spec['fracture_width_km']) ** 2)
         weights[active] += wa
     weights = np.maximum(weights, 1e-12)
@@ -1730,7 +1792,8 @@ def seafloor(domain, world, ocean, base, sampler, spec, seed):
     coherence = np.ones(points.shape[1:])
     if spec.get('hills_coherence', False):
         coherence = np.clip(np.abs(doubled) / np.maximum(sampler(ocean['strength']), 1e-9), 0.0, 1.0)
-    hills = oriented_fbm(shifted, theta, coherence, spec['hills'], seed + 121, domain)
+    hills = oriented_fbm(shifted, theta, coherence, {**spec['hills'], **bank_options(spec)},
+                         seed + 121, domain)
     amplitude = spec['hills']['amplitude_m'] * (spec['hills']['old_fraction'] + (1.0 - spec['hills']['old_fraction'])
                                                 * np.exp(-age / spec['hills']['age_scale_myr']))
     if spec['hills'].get('patch'):
@@ -2774,6 +2837,7 @@ def main():
     arguments = parser.parse_args()
 
     config = load_config(arguments.config, preset_overrides(arguments.preset) + arguments.set)
+    use_noise_divisor(config)
     directory = ROOT / 'out' / 'scratch' / 'sandbox' / arguments.label
     directory.mkdir(parents=True, exist_ok=True)
     bundle = Bundle.open(ROOT / config['base_bundle'])
@@ -2782,7 +2846,7 @@ def main():
     world['precipitation'] = precipitation(world, config['precipitation'], radius_m)
     if config['seafloor'].get('abyss', {}).get('enabled', False):
         world['elevation'] = damp_abyss(world, config['seafloor']['abyss'])
-    world['ocean'] = ocean_world(world, config['seafloor'], config['seed'], radius_m / 1000.0, directory)
+    world['ocean'] = ocean_world(world, seafloor_spec(config), config['seed'], radius_m / 1000.0, directory)
     if config.get('platform', {}).get('enabled', False):
         world['provinces'] = provinces_world(world, config['platform'], 2.0 * math.pi * radius_m / 1000.0 / bundle.columns)
     names = arguments.domains.split(',') if arguments.domains else config['default_domains']
