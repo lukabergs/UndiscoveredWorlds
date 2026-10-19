@@ -2408,6 +2408,10 @@ void write_int_val(int val, ostream& out) {
 }
 void write_val(int   const val, ostream& out) { write_int_val(val, out); }
 void write_val(short const val, ostream& out) { write_int_val(val, out); }
+// Byte grids are numbers in the file like every other value (read back by stouc):
+// the default would write the raw byte, which the loader cannot parse.
+void write_val(unsigned char const val, ostream& out) { write_int_val(val, out); }
+void write_val(signed char const val, ostream& out) { write_int_val(val, out); }
 
 void write_val(bool const val, ostream& out) {
     out.put(val ? '1' : '0');
