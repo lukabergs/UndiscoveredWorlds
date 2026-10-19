@@ -122,6 +122,17 @@ void channelcellmeans(const RegionalWindow& window, const FineChannels& channels
 // lat-lon the cosine of the row's latitude: a pure function of the absolute row; 1 outside the
 // grid), by which a form scales its column offsets, and the column extent of a form of `radius`
 // fine cells (north-south) at that ratio, at most k.
+// The cube forms of carvevalleys and channelcellmeans (T8 W2-W2d; lat-lon windows take the forms
+// above): one value per cell of a cube window refining inputs.grid, in its local order. A form around
+// an axis cell is the cells within its extent's rings on the window's table (enough rings for the
+// extent at the table's smallest spacing); the single pass measures in rings (the cube's Chebyshev),
+// the loop on the ground (the great-circle distance between centres over the level arc pi R / (2 N_L),
+// northsouthspacing_m). channelcellmeans: the 8 neighbours on the window's table.
+void carvevalleys(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window, const RegionalParameters& parameters,
+                  const FineChannels& channels, const std::vector<uint8_t>& sea, std::vector<float>& elevation_m,
+                  double bandlower, double bandupper);
+void channelcellmeans(const mesh::CellGrid& window, const FineChannels& channels, const std::vector<uint8_t>& sea,
+                      double cap_m, const std::vector<float>& before, std::vector<float>& elevation_m);
 double eastwestratio(const mesh::CellGrid& grid, std::size_t cell);
 int columnextent(double radius, double ratio, int k);
 

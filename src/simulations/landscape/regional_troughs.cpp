@@ -3,9 +3,12 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
+#include <stdexcept>
 
 #include "simulations/landscape/regional_valleys.hpp"
+#include "simulations/landscape/regional_helpers.hpp"
 
 
 // Erosion plan Phase E5: the E5.0 contract (regional_troughs.hpp), which step E5.1
@@ -105,6 +108,77 @@ void carvetroughs(const RegionalGlobalInputs& inputs, const RegionalWindow& wind
         // S3.5: a channel cell keeps its value (its bed in the single pass; its cell mean in the
         // loop, which channelcellmeans lowers with the trough around it, never back to the bed).
         if (channels.channel[cell] != 0)
+            continue;
+        const float value = std::max(floorlevel, static_cast<float>(target[cell]));
+        elevation_m[cell] = std::min(elevation_m[cell], value);
+    }
+}
+
+void carvetroughs(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window, const RegionalParameters& parameters,
+                  const FineGlacial& glacial, const FineChannels& channels, const std::vector<uint8_t>& sea,
+                  std::vector<float>& elevation_m, double bandlower, double bandupper)
+{
+    const TroughParameters& troughs = parameters.troughs;
+    if (!(troughs.width_km > 0.0) || !glacial.active)
+        return;
+    const std::size_t count = window.cellcount();
+    if (count == 0 || channels.channel.size() != count || channels.globalcell.size() != count || sea.size() != count ||
+        elevation_m.size() != count || glacial.glaciation.size() != count)
+        return;
+    if (inputs.grid == nullptr || inputs.grid->kind() != mesh::GridKind::cube || window.kind() != mesh::GridKind::cube ||
+        window.facecells() % inputs.grid->facecells() != 0)
+        throw std::invalid_argument("carvetroughs: a cube window refining the inputs' cube level 0");
+    const int k = window.facecells() / inputs.grid->facecells();
+    const std::vector<double> catchment = glacialcatchment_km2(inputs);
+    if (catchment.empty())
+        return;
+    const double reference = troughs.reference_km2 > 0.0 ? troughs.reference_km2 : 1.0;
+    const double cell_m = northsouthspacing_m(window);
+    if (!(cell_m > 0.0))
+        return;
+    const bool loop = bandupper > 0.0;
+    const double widthcells = troughs.width_km * 1000.0 / cell_m;
+    const double widthmax = std::min(static_cast<double>(k), std::max(0.0, troughs.widthmax_km * 1000.0 / cell_m));
+    const float floorlevel = std::nextafter(inputs.sealevel, std::numeric_limits<float>::infinity());
+    const bool withbeds = channels.bed_m.size() == count;
+    const double spacing = window.minimumspacing_m() / cell_m;
+    std::vector<double> target(count, std::numeric_limits<double>::infinity());
+    std::vector<std::uint32_t> stamp;
+    std::vector<std::pair<mesh::CellId, int>> around;
+    std::uint32_t id = 0;
+    for (mesh::CellId cell = 0; cell < count; cell++)
+    {
+        if (channels.channel[cell] == 0 || sea[cell] != 0 || !(glacial.glaciation[cell] >= troughs.glaciationmin))
+            continue;
+        const int32_t global = channels.globalcell[cell];
+        if (global < 0 || static_cast<std::size_t>(global) >= catchment.size())
+            continue;
+        const double area = catchment[static_cast<std::size_t>(global)];
+        if (!(area > 0.0))
+            continue;
+        const double halfwidth = std::min(widthmax, widthcells * std::pow(area / reference, troughs.widthexponent));
+        if (!(halfwidth >= 1.0))
+            continue;
+        if (loop && (halfwidth < bandlower || halfwidth >= bandupper))
+            continue;
+        const double bed = static_cast<double>(withbeds ? channels.bed_m[cell] : elevation_m[cell]);
+        if (!std::isfinite(bed))
+            continue;
+        // The disc on the ground (the cube has no raster rows: both passes measure the ground distance).
+        const int rings = std::min(2 * k, static_cast<int>(std::ceil(halfwidth / spacing)));
+        regionaldetail::cellswithin(window, cell, rings, stamp, ++id, around);
+        for (const auto& [next, ring] : around)
+        {
+            const double distance = regionaldetail::centredistance(window, cell, next, cell_m);
+            if (distance > halfwidth)
+                continue;
+            const double value = bed + troughs.wall_m * std::pow(distance / halfwidth, troughs.exponent);
+            target[next] = std::min(target[next], value);
+        }
+    }
+    for (std::size_t cell = 0; cell < count; cell++)
+    {
+        if (sea[cell] != 0 || !std::isfinite(target[cell]) || channels.channel[cell] != 0)
             continue;
         const float value = std::max(floorlevel, static_cast<float>(target[cell]));
         elevation_m[cell] = std::min(elevation_m[cell], value);

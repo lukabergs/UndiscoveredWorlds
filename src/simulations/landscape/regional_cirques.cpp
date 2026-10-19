@@ -5,9 +5,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <stdexcept>
 
 #include "core/deterministic_random.hpp"
+#include "simulations/landscape/level_blocks.hpp"
 #include "simulations/landscape/regional_valleys.hpp"
+#include "simulations/landscape/regional_helpers.hpp"
 #include "simulations/landscape/upsampling.hpp"
 
 // Erosion plan Phase E5: the E5.0 contract (regional_cirques.hpp), which step E5.2
@@ -127,6 +130,89 @@ void carvecirques(const RegionalGlobalInputs& inputs, const RegionalWindow& wind
     // S3.5: a channel cell keeps its value (its bed in the single pass; its cell mean in the loop,
     // which channelcellmeans, regional_valleys.hpp, lowers with the bowl around it, never back to
     // the bed).
+    for (std::size_t cell = 0; cell < count; cell++)
+    {
+        if (sea[cell] != 0 || !std::isfinite(target[cell]) || channels.channel[cell] != 0)
+            continue;
+        const float value = std::max(floorlevel, static_cast<float>(target[cell]));
+        elevation_m[cell] = std::min(elevation_m[cell], value);
+    }
+}
+
+void carvecirques(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window, const RegionalParameters& parameters,
+                  const FineGlacial& glacial, const FineChannels& channels, const std::vector<uint8_t>& sea,
+                  std::vector<float>& elevation_m, double bandlower, double bandupper)
+{
+    if (!(parameters.cirques.radius_km > 0.0) || !glacial.active)
+        return;
+    const CirqueParameters& cirques = parameters.cirques;
+    const std::size_t count = window.cellcount();
+    if (inputs.grid == nullptr || inputs.grid->kind() != mesh::GridKind::cube || window.kind() != mesh::GridKind::cube ||
+        window.facecells() % inputs.grid->facecells() != 0)
+        throw std::invalid_argument("carvecirques: a cube window refining the inputs' cube level 0");
+    const int k = window.facecells() / inputs.grid->facecells();
+    const mesh::CellGrid& levelzero = *inputs.grid;
+    const std::size_t size = levelzero.cellcount();
+    if (count == 0 || cirques.candidates < 1 || channels.channel.size() != count || sea.size() != count ||
+        elevation_m.size() != count || glacial.runela_m.size() != count || inputs.network.sea.size() != size)
+        return;
+    const bool withglaciation = inputs.glaciation.size() == size;
+    const double cell_m = northsouthspacing_m(window);
+    const double radius = std::min(static_cast<double>(k), cirques.radius_km * 1000.0 / cell_m);
+    if (!(radius > 0.0))
+        return;
+    if (bandupper > 0.0 && (radius < bandlower || radius >= bandupper))
+        return;
+    const double radius2 = radius * radius;
+    const float floorlevel = std::nextafter(inputs.sealevel, std::numeric_limits<float>::infinity());
+    const std::vector<float> base = upsample(inputs.elevation_m, levelzero, window);
+    const double spacing = window.minimumspacing_m() / cell_m;
+    const int rings = std::min(2 * k, static_cast<int>(std::ceil(radius / spacing)));
+    std::vector<double> target(count, std::numeric_limits<double>::infinity());
+    std::vector<std::uint32_t> stamp;
+    std::vector<std::pair<mesh::CellId, int>> around;
+    std::uint32_t id = 0;
+    bool any = false;
+    // The candidates of every level-0 cell of the window (its blocks): the hash of the seed and the
+    // level-0 key draws the child at face-index offset (ox, oy) in the block.
+    const WindowBlocks blocks = windowblocks(window, k);
+    for (std::size_t b = 0; b < blocks.count(); b++)
+    {
+        const std::size_t global = levelzero.localofkey(blocks.parents[b]);
+        if (inputs.network.sea[global] != 0)
+            continue;
+        const double glaciation = withglaciation ? static_cast<double>(inputs.glaciation[global]) : 0.0;
+        if (!(glaciation >= cirques.glaciationmin))
+            continue;
+        for (int n = 0; n < cirques.candidates; n++)
+        {
+            const std::uint64_t hash =
+                deterministiccombine(inputs.seed, cirquesalt, static_cast<std::int64_t>(blocks.parents[b]), std::int64_t{ -1 }, n);
+            const int ox = static_cast<int>((hash & 0xffffffffull) % static_cast<std::uint64_t>(k));
+            const int oy = static_cast<int>((hash >> 32) % static_cast<std::uint64_t>(k));
+            const mesh::CellId centre = blocks.childrenof(b)[oy * k + ox];
+            if (sea[centre] != 0 || channels.channel[centre] != 0)
+                continue;
+            const double z = static_cast<double>(base[centre]);
+            const double ela = static_cast<double>(glacial.runela_m[centre]);
+            if (!(z >= ela) || !(z <= ela + cirques.band_m))
+                continue;
+            const double floor = std::max(static_cast<double>(floorlevel), std::max(ela, z - cirques.depth_m));
+            any = true;
+            regionaldetail::cellswithin(window, centre, rings, stamp, ++id, around);
+            for (const auto& [next, ring] : around)
+            {
+                const double distance = regionaldetail::centredistance(window, centre, next, cell_m);
+                const double d2 = distance * distance;
+                if (d2 > radius2)
+                    continue;
+                const double value = floor + (static_cast<double>(elevation_m[next]) - floor) * (d2 / radius2);
+                target[next] = std::min(target[next], value);
+            }
+        }
+    }
+    if (!any)
+        return;
     for (std::size_t cell = 0; cell < count; cell++)
     {
         if (sea[cell] != 0 || !std::isfinite(target[cell]) || channels.channel[cell] != 0)

@@ -6,11 +6,15 @@
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
+#include <string>
 #include <utility>
 
 #include "core/deterministic_random.hpp"
+#include "core/mesh/window_grid.hpp"
+#include "simulations/landscape/level_blocks.hpp"
 #include "simulations/landscape/refinement_levels.hpp"
 #include "simulations/landscape/regional_edges.hpp"
+#include "simulations/landscape/regional_helpers.hpp"
 #include "simulations/landscape/regional_pass.hpp"
 #include "simulations/landscape/regional_surface.hpp"
 #include "simulations/landscape/sphere_metric.hpp"
@@ -755,5 +759,487 @@ void lakeslevel(const LevelContext& context, LevelState& state)
         }
     }
     recordlevelstep(state, LevelStep::lakes);
+}
+
+// --- The cube forms (T8 W2-W2d; sphere-mesh.md section 8: water gates by table neighbours and G
+// footprints). The steps of phaseewater and shorewater on a cube window: a cell's global cell is its
+// level-0 ancestor, every raster neighbourhood the window's table (8 slots; the flood's 4-connection
+// the cardinal slots), the indicators and fields gathered by G at the warped point, the noises at the
+// cell's centre, the indicator's magnitude a hash of the seed, the salt and the level-0 key. ---
+
+namespace
+{
+struct CubeWater
+{
+    const mesh::CellGrid* levelzero = nullptr;
+    int k = 1;
+    std::vector<std::size_t> globalof;  // per window cell its level-0 id
+};
+
+CubeWater cubewater(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window, const char* name)
+{
+    if (inputs.grid == nullptr || inputs.grid->kind() != mesh::GridKind::cube || window.kind() != mesh::GridKind::cube ||
+        window.facecells() % inputs.grid->facecells() != 0)
+        throw std::invalid_argument(std::string(name) + ": a cube window refining the inputs' cube level 0");
+    CubeWater result;
+    result.levelzero = inputs.grid.get();
+    result.k = window.facecells() / inputs.grid->facecells();
+    result.globalof.resize(window.cellcount());
+    for (mesh::CellId c = 0; c < window.cellcount(); c++)
+        result.globalof[c] = inputs.grid->localofkey(parentkey(window, window.globalkey(c), result.k));
+    return result;
+}
+
+// G of a level-0 field at a point (upsampling.hpp's cube gather).
+double gathered(const std::vector<float>& field, const mesh::CellGrid& levelzero, const mesh::Vec3& p)
+{
+    return mesh::applystencil(mesh::cubicstencil(levelzero.facecells(), p),
+                              [&](mesh::LevelKey key) { return field[levelzero.localofkey(key)]; });
+}
+
+// A wet 8-neighbour on the window's table passing `test`.
+template<typename Test>
+bool cubeneighbour(const mesh::CellGrid& window, std::size_t cell, Test test)
+{
+    for (int slot = 1; slot <= mesh::slotcount; slot++)
+    {
+        const std::int32_t other = window.neighbour(static_cast<mesh::CellId>(cell), slot);
+        if (other >= 0 && test(static_cast<std::size_t>(other)))
+            return true;
+    }
+    return false;
+}
+
+FineWater cubephaseewater(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window, const CubeWater& cube,
+                          const std::vector<uint8_t>& sea, const FineChannels& channels, std::vector<float>& elevation_m)
+{
+    const mesh::CellGrid& grid = *cube.levelzero;
+    const std::size_t count = window.cellcount();
+    std::vector<uint8_t> nearice(grid.cellcount(), 0);
+    for (std::size_t global = 0; global < nearice.size(); global++)
+        nearice[global] = regionaldetail::aroundcell(grid, global, [&](std::size_t other) {
+            return inputs.icethickness_m[other] > 0.0f;
+        }) ? 1 : 0;
+    const std::vector<float> ice = upsample(inputs.icethickness_m, grid, window);
+    FineWater water;
+    water.lakesurface_m.assign(count, 0.0f);
+    water.icethickness_m.assign(count, 0.0f);
+    for (std::size_t cell = 0; cell < count; cell++)
+    {
+        const std::size_t global = cube.globalof[cell];
+        const float surfacelevel = inputs.lakesurface_m[global];
+        if (sea[cell] == 0 && surfacelevel > 0.0f)
+        {
+            if (channels.channel[cell] != 0)
+            {
+                const float level = std::max(surfacelevel, inputs.network.filledelevation_m[global]);
+                if (elevation_m[cell] <= level)
+                {
+                    water.lakesurface_m[cell] = surfacelevel;
+                    elevation_m[cell] = std::min(elevation_m[cell], surfacelevel);
+                }
+            }
+            else if (elevation_m[cell] < surfacelevel)
+                water.lakesurface_m[cell] = surfacelevel;
+        }
+        water.icethickness_m[cell] = nearice[global] != 0 ? std::max(0.0f, ice[cell]) : 0.0f;
+    }
+    return water;
+}
+
+// R4's zone on the cube: the lake cell among the ancestor and its 8 table neighbours whose term in
+// the indicator's G stencil at the warped point (the node's weight times the cell's magnitude) is the
+// most negative; ties by the smaller key; none without a lake cell around.
+std::size_t cubefinezone(const mesh::CellGrid& grid, const std::vector<uint8_t>& lakecell, const std::vector<float>& magnitude,
+                         std::size_t global, const mesh::KeyStencil& stencil)
+{
+    std::size_t best = none;
+    double bestterm = 0.0;
+    regionaldetail::aroundcell(grid, global, [&](std::size_t cell) {
+        if (lakecell[cell] == 0)
+            return false;
+        const mesh::LevelKey key = grid.globalkey(static_cast<mesh::CellId>(cell));
+        const auto found = std::lower_bound(stencil.key.begin(), stencil.key.end(), key);
+        const double weight = found != stencil.key.end() && *found == key
+                                  ? stencil.weight[static_cast<std::size_t>(found - stencil.key.begin())]
+                                  : 0.0;
+        const double term = weight * std::fabs(static_cast<double>(magnitude[cell]));
+        if (best == none || term > bestterm || (term == bestterm && cell < best))
+        {
+            best = cell;
+            bestterm = term;
+        }
+        return false;
+    });
+    return best;
+}
+
+FineWater cubeshorewater(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window, const CubeWater& cube,
+                         const FineWarp& warp, const RegionalParameters& parameters, const std::vector<uint8_t>& sea,
+                         const FineChannels& channels, std::vector<float>& elevation_m, bool globaldepth,
+                         const LakeInheritance& inheritance)
+{
+    const mesh::CellGrid& grid = *cube.levelzero;
+    const int n0 = grid.facecells();
+    const std::size_t globalsize = grid.cellcount();
+    const std::size_t count = window.cellcount();
+    const double shorenoise = parameters.shores.shorenoise;
+    const double terrain = parameters.shores.terrain_m;
+    const float above = std::numeric_limits<float>::infinity();
+    const float below = -std::numeric_limits<float>::infinity();
+
+    std::vector<uint8_t> lakecell(globalsize, 0), icecell(globalsize, 0), nearice(globalsize, 0);
+    for (std::size_t global = 0; global < globalsize; global++)
+    {
+        lakecell[global] = inputs.lakesurface_m[global] > 0.0f && inputs.network.sea[global] == 0 ? 1 : 0;
+        icecell[global] = inputs.icethickness_m[global] > 0.0f ? 1 : 0;
+    }
+    for (std::size_t global = 0; global < globalsize; global++)
+        nearice[global] = regionaldetail::aroundcell(grid, global, [&](std::size_t other) { return icecell[other] != 0; }) ? 1 : 0;
+    // The indicators' magnitudes by the level-0 key.
+    const auto indicator = [&](const std::vector<uint8_t>& negative, std::uint64_t salt) {
+        const std::uint64_t base = deterministiccombine(inputs.seed, salt);
+        std::vector<float> values(globalsize);
+        for (std::size_t global = 0; global < globalsize; global++)
+        {
+            const std::int64_t key = static_cast<std::int64_t>(grid.globalkey(static_cast<mesh::CellId>(global)));
+            const double magnitude = deterministicrandom(base, magnitudeleast, magnitudemost, key, std::int64_t{ -1 }) / magnitudescale;
+            values[global] = static_cast<float>(negative[global] != 0 ? -magnitude : magnitude);
+        }
+        return values;
+    };
+    const std::vector<float> lakemagnitude = indicator(lakecell, lakesalt);
+    const std::vector<float> icemagnitude = indicator(icecell, icesalt);
+    std::vector<float> lakemask(globalsize);
+    for (std::size_t global = 0; global < globalsize; global++)
+        lakemask[global] = lakecell[global] != 0 ? 1.0f : 0.0f;
+    // The fully warped points and the fields there (lakecellweight's points).
+    std::vector<mesh::Vec3> point(count);
+    std::vector<float> lakeindicator(count), lakeweight(count), iceindicator(count), ice(count);
+    for (mesh::CellId c = 0; c < count; c++)
+    {
+        point[c] = warp.empty() ? window.centre(c) : warpedpoint(window.centre(c), warp.dx[c], warp.dy[c], grid.radius_m(), n0);
+        lakeindicator[c] = static_cast<float>(gathered(lakemagnitude, grid, point[c]));
+        lakeweight[c] = static_cast<float>(gathered(lakemask, grid, point[c]));
+        iceindicator[c] = static_cast<float>(gathered(icemagnitude, grid, point[c]));
+        ice[c] = static_cast<float>(gathered(inputs.icethickness_m, grid, point[c]));
+    }
+    const double persistence = parameters.coast.noisepersistence;
+    const RegionalNoise lakenoise(4 * n0, 2 * n0, cube.k, inputs.seed, lakenoisesalt, persistence);
+    const RegionalNoise icenoise(4 * n0, 2 * n0, cube.k, inputs.seed, icenoisesalt, persistence);
+    const auto noiseat = [&](const RegionalNoise& noise, mesh::CellId c) {
+        const mesh::Vec3 p = window.centre(c);
+        return noise.atpoint(p.x, p.y, p.z);
+    };
+
+    FineWater water;
+    water.lakesurface_m.assign(count, 0.0f);
+    water.icethickness_m.assign(count, 0.0f);
+
+    // 1. The zones, the sums and the wet cells (shorewater's step 1).
+    std::vector<std::size_t> zone(count, none);
+    std::vector<float> surface(count, 0.0f);
+    std::vector<double> lakesum(count, 0.0);
+    std::vector<uint8_t> wet(count, 0);
+    for (mesh::CellId cell = 0; cell < count; cell++)
+    {
+        if (sea[cell] != 0)
+            continue;
+        const std::size_t lake = cubefinezone(grid, lakecell, lakemagnitude, cube.globalof[cell],
+                                              mesh::cubicstencil(n0, point[cell]));
+        if (lake == none)
+            continue;
+        zone[cell] = lake;
+        surface[cell] = inputs.lakesurface_m[lake];
+        const double height_m = static_cast<double>(elevation_m[cell]) - static_cast<double>(surface[cell]);
+        const double forcing = std::clamp(static_cast<double>(lakeweight[cell]), 0.0, 1.0);
+        const double term = terrain > 0.0 ? std::clamp(height_m / terrain, -forcing, 1.0) : 0.0;
+        lakesum[cell] = static_cast<double>(lakeindicator[cell]) + shorenoise * noiseat(lakenoise, cell) + term;
+        wet[cell] = lakesum[cell] < 0.0 && (terrain <= 0.0 || height_m < terrain) ? 1 : 0;
+    }
+
+    // 1b. The refinement loop's flood through the cardinal neighbours on the table.
+    if (inheritance.flood)
+    {
+        const bool inherited = inheritance.parentsurface_m != nullptr;
+        const std::vector<uint8_t> gate = seagate(inputs, window, warp, parameters, &lakeweight);
+        const auto atorbelow = [&](float value, std::size_t cell, std::size_t global) {
+            return value < surface[cell] || (value == surface[cell] && lakecell[global] != 0);
+        };
+        const auto passable = [&](std::size_t cell) {
+            const std::size_t global = cube.globalof[cell];
+            if (sea[cell] != 0 || zone[cell] == none || !atorbelow(elevation_m[cell], cell, global))
+                return false;
+            if (inheritance.startsurface_m != nullptr && !atorbelow((*inheritance.startsurface_m)[cell], cell, global))
+                return false;
+            if (inherited && (*inheritance.parentreach)[cell] == 0)
+                return false;
+            if (gate[cell] != 0 && (inheritance.parentseagate == nullptr || (*inheritance.parentseagate)[cell] != 0) &&
+                elevation_m[cell] > inputs.sealevel)
+                return true;
+            return lakeweight[cell] >= 0.5f || inputs.elevation_m[global] > surface[cell];
+        };
+        std::vector<uint8_t> flooded(count, 0);
+        std::vector<std::size_t> queue;
+        for (std::size_t cell = 0; cell < count; cell++)
+        {
+            const bool core = inherited ? sea[cell] == 0 && zone[cell] != none &&
+                                              (*inheritance.parentsurface_m)[cell] == surface[cell] &&
+                                              atorbelow(elevation_m[cell], cell, cube.globalof[cell])
+                                        : wet[cell] != 0;
+            if (core)
+            {
+                flooded[cell] = 1;
+                queue.push_back(cell);
+            }
+        }
+        for (std::size_t next = 0; next < queue.size(); next++)
+        {
+            const std::size_t cell = queue[next];
+            for (const int slot : { 1, 3, 5, 7 })
+            {
+                const std::int32_t neighbour = window.neighbour(static_cast<mesh::CellId>(cell), slot);
+                if (neighbour < 0)
+                    continue;
+                const std::size_t other = static_cast<std::size_t>(neighbour);
+                if (flooded[other] != 0 || zone[other] != zone[cell] || !passable(other))
+                    continue;
+                flooded[other] = 1;
+                queue.push_back(other);
+            }
+        }
+        wet = std::move(flooded);
+    }
+    const auto neighbour = [&](std::size_t cell, auto test) { return cubeneighbour(window, cell, test); };
+
+    // 2. No step between two lakes.
+    std::vector<uint8_t> water2(count, 0);
+    for (std::size_t cell = 0; cell < count; cell++)
+        if (wet[cell] != 0)
+            water2[cell] = neighbour(cell, [&](std::size_t other) { return wet[other] != 0 && surface[other] < surface[cell]; }) ? 0 : 1;
+
+    // 3. The channel cells of lake cells, and S3.13's lake levels.
+    const std::vector<float> lakelevel = channellakelevels(inputs, window, channels);
+    std::vector<uint8_t> atlevel(count, 0);
+    std::vector<uint8_t> water3 = water2;
+    for (std::size_t cell = 0; cell < count; cell++)
+    {
+        const std::size_t global = cube.globalof[cell];
+        if (water2[cell] != 0 || sea[cell] != 0 || channels.channel[cell] == 0)
+            continue;
+        if (zone[cell] != none && lakecell[global] != 0)
+        {
+            const double height_m = static_cast<double>(elevation_m[cell]) - static_cast<double>(surface[cell]);
+            const bool meets = (terrain <= 0.0 || height_m < terrain) &&
+                               neighbour(cell, [&](std::size_t other) { return water2[other] != 0 && channels.channel[other] == 0; });
+            const bool otherlake = neighbour(cell, [&](std::size_t other) { return water2[other] != 0 && surface[other] != surface[cell]; });
+            water3[cell] = (meets || height_m < 0.0) && !otherlake ? 1 : 0;
+            if (water3[cell] != 0)
+                continue;
+        }
+        const float level = lakelevel[cell];
+        if (!(level > 0.0f) || !(elevation_m[cell] <= level))
+            continue;
+        if (neighbour(cell, [&](std::size_t other) { return water2[other] != 0 && surface[other] != level; }))
+            continue;
+        atlevel[cell] = lakecell[global] != 0 && zone[cell] != none && surface[cell] == level ? 0 : 1;
+        water3[cell] = 1;
+        surface[cell] = level;
+    }
+    // 3b.
+    {
+        std::vector<uint8_t> added(count, 0);
+        for (std::size_t cell = 0; cell < count; cell++)
+            added[cell] = water3[cell] != 0 && water2[cell] == 0 ? 1 : 0;
+        for (std::size_t cell = 0; cell < count; cell++)
+            if (added[cell] != 0 && neighbour(cell, [&](std::size_t other) { return added[other] != 0 && surface[other] < surface[cell]; }))
+                water3[cell] = 0;
+    }
+    // 3c. The rim raise capped at the level's noise band.
+    if (inheritance.flood && inheritance.rimcap_m != nullptr)
+    {
+        const std::vector<float>& cap = *inheritance.rimcap_m;
+        for (;;)
+        {
+            std::vector<std::size_t> joins;
+            for (std::size_t cell = 0; cell < count; cell++)
+            {
+                if (water3[cell] != 0 || sea[cell] != 0 || channels.channel[cell] != 0 || zone[cell] == none ||
+                    (inheritance.parentreach != nullptr && (*inheritance.parentreach)[cell] == 0) ||
+                    (inheritance.startsurface_m != nullptr && !((*inheritance.startsurface_m)[cell] < surface[cell])))
+                    continue;
+                const double rise = static_cast<double>(surface[cell]) - static_cast<double>(elevation_m[cell]);
+                if (!(rise > terrain) || !(rise > static_cast<double>(cap[cell])))
+                    continue;
+                if (neighbour(cell, [&](std::size_t other) { return water3[other] != 0 && surface[other] < surface[cell]; }))
+                    continue;
+                if (neighbour(cell, [&](std::size_t other) { return water3[other] != 0 && surface[other] == surface[cell]; }))
+                    joins.push_back(cell);
+            }
+            if (joins.empty())
+                break;
+            for (const std::size_t cell : joins)
+                water3[cell] = 1;
+        }
+    }
+    // 4. The beds.
+    for (std::size_t cell = 0; cell < count; cell++)
+    {
+        if (water3[cell] == 0)
+            continue;
+        const std::size_t lake = zone[cell];
+        const float level = surface[cell];
+        water.lakesurface_m[cell] = level;
+        if (elevation_m[cell] < level)
+            continue;
+        if (atlevel[cell] != 0)
+        {
+            elevation_m[cell] = std::nextafter(level, below);
+            continue;
+        }
+        const double magnitude = std::fabs(static_cast<double>(lakemagnitude[lake]));
+        double depth = std::max(0.0, static_cast<double>(level) - static_cast<double>(inputs.elevation_m[lake]));
+        if (terrain > 0.0 && !globaldepth)
+            depth = std::min(depth, terrain);
+        const double share = std::clamp(-lakesum[cell] / magnitude, 0.0, 1.0);
+        elevation_m[cell] = std::min(std::nextafter(level, below), static_cast<float>(static_cast<double>(level) - share * depth));
+    }
+    // 5. No dry land just below an adjacent lake's surface.
+    if (inheritance.flood)
+        water.rimraise_m.assign(count, 0.0f);
+    std::vector<float> raised(count, 0.0f);
+    std::vector<uint8_t> raise(count, 0);
+    for (std::size_t cell = 0; cell < count; cell++)
+    {
+        if (water.lakesurface_m[cell] > 0.0f || sea[cell] != 0 || channels.channel[cell] != 0)
+            continue;
+        const std::size_t global = cube.globalof[cell];
+        float level = below, beside = below;
+        if (lakecell[global] != 0)
+            level = inputs.lakesurface_m[global];
+        neighbour(cell, [&](std::size_t other) {
+            if (water.lakesurface_m[other] > 0.0f)
+                beside = std::max(beside, water.lakesurface_m[other]);
+            return false;
+        });
+        level = std::max(level, beside);
+        if (!(elevation_m[cell] <= level))
+            continue;
+        const double rise = static_cast<double>(level) - static_cast<double>(elevation_m[cell]);
+        if (terrain > 0.0 && rise > terrain)
+        {
+            if (inheritance.flood && elevation_m[cell] <= beside)
+            {
+                raised[cell] = std::nextafter(beside, above);
+                raise[cell] = 1;
+                water.rimraise_m[cell] = static_cast<float>(static_cast<double>(raised[cell]) - static_cast<double>(elevation_m[cell]));
+            }
+            continue;
+        }
+        raised[cell] = std::max(std::nextafter(level, above), static_cast<float>(static_cast<double>(level) + rise));
+        raise[cell] = 1;
+    }
+    for (std::size_t cell = 0; cell < count; cell++)
+        if (raise[cell] != 0)
+            elevation_m[cell] = raised[cell];
+    // The ice.
+    for (mesh::CellId cell = 0; cell < count; cell++)
+    {
+        const std::size_t global = cube.globalof[cell];
+        if (nearice[global] == 0 || (sea[cell] != 0 && !(inputs.network.sea[global] != 0 && icecell[global] != 0)))
+            continue;
+        const double sum = static_cast<double>(iceindicator[cell]) + shorenoise * noiseat(icenoise, cell);
+        if (sum < 0.0)
+            water.icethickness_m[cell] = std::max(iceminimum_m, ice[cell]);
+    }
+    return water;
+}
+}
+
+FineWater regionalwater(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window, const FineWarp& warp,
+                        const RegionalParameters& parameters, const std::vector<uint8_t>& sea,
+                        const FineChannels& channels, std::vector<float>& elevation_m, bool globaldepth,
+                        const LakeInheritance& inheritance)
+{
+    const CubeWater cube = cubewater(inputs, window, "regionalwater");
+    const std::size_t count = window.cellcount();
+    if (sea.size() != count || elevation_m.size() != count || channels.channel.size() != count ||
+        (!warp.empty() && (warp.dx.size() != count || warp.dy.size() != count)))
+        throw std::invalid_argument("regionalwater: one sea flag, elevation, channel and warp value per window cell");
+    if (!(parameters.shores.shorenoise > 0.0))
+        return cubephaseewater(inputs, window, cube, sea, channels, elevation_m);
+    if ((inheritance.parentsurface_m == nullptr) != (inheritance.parentreach == nullptr) ||
+        (inheritance.parentsurface_m != nullptr &&
+         (inheritance.parentsurface_m->size() != count || inheritance.parentreach->size() != count)) ||
+        (inheritance.parentseagate != nullptr && inheritance.parentseagate->size() != count) ||
+        (inheritance.rimcap_m != nullptr && inheritance.rimcap_m->size() != count) ||
+        (inheritance.startsurface_m != nullptr && inheritance.startsurface_m->size() != count))
+        throw std::invalid_argument("regionalwater: the inherited masks must hold one value per window cell");
+    return cubeshorewater(inputs, window, cube, warp, parameters, sea, channels, elevation_m, globaldepth, inheritance);
+}
+
+std::vector<float> channellakelevels(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window,
+                                     const FineChannels& channels)
+{
+    const CubeWater cube = cubewater(inputs, window, "channellakelevels");
+    const mesh::CellGrid& grid = *cube.levelzero;
+    const std::size_t count = window.cellcount(), globalsize = grid.cellcount();
+    std::vector<float> level(count, 0.0f);
+    if (channels.channel.size() != count || channels.globalcell.size() != count || inputs.lakesurface_m.size() != globalsize ||
+        inputs.network.sea.size() != globalsize || inputs.network.direction.size() != globalsize)
+        return level;
+    const auto lake = [&](std::size_t global) { return inputs.lakesurface_m[global] > 0.0f && inputs.network.sea[global] == 0; };
+    for (std::size_t cell = 0; cell < count; cell++)
+    {
+        if (channels.channel[cell] == 0 || channels.globalcell[cell] < 0 ||
+            static_cast<std::size_t>(channels.globalcell[cell]) >= globalsize)
+            continue;
+        const std::size_t upstream = static_cast<std::size_t>(channels.globalcell[cell]);
+        // The receiver on the world's table (the network's slot codes).
+        const int direction = inputs.network.direction[upstream];
+        std::size_t next = none;
+        if (inputs.network.sea[upstream] == 0 && direction >= 1 && direction <= mesh::slotcount)
+        {
+            const std::int32_t other = grid.neighbour(static_cast<mesh::CellId>(upstream), direction);
+            next = other < 0 ? none : static_cast<std::size_t>(other);
+        }
+        if (next != none && lake(next))
+            level[cell] = inputs.lakesurface_m[next];
+        else if (lake(upstream) && cube.globalof[cell] == upstream)
+            level[cell] = inputs.lakesurface_m[upstream];
+    }
+    return level;
+}
+
+std::vector<std::size_t> channelmeansafterlakes(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window,
+                                                const FineChannels& channels, const std::vector<uint8_t>& sea,
+                                                const std::vector<float>& bed_m, const std::vector<float>& means_m,
+                                                std::vector<float>& elevation_m, FineWater& water, bool drymeans)
+{
+    std::vector<std::size_t> dried;
+    const CubeWater cube = cubewater(inputs, window, "channelmeansafterlakes");
+    const std::size_t count = window.cellcount();
+    if (channels.channel.size() != count || sea.size() != count || bed_m.size() != count || means_m.size() != count ||
+        elevation_m.size() != count || water.lakesurface_m.size() != count)
+        return dried;
+    for (std::size_t cell = 0; cell < count; cell++)
+    {
+        if (channels.channel[cell] == 0 || sea[cell] != 0 || means_m[cell] == bed_m[cell])
+            continue;
+        const float surface = water.lakesurface_m[cell];
+        if (surface > 0.0f)
+        {
+            const std::size_t global = cube.globalof[cell];
+            if (inputs.lakesurface_m[global] > 0.0f && inputs.network.sea[global] == 0)
+                continue;
+        }
+        elevation_m[cell] = means_m[cell];
+        if (drymeans && surface > 0.0f && means_m[cell] > surface)
+        {
+            water.lakesurface_m[cell] = 0.0f;
+            dried.push_back(cell);
+        }
+    }
+    return dried;
 }
 }

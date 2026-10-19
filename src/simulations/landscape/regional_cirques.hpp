@@ -57,4 +57,10 @@ namespace landscape
 void carvecirques(const RegionalGlobalInputs& inputs, const RegionalWindow& window, const RegionalParameters& parameters,
                   const FineGlacial& glacial, const FineChannels& channels, const std::vector<uint8_t>& sea,
                   std::vector<float>& elevation_m, double bandlower = 0.0, double bandupper = 0.0);
+// The cube form (T8 W2-W2d; lat-lon windows take the form above): one value per cell of a cube
+// window refining inputs.grid, in its local order; the candidates of each level-0 cell drawn from a hash of
+// the seed and its key as a face-index offset in its block, each bowl the disc on the ground.
+void carvecirques(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window, const RegionalParameters& parameters,
+                  const FineGlacial& glacial, const FineChannels& channels, const std::vector<uint8_t>& sea,
+                  std::vector<float>& elevation_m, double bandlower = 0.0, double bandupper = 0.0);
 }

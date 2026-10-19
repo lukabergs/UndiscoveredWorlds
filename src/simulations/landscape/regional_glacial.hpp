@@ -46,6 +46,10 @@ bool glacialformson(const RegionalParameters& parameters);
 // holds width x height values.
 FineGlacial regionalglacialfields(const RegionalGlobalInputs& inputs, const RegionalWindow& window,
                                   const RegionalParameters& parameters);
+// The cube form (T8 W2-W2d; lat-lon windows take the form above): one value per cell of a cube
+// window refining inputs.grid, in its local order; the fields gathered by G (upsampling.hpp).
+FineGlacial regionalglacialfields(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window,
+                                  const RegionalParameters& parameters);
 
 // The ice catchment per global cell (W x H, km2): the sum over the cell and every cell
 // upstream of it on the global network of glaciation x the cell's area (SphereMetric's

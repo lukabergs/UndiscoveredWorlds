@@ -165,6 +165,26 @@ std::vector<std::size_t> channelmeansafterlakes(const RegionalGlobalInputs& inpu
                                                 const std::vector<float>& bed_m, const std::vector<float>& means_m,
                                                 std::vector<float>& elevation_m, FineWater& water, bool drymeans = true);
 
+// The cube forms of the three above (T8 W2-W2d; sphere-mesh.md section 8, water gates by table
+// neighbours and G footprints; lat-lon windows take the forms above): one value per cell of a cube
+// window refining inputs.grid, in its local order. A cell's global cell is its level-0 ancestor, the
+// raster neighbourhoods the window's table (the flood through the cardinal slots), the indicators and
+// the ice gathered by G at the fully warped point (warpedpoint), the shore and ice noises at the cell's
+// centre; the indicators' magnitudes hash the seed, the salt and the level-0 key; R4's zone is the lake
+// cell of the ancestor's 3 x 3 (the world's table) with the largest term (its weight in the G stencil
+// at the warped point times its magnitude), ties to the smaller key; a channel's lake level reads the
+// receiver on the world's table.
+FineWater regionalwater(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window, const FineWarp& warp,
+                        const RegionalParameters& parameters, const std::vector<uint8_t>& sea,
+                        const FineChannels& channels, std::vector<float>& elevation_m, bool globaldepth = false,
+                        const LakeInheritance& inheritance = {});
+std::vector<float> channellakelevels(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window,
+                                     const FineChannels& channels);
+std::vector<std::size_t> channelmeansafterlakes(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window,
+                                                const FineChannels& channels, const std::vector<uint8_t>& sea,
+                                                const std::vector<float>& bed_m, const std::vector<float>& means_m,
+                                                std::vector<float>& elevation_m, FineWater& water, bool drymeans);
+
 struct LevelContext;  // regional_pass.hpp (the hook interface, multiscale plan S3.0)
 struct LevelState;
 

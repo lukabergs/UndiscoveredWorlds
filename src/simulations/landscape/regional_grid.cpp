@@ -137,7 +137,10 @@ std::shared_ptr<const mesh::CellGrid> regionalwindowgrid(const RegionalWindow& w
 
 double northsouthspacing_m(const mesh::CellGrid& grid)
 {
-    // The north slot's distance: the row spacing on every lat-lon cell (also beyond the edge).
+    // The cube: the level's arc pi R / (2 N_L) (the equiangular cells' arc along the face centre lines;
+    // T8 W2-W2d). Lat-lon: the north slot's distance, the row spacing on every cell (also beyond the edge).
+    if (grid.kind() == mesh::GridKind::cube)
+        return grid.facecells() > 0 ? pi * grid.radius_m() / (2.0 * static_cast<double>(grid.facecells())) : 0.0;
     return grid.cellcount() > 0 ? grid.distance_m(0, 1) : 0.0;
 }
 

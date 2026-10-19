@@ -42,4 +42,9 @@ namespace landscape
 void iceabovetheela(const RegionalGlobalInputs& inputs, const RegionalWindow& window, const RegionalParameters& parameters,
                     const FineGlacial& glacial, const std::vector<uint8_t>& sea, const std::vector<float>& elevation_m,
                     std::vector<float>& icethickness_m);
+// The cube form (T8 W2-W2d; lat-lon windows take the form above): one value per cell of a cube
+// window refining inputs.grid, in its local order; the edge noise at the cell's centre.
+void iceabovetheela(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window, const RegionalParameters& parameters,
+                    const FineGlacial& glacial, const std::vector<uint8_t>& sea, const std::vector<float>& elevation_m,
+                    std::vector<float>& icethickness_m);
 }

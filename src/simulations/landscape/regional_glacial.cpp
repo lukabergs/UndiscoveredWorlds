@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
 #include <cstddef>
 #include <limits>
 
@@ -24,17 +25,14 @@ constexpr std::size_t nocell = std::numeric_limits<std::size_t>::max();
 
 // The receiver of a global land cell on the drainage tree (regional_valleys.cpp's
 // receiverof): nocell for a sea cell, a sink and a direction beyond a pole.
-std::size_t receiverof(const GlobalNetwork& network, std::size_t cell)
+std::size_t receiverof(const mesh::CellGrid& grid, const GlobalNetwork& network, std::size_t cell)
 {
+    // The neighbour in its direction (the world's slot codes) on the world's table (T8 W2-W2d).
     const int direction = network.direction[cell];
     if (network.sea[cell] != 0 || direction < 1 || direction > directioncount)
         return nocell;
-    const int i = static_cast<int>(cell % static_cast<std::size_t>(network.width));
-    const int j = static_cast<int>(cell / static_cast<std::size_t>(network.width)) + directionoffsety(direction);
-    if (j < 0 || j >= network.height)
-        return nocell;
-    return static_cast<std::size_t>(j) * static_cast<std::size_t>(network.width) +
-           static_cast<std::size_t>((i + directionoffsetx(direction) + network.width) % network.width);
+    const std::int32_t next = grid.neighbour(static_cast<mesh::CellId>(cell), direction);
+    return next < 0 ? nocell : static_cast<std::size_t>(next);
 }
 }
 
@@ -71,19 +69,26 @@ FineGlacial regionalglacialfields(const RegionalGlobalInputs& inputs, const Regi
 std::vector<double> glacialcatchment_km2(const RegionalGlobalInputs& inputs)
 {
     std::vector<double> catchment;
-    const std::size_t size = static_cast<std::size_t>(inputs.width) * static_cast<std::size_t>(inputs.height);
+    const std::size_t size = inputs.grid != nullptr ? inputs.grid->cellcount()
+                                                    : static_cast<std::size_t>(inputs.width) * static_cast<std::size_t>(inputs.height);
     const GlobalNetwork& network = inputs.network;
     if (size == 0 || inputs.glaciation.size() != size || network.sea.size() != size || network.direction.size() != size ||
         !(inputs.radius_m > 0.0))
         return catchment;
-    const SphereMetric metric(inputs.width, inputs.height, inputs.radius_m);
+    // The areas: SphereMetric's on lat-lon (bit for bit as before), the world's table on the cube (T8 W2-W2d).
+    const bool cube = inputs.grid != nullptr && inputs.grid->kind() == mesh::GridKind::cube;
+    if (inputs.grid == nullptr || inputs.grid->cellcount() != size)
+        throw std::invalid_argument("glacialcatchment_km2: the inputs need the world's grid, one cell per global value");
+    const mesh::CellGrid& grid = *inputs.grid;
+    const SphereMetric metric(cube ? 4 : inputs.width, cube ? 2 : inputs.height, inputs.radius_m);
     catchment.assign(size, 0.0);
     for (std::size_t cell = 0; cell < size; cell++)
     {
         if (network.sea[cell] != 0)
             continue;
         const double share = std::clamp(static_cast<double>(inputs.glaciation[cell]), 0.0, 1.0);
-        catchment[cell] = std::isfinite(share) ? share * metric.area_m2(cell) / 1.0e6 : 0.0;
+        const double area = cube ? grid.area_m2(static_cast<mesh::CellId>(cell)) : metric.area_m2(cell);
+        catchment[cell] = std::isfinite(share) ? share * area / 1.0e6 : 0.0;
     }
     // Kahn's order over the forest of land links: a cell's donors are added before it is
     // passed on to its receiver.
@@ -91,7 +96,7 @@ std::vector<double> glacialcatchment_km2(const RegionalGlobalInputs& inputs)
     std::vector<int> donors(size, 0);
     for (std::size_t cell = 0; cell < size; cell++)
     {
-        receiver[cell] = receiverof(network, cell);
+        receiver[cell] = receiverof(grid, network, cell);
         if (receiver[cell] != nocell)
             donors[receiver[cell]]++;
     }
@@ -160,5 +165,32 @@ void glacialformslevel(const LevelContext& context, LevelState& state)
     }
     if (details.troughs || details.cirques)
         recordlevelstep(state, LevelStep::glacialforms);
+}
+
+FineGlacial regionalglacialfields(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window,
+                                  const RegionalParameters& parameters)
+{
+    FineGlacial glacial;
+    if (inputs.grid == nullptr || inputs.grid->kind() != window.kind())
+        throw std::invalid_argument("regionalglacialfields: a window of the inputs' grid kind");
+    const mesh::CellGrid& levelzero = *inputs.grid;
+    const std::size_t size = levelzero.cellcount();
+    if (!glacialformson(parameters) || size == 0 || inputs.equilibriumline_m.size() != size)
+        return glacial;
+    glacial.active = true;
+    glacial.runela_m = upsample(inputs.equilibriumline_m, levelzero, window);
+    glacial.presentela_m = glacial.runela_m;
+    const double offset = std::isfinite(inputs.presentelaoffset_m) ? inputs.presentelaoffset_m : 0.0;
+    for (float& value : glacial.presentela_m)
+        value = static_cast<float>(static_cast<double>(value) + offset);
+    if (inputs.glaciation.size() == size)
+    {
+        glacial.glaciation = upsample(inputs.glaciation, levelzero, window);
+        for (float& value : glacial.glaciation)
+            value = std::clamp(value, 0.0f, 1.0f);
+    }
+    else
+        glacial.glaciation.assign(glacial.runela_m.size(), 0.0f);
+    return glacial;
 }
 }

@@ -3,10 +3,13 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
+#include <stdexcept>
 
 #include "simulations/landscape/refinement_levels.hpp"
 #include "simulations/landscape/regional_pass.hpp"
+#include "simulations/landscape/regional_helpers.hpp"
 #include "simulations/landscape/sphere_metric.hpp"
 #include "simulations/landscape/upsampling.hpp"
 
@@ -21,42 +24,29 @@ namespace
 constexpr std::size_t nocell = std::numeric_limits<std::size_t>::max();
 
 // The receiver of a global land cell on the drainage tree (channel_network.cpp's
-// globalreceiver): nocell for a sea cell, a sink and a direction beyond a pole.
-std::size_t receiverof(const GlobalNetwork& network, std::size_t cell)
+// globalreceiver): the neighbour in its direction (the world's slot codes) on the world's table;
+// nocell for a sea cell, a sink and a direction beyond a pole (T8 W2-W2d; on lat-lon the raster
+// step, columns wrapping).
+std::size_t receiverof(const mesh::CellGrid& grid, const GlobalNetwork& network, std::size_t cell)
 {
     const int direction = network.direction[cell];
     if (network.sea[cell] != 0 || direction < 1 || direction > directioncount)
         return nocell;
-    const int i = static_cast<int>(cell % static_cast<std::size_t>(network.width));
-    const int j = static_cast<int>(cell / static_cast<std::size_t>(network.width)) + directionoffsety(direction);
-    if (j < 0 || j >= network.height)
-        return nocell;
-    return static_cast<std::size_t>(j) * static_cast<std::size_t>(network.width) +
-           static_cast<std::size_t>((i + directionoffsetx(direction) + network.width) % network.width);
+    const std::int32_t next = grid.neighbour(static_cast<mesh::CellId>(cell), direction);
+    return next < 0 ? nocell : static_cast<std::size_t>(next);
 }
 
 // The local global relief of one cell: the largest absolute difference between its
-// elevation and its 8 neighbours' (columns wrap, rows beyond the poles do not exist), the
-// expression of regional_surface.cpp's localrelief.
-float localrelief(const std::vector<float>& elevation, int width, int height, std::size_t cell)
+// elevation and its 8 neighbours' on the world's table, the expression of regional_surface.cpp's
+// localrelief.
+float localrelief(const std::vector<float>& elevation, const mesh::CellGrid& grid, std::size_t cell)
 {
-    const int i = static_cast<int>(cell % static_cast<std::size_t>(width));
-    const int j = static_cast<int>(cell / static_cast<std::size_t>(width));
     const float own = elevation[cell];
     float largest = 0.0f;
-    for (int dj = -1; dj <= 1; dj++)
-    {
-        const int row = j + dj;
-        if (row < 0 || row >= height)
-            continue;
-        for (int di = -1; di <= 1; di++)
-        {
-            const int column = ((i + di) % width + width) % width;
-            const float other = elevation[static_cast<std::size_t>(row) * static_cast<std::size_t>(width) +
-                                          static_cast<std::size_t>(column)];
-            largest = std::max(largest, std::fabs(other - own));
-        }
-    }
+    regionaldetail::aroundcell(grid, cell, [&](std::size_t other) {
+        largest = std::max(largest, std::fabs(elevation[other] - own));
+        return false;
+    });
     return largest;
 }
 }
@@ -65,7 +55,8 @@ GlobalIncision globalincision(const RegionalGlobalInputs& inputs, const Regional
 {
     GlobalIncision incision;
     const ValleyParameters& valleys = parameters.valleys;
-    const std::size_t size = static_cast<std::size_t>(inputs.width) * static_cast<std::size_t>(inputs.height);
+    const std::size_t size = inputs.grid != nullptr ? inputs.grid->cellcount()
+                                                    : static_cast<std::size_t>(inputs.width) * static_cast<std::size_t>(inputs.height);
     const bool uplift = valleys.upliftscale > 0.0 && inputs.upliftrate_m_myr.size() == size;
     const bool denudation = valleys.denudationratescale > 0.0 && inputs.denudation_m.size() == size &&
                             inputs.erosionduration_myr > 0.0;
@@ -74,6 +65,9 @@ GlobalIncision globalincision(const RegionalGlobalInputs& inputs, const Regional
     if ((!uplift && !denudation) || !(elapsed > 0.0) || size == 0 || network.sea.size() != size ||
         network.direction.size() != size || network.filledelevation_m.size() != size)
         return incision;
+    if (inputs.grid == nullptr || inputs.grid->cellcount() != size)
+        throw std::invalid_argument("globalincision: the inputs need the world's grid, one cell per global value");
+    const mesh::CellGrid& grid = *inputs.grid;
 
     // The lowest incised level: the next float above the sea level, so a land channel at the
     // mouth never sits at the sea level itself (the bed law's lo, channel_network.hpp).
@@ -89,7 +83,7 @@ GlobalIncision globalincision(const RegionalGlobalInputs& inputs, const Regional
     // S <= F'(u), so F' never rises; with no lake cell Λ is s+ everywhere (the rule of R9 exactly).
     std::vector<std::size_t> receiver(size, nocell);
     for (std::size_t cell = 0; cell < size; cell++)
-        receiver[cell] = receiverof(network, cell);
+        receiver[cell] = receiverof(grid, network, cell);
     std::vector<float> base(size, floorlevel);
     if (inputs.lakesurface_m.size() == size)
     {
@@ -158,7 +152,7 @@ GlobalIncision globalincision(const RegionalGlobalInputs& inputs, const Regional
         const double filled = static_cast<double>(network.filledelevation_m[cell]);
         double cap = filled - static_cast<double>(base[cell]);
         if (withrelief)
-            cap = std::min(cap, static_cast<double>(localrelief(inputs.elevation_m, inputs.width, inputs.height, cell)));
+            cap = std::min(cap, static_cast<double>(localrelief(inputs.elevation_m, grid, cell)));
         depth[cell] = std::max(0.0, std::min(value * elapsed, cap));
     }
 
@@ -453,5 +447,120 @@ double channelcellcap_m(const LevelContext& context)
     if (context.refinement == nullptr || !(context.refinement->channelcellslope > 0.0))
         return 0.0;
     return context.refinement->channelcellslope * northsouthspacing_m(context.grid);
+}
+
+// --- The cube forms (T8 W2-W2d; sphere-mesh.md section 8, the rule of the forms: a disc on the ground
+// around the axis, its cells within the extent's rings on the window's table). ---
+
+void carvevalleys(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window, const RegionalParameters& parameters,
+                  const FineChannels& channels, const std::vector<uint8_t>& sea, std::vector<float>& elevation_m,
+                  double bandlower, double bandupper)
+{
+    const ValleyParameters& valleys = parameters.valleys;
+    if (!(valleys.floor_km > 0.0))
+        return;
+    const std::size_t count = window.cellcount();
+    if (count == 0 || channels.channel.size() != count || sea.size() != count || elevation_m.size() != count)
+        return;
+    if (inputs.grid == nullptr || inputs.grid->kind() != mesh::GridKind::cube || window.kind() != mesh::GridKind::cube ||
+        window.facecells() % inputs.grid->facecells() != 0)
+        throw std::invalid_argument("carvevalleys: a cube window refining the inputs' cube level 0");
+    const int k = window.facecells() / inputs.grid->facecells();
+    const double reference = valleys.reference_m3s > 0.0 ? valleys.reference_m3s : 1.0;
+    const double cell_m = northsouthspacing_m(window);
+    const bool loop = bandupper > 0.0;
+    const bool reachkm = loop && valleys.reach_km > 0.0;
+    const bool sides = valleys.sideslope > 0.0 && (reachkm || valleys.reachcells > 0);
+    const double reach = !sides ? 0.0
+                         : reachkm ? std::min(static_cast<double>(k), valleys.reach_km * 1000.0 / cell_m)
+                                   : static_cast<double>(std::min(k, valleys.reachcells));
+    const double floorcells = valleys.floor_km * 1000.0 / cell_m;
+    const double floormax = std::min(static_cast<double>(k), std::max(0.0, valleys.floormax_km * 1000.0 / cell_m));
+    const double rise = valleys.sideslope * cell_m;
+    const float floorlevel = std::nextafter(inputs.sealevel, std::numeric_limits<float>::infinity());
+    const bool withbeds = channels.bed_m.size() == count;
+    // The rings that hold a disc of `extent` level arcs: the table's smallest spacing is about 0.7 arcs.
+    const double spacing = window.minimumspacing_m() / cell_m;
+    std::vector<double> target(count, std::numeric_limits<double>::infinity());
+    std::vector<std::uint32_t> stamp;
+    std::vector<std::pair<mesh::CellId, int>> around;
+    std::uint32_t id = 0;
+    for (mesh::CellId cell = 0; cell < count; cell++)
+    {
+        if (channels.channel[cell] == 0 || sea[cell] != 0)
+            continue;
+        const double discharge = std::max(0.0, static_cast<double>(channels.discharge_m3s[cell]));
+        const double halfwidth = std::min(floormax, floorcells * std::sqrt(discharge / reference));
+        const double fullwidth = std::max(halfwidth, reach);
+        if (loop && (fullwidth < bandlower || (reachkm ? fullwidth : halfwidth) >= bandupper))
+            continue;
+        const int extent = std::min(k, static_cast<int>(std::floor(fullwidth)));
+        if (extent < 1)
+            continue;
+        const double bed = static_cast<double>(withbeds ? channels.bed_m[cell] : elevation_m[cell]);
+        // The single pass: ring distances (the cube's Chebyshev); the loop: the ground distance in arcs.
+        const int rings = loop ? std::min(2 * k, static_cast<int>(std::ceil(fullwidth / spacing))) : extent;
+        regionaldetail::cellswithin(window, cell, rings, stamp, ++id, around);
+        for (const auto& [next, ring] : around)
+        {
+            const double distance = loop ? regionaldetail::centredistance(window, cell, next, cell_m) : static_cast<double>(ring);
+            double value;
+            if (distance <= halfwidth)
+                value = bed;
+            else if (distance <= reach)
+                value = bed + (distance - halfwidth) * rise;
+            else
+                continue;
+            target[next] = std::min(target[next], value);
+        }
+    }
+    for (std::size_t cell = 0; cell < count; cell++)
+    {
+        if (sea[cell] != 0 || !std::isfinite(target[cell]) || channels.channel[cell] != 0)
+            continue;
+        const float value = std::max(floorlevel, static_cast<float>(target[cell]));
+        elevation_m[cell] = std::min(elevation_m[cell], value);
+    }
+}
+
+void channelcellmeans(const mesh::CellGrid& window, const FineChannels& channels, const std::vector<uint8_t>& sea,
+                      double cap_m, const std::vector<float>& before, std::vector<float>& elevation_m)
+{
+    if (!(cap_m > 0.0))
+        return;
+    const std::size_t count = window.cellcount();
+    if (count == 0 || channels.channel.size() != count || channels.bed_m.size() != count || sea.size() != count ||
+        before.size() != count || elevation_m.size() != count)
+        return;
+    for (mesh::CellId cell = 0; cell < count; cell++)
+    {
+        if (channels.channel[cell] == 0 || sea[cell] != 0)
+            continue;
+        const double bed = static_cast<double>(channels.bed_m[cell]);
+        double sum = 0.0, carvedsum = 0.0;
+        int neighbours = 0, carved = 0;
+        for (int slot = 1; slot <= mesh::slotcount; slot++)
+        {
+            const std::int32_t next = window.neighbour(cell, slot);
+            if (next < 0)
+                continue;
+            const std::size_t other = static_cast<std::size_t>(next);
+            if (channels.channel[other] != 0 || sea[other] != 0)
+                continue;
+            const double above = static_cast<double>(elevation_m[other]) - bed;
+            sum += above;
+            neighbours++;
+            if (elevation_m[other] != before[other])
+            {
+                carvedsum += above;
+                carved++;
+            }
+        }
+        if (carved == 0)
+            continue;
+        const double height_m = std::max(0.0, std::min(sum / neighbours, carvedsum / carved));
+        const float mean = static_cast<float>(bed + std::min(height_m, cap_m));
+        elevation_m[cell] = std::min(elevation_m[cell], mean);
+    }
 }
 }

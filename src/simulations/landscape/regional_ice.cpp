@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
 #include <cstddef>
 #include <cstdint>
 
@@ -58,6 +59,43 @@ void iceabovetheela(const RegionalGlobalInputs& inputs, const RegionalWindow& wi
             const double thickness = std::max(iceminimum_m, std::min(thickest, fraction * (z - ela)));
             icethickness_m[cell] = std::max(icethickness_m[cell], static_cast<float>(thickness));
         }
+    }
+}
+
+void iceabovetheela(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window, const RegionalParameters& parameters,
+                    const FineGlacial& glacial, const std::vector<uint8_t>& sea, const std::vector<float>& elevation_m,
+                    std::vector<float>& icethickness_m)
+{
+    if (!(parameters.ice.thicknessfraction > 0.0) || !glacial.active)
+        return;
+    const std::size_t count = window.cellcount();
+    if (glacial.presentela_m.size() != count || sea.size() != count || elevation_m.size() != count ||
+        icethickness_m.size() != count)
+        return;
+    if (inputs.grid == nullptr || inputs.grid->kind() != mesh::GridKind::cube || window.kind() != mesh::GridKind::cube ||
+        window.facecells() % inputs.grid->facecells() != 0)
+        throw std::invalid_argument("iceabovetheela: a cube window refining the inputs' cube level 0");
+    const int k = window.facecells() / inputs.grid->facecells();
+    const int n0 = inputs.grid->facecells();
+    const double fraction = parameters.ice.thicknessfraction;
+    const double thickest = parameters.ice.thicknessmax_m;
+    const double edgenoise = parameters.ice.edgenoise_m;
+    const RegionalNoise noise(4 * n0, 2 * n0, k, inputs.seed, elanoisesalt, parameters.coast.noisepersistence);
+    const bool noisy = edgenoise > 0.0 && noise.active();
+    for (mesh::CellId cell = 0; cell < count; cell++)
+    {
+        if (sea[cell] != 0)
+            continue;
+        const double z = static_cast<double>(elevation_m[cell]);
+        const double ela = static_cast<double>(glacial.presentela_m[cell]);
+        if (!std::isfinite(z) || !std::isfinite(ela))
+            continue;
+        const mesh::Vec3 p = window.centre(cell);
+        const double threshold = noisy ? ela + edgenoise * noise.atpoint(p.x, p.y, p.z) : ela;
+        if (!(z >= threshold))
+            continue;
+        const double thickness = std::max(iceminimum_m, std::min(thickest, fraction * (z - ela)));
+        icethickness_m[cell] = std::max(icethickness_m[cell], static_cast<float>(thickness));
     }
 }
 }

@@ -48,4 +48,10 @@ namespace landscape
 void carvetroughs(const RegionalGlobalInputs& inputs, const RegionalWindow& window, const RegionalParameters& parameters,
                   const FineGlacial& glacial, const FineChannels& channels, const std::vector<uint8_t>& sea,
                   std::vector<float>& elevation_m, double bandlower = 0.0, double bandupper = 0.0);
+// The cube form (T8 W2-W2d; lat-lon windows take the form above): one value per cell of a cube
+// window refining inputs.grid, in its local order; the trough is the disc on the ground (the great-circle
+// distance between centres over the level arc) within its rings on the window's table.
+void carvetroughs(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window, const RegionalParameters& parameters,
+                  const FineGlacial& glacial, const FineChannels& channels, const std::vector<uint8_t>& sea,
+                  std::vector<float>& elevation_m, double bandlower = 0.0, double bandupper = 0.0);
 }

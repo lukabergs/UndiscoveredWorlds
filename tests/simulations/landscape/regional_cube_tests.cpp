@@ -13,6 +13,12 @@
 #include "simulations/landscape/regional_coast.hpp"
 #include "simulations/landscape/regional_edges.hpp"
 #include "simulations/landscape/regional_surface.hpp"
+#include "simulations/landscape/regional_cirques.hpp"
+#include "simulations/landscape/regional_glacial.hpp"
+#include "simulations/landscape/regional_ice.hpp"
+#include "simulations/landscape/regional_troughs.hpp"
+#include "simulations/landscape/regional_valleys.hpp"
+#include "simulations/landscape/regional_water.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -148,6 +154,151 @@ TEST_F(Landscape, RegionalCubeStartSurfaceOverlaps)
     EXPECT_GT(sea, 0);
     EXPECT_LT(sea, static_cast<int>(seaa.size()));
     EXPECT_LT(sa.blockmeanerror_m, 50.0);
+}
+
+namespace
+{
+// The cube world with lakes (a lake surface 40 m above the cells between 100 and 400 m), ice above
+// within 0.1 rad of a cell on face 0 (where the overlap test looks), full glaciation within 0.14 rad
+// and an ELA of 600 m.
+RegionalGlobalInputs lakeworld()
+{
+    RegionalGlobalInputs inputs = cubeworld();
+    const std::size_t size = inputs.grid->cellcount();
+    inputs.icethickness_m.assign(size, 0.0f);
+    inputs.glaciation.assign(size, 0.0f);
+    inputs.equilibriumline_m.assign(size, 600.0f);
+    inputs.network.filledelevation_m = inputs.elevation_m;
+    inputs.network.direction.assign(size, 0);
+    const mesh::Vec3 focus = inputs.grid->centre(static_cast<mesh::CellId>(mesh::cubekey(cuben, 0, cuben - 2, 21)));
+    for (mesh::CellId c = 0; c < size; c++)
+    {
+        const mesh::Vec3 p = inputs.grid->centre(c);
+        const float z = inputs.elevation_m[c];
+        if (z > 100.0f && z < 400.0f)
+            inputs.lakesurface_m[c] = z + 40.0f;
+        if (mesh::dot(p, focus) > 0.995)
+            inputs.icethickness_m[c] = 200.0f;
+        if (mesh::dot(p, focus) > 0.99)
+            inputs.glaciation[c] = 1.0f;
+    }
+    return inputs;
+}
+
+// Synthetic fine fields of a cube window, pure functions of the cell's key: the start elevation G of
+// the base elevation, a channel on every 29th key (discharge 2,000 m3/s, bed 15 m below), the sea below 0 m.
+struct CubeFine
+{
+    std::vector<float> elevation;
+    std::vector<uint8_t> sea;
+    landscape::FineChannels channels;
+};
+
+CubeFine cubefine(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window, int k)
+{
+    CubeFine fine;
+    fine.elevation = landscape::upsample(inputs.elevation_m, *inputs.grid, window);
+    const std::size_t count = window.cellcount();
+    fine.sea.assign(count, 0);
+    fine.channels.channel.assign(count, 0);
+    fine.channels.direction.assign(count, 0);
+    fine.channels.bed_m.assign(count, 0.0f);
+    fine.channels.discharge_m3s.assign(count, 0.0f);
+    fine.channels.globalcell.assign(count, -1);
+    for (mesh::CellId c = 0; c < count; c++)
+    {
+        const mesh::LevelKey key = window.globalkey(c);
+        fine.sea[c] = fine.elevation[c] < 0.0f ? 1 : 0;
+        if (fine.sea[c] == 0 && key % 29 == 0)
+        {
+            fine.channels.channel[c] = 1;
+            fine.channels.discharge_m3s[c] = 2000.0f;
+            fine.channels.bed_m[c] = fine.elevation[c] - 15.0f;
+            fine.channels.globalcell[c] =
+                static_cast<std::int32_t>(inputs.grid->localofkey(mesh::cubeparentkey(window.facecells(), k, key)));
+        }
+    }
+    return fine;
+}
+}
+
+TEST_F(Landscape, RegionalCubeWaterAndFormsOverlap)
+{
+    // The cube forms of the water (shore water with R4's indicators, the flood of the loop), the glacial
+    // fields, the valley floors, the troughs, the cirques and the ice above the ELA on two windows of 7
+    // rings around cells 4 apart across a face edge: on the cells of the level-0 cells within 3 rings of
+    // both centres every field is bit-identical.
+    constexpr int k = 4;
+    const RegionalGlobalInputs inputs = lakeworld();
+    RegionalParameters parameters = coastparameters();
+    parameters.shores.shorenoise = 0.3;
+    parameters.shores.terrain_m = 50.0;
+    parameters.valleys.floor_km = 3.0;
+    parameters.valleys.reference_m3s = 1000.0;
+    parameters.valleys.floormax_km = 30.0;
+    parameters.valleys.sideslope = 0.2;
+    parameters.valleys.reachcells = 3;
+    parameters.troughs.width_km = 20.0;
+    parameters.troughs.reference_km2 = 1000.0;
+    parameters.troughs.widthexponent = 0.5;
+    parameters.troughs.widthmax_km = 40.0;
+    parameters.troughs.wall_m = 400.0;
+    parameters.troughs.exponent = 2.0;
+    parameters.troughs.glaciationmin = 0.5;
+    parameters.cirques.radius_km = 15.0;
+    parameters.cirques.candidates = 2;
+    parameters.cirques.band_m = 3000.0;
+    parameters.ice.thicknessfraction = 0.5;
+    const mesh::LevelKey left = mesh::cubekey(cuben, 0, cuben - 3, 20), right = mesh::cubekey(cuben, 0, cuben - 1, 22);
+    struct Result
+    {
+        std::shared_ptr<const mesh::CellGrid> window;
+        std::vector<float> elevation, lake, ice;
+    };
+    const auto run = [&](mesh::LevelKey centre) {
+        Result result;
+        result.window = windowof(disc(centre, 7), k);
+        const mesh::CellGrid& window = *result.window;
+        CubeFine fine = cubefine(inputs, window, k);
+        const landscape::FineWarp warp = landscape::regionalwarp(window, cuben, inputs.seed, parameters);
+        const landscape::FineGlacial glacial = landscape::regionalglacialfields(inputs, window, parameters);
+        landscape::carvevalleys(inputs, window, parameters, fine.channels, fine.sea, fine.elevation, 0.0, 0.0);
+        landscape::carvetroughs(inputs, window, parameters, glacial, fine.channels, fine.sea, fine.elevation, 0.0, 0.0);
+        landscape::carvecirques(inputs, window, parameters, glacial, fine.channels, fine.sea, fine.elevation, 0.0, 0.0);
+        landscape::LakeInheritance lakes;
+        lakes.flood = true;
+        landscape::FineWater water =
+            landscape::regionalwater(inputs, window, warp, parameters, fine.sea, fine.channels, fine.elevation, false, lakes);
+        landscape::iceabovetheela(inputs, window, parameters, glacial, fine.sea, fine.elevation, water.icethickness_m);
+        result.elevation = fine.elevation;
+        result.lake = water.lakesurface_m;
+        result.ice = water.icethickness_m;
+        return result;
+    };
+    const Result a = run(left), b = run(right);
+    const std::vector<mesh::LevelKey> innera = disc(left, 3), innerb = disc(right, 3);
+    int shared = 0, elevations = 0, lakes = 0, ices = 0, wet = 0, iced = 0;
+    for (mesh::CellId c = 0; c < a.window->cellcount(); c++)
+    {
+        const mesh::LevelKey key = a.window->globalkey(c);
+        const mesh::LevelKey parent = mesh::cubeparentkey(cuben * k, k, key);
+        if (!std::binary_search(innera.begin(), innera.end(), parent) || !std::binary_search(innerb.begin(), innerb.end(), parent))
+            continue;
+        const mesh::CellId other = b.window->localofkey(key);
+        ASSERT_NE(other, mesh::nocell);
+        shared++;
+        elevations += floatbits(a.elevation[c]) != floatbits(b.elevation[other]) ? 1 : 0;
+        lakes += floatbits(a.lake[c]) != floatbits(b.lake[other]) ? 1 : 0;
+        ices += floatbits(a.ice[c]) != floatbits(b.ice[other]) ? 1 : 0;
+        wet += a.lake[c] > 0.0f ? 1 : 0;
+        iced += a.ice[c] > 0.0f ? 1 : 0;
+    }
+    std::printf("[cube water] %d shared cells (%d wet, %d iced): %d elevations, %d lake surfaces, %d ice thicknesses differ\n",
+                shared, wet, iced, elevations, lakes, ices);
+    EXPECT_GT(shared, 0);
+    EXPECT_EQ(elevations, 0);
+    EXPECT_EQ(lakes, 0);
+    EXPECT_EQ(ices, 0);
 }
 
 TEST_F(Landscape, RegionalCubeRefinedCoastKeepsTheParentShares)
