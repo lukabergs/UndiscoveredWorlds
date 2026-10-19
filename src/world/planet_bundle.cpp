@@ -281,6 +281,16 @@ void writeplanetbundle(const planet& world, const std::filesystem::path& directo
             }
         }
 
+        // A shadow field the cube does not store (the moisture diagnostics when the moisture grid is
+        // the export's) is a field in its lat-lon shape as well, as on any other solver grid.
+        if (!native && shadowexport)
+        {
+            entry.shape = shadowdata.shape;
+            entry.data = shadowdata.bytes.data();
+            entry.bytes = shadowdata.bytes.size();
+            writer.addfield(entry);
+            continue;
+        }
         if (!native)
             continue;
         entry.shape = data.shape;
