@@ -162,7 +162,8 @@ bool flowstep(const mesh::CellGrid& grid, const worldgrid<std::uint8_t>& directi
     return true;
 }
 
-// Per cell: 1 when the cell belongs to a closed depression.
+}
+
 std::vector<std::uint8_t> closeddepressioncells(const planet& world)
 {
     struct DepressionLevel
@@ -217,6 +218,8 @@ std::vector<std::uint8_t> closeddepressioncells(const planet& world)
     return closed;
 }
 
+namespace
+{
 // Per cell: the terminal of its path along flow_direction, memoised (a cell takes its
 // receiver's terminal unless it lies in a closed depression). A walk longer than the
 // cell count is counted as exorheic.

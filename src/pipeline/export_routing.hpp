@@ -7,7 +7,9 @@
 // of hydrology.flow_routing (flowrouting::gatherinputs, route and writeroutingfields:
 // flow_direction, drainage_area, discharge, filled_elevation, depression_id, runoff)
 // on the exported filled surface, so pits the remap left are filled, where the world
-// was routed (a drainage area somewhere); then hydrology.rivers (applyriverstage:
+// was routed (a drainage area somewhere); a lake open on the world is raised to its
+// export spill level so the export's closure agrees with the world's (lake_surface; a
+// lake closed on the world keeps its level); then hydrology.rivers (applyriverstage:
 // river_direction, river_flow_*, the mouths and, after an erosion run, the
 // distributaries delta_*) where the world has river flows. Deterministic from the
 // world seed (the routing's draws).
@@ -26,8 +28,9 @@ class ClimateShadow;
 const std::vector<worldmodel::FieldId>& exportroutingfields();
 
 // Recomputes the routing and the rivers of a lat-lon planet (an export) in place, as
-// described above. The LatlonDirectionRecompute of exportlatlon and writeplanetbundle.
-void recomputeexportrouting(planet& latlon);
+// described above; `world` is the exported world (its lakes' open or closed answer).
+// The LatlonDirectionRecompute of exportlatlon and writeplanetbundle.
+void recomputeexportrouting(planet& latlon, const planet& world);
 
 // The lat-lon export of a world at its export width (4 N on a cube) with the
 // recomputed routing; on a cube world with a climate shadow, the climate-owned

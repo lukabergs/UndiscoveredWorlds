@@ -209,7 +209,7 @@ TEST(BundleV2, ExportOfConstantFieldIsExact)
     }
 
     bool called = false;
-    const std::unique_ptr<planet> latlon = exportlatlon(*world, 32, [&](planet&) { called = true; });
+    const std::unique_ptr<planet> latlon = exportlatlon(*world, 32, [&](planet&, const planet&) { called = true; });
     EXPECT_TRUE(called);
     ASSERT_EQ(latlon->grid().kind(), mesh::GridKind::latlon);
     ASSERT_EQ(latlon->grid().columns(), 32);

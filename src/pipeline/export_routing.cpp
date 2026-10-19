@@ -3,10 +3,12 @@
 #include <algorithm>
 #include <cstdint>
 #include <stdexcept>
+#include <unordered_map>
 #include <vector>
 
 #include "core/mesh/cell_grid.hpp"
 #include "pipeline/climate_adapter.hpp"
+#include "simulations/hydrology/drainage_basins.hpp"
 #include "simulations/hydrology/flow_routing.hpp"
 #include "simulations/hydrology/rivers.hpp"
 #include "world/planet.hpp"
@@ -36,20 +38,68 @@ int exportcolumns(const mesh::CellGrid& grid)
 {
     return grid.kind() == mesh::GridKind::cube ? 4 * grid.facecells() : grid.columns();
 }
+
+// The routing recomputed on an export keeps the world's open or closed answer for its lakes
+// (sphere-mesh.md section 6). The export's Priority-Flood can spill above the world's lake
+// level (the mean over a narrow outlet), which the closure rule (closeddepressioncells: the
+// highest lake surface more than 0.01 m below the highest filled level) would read as a
+// closed lake. An export depression none of whose lake cells lies on a closed cell of the
+// world (the world cell at the lake cell's centre) is open: its lake cells below its spill
+// level (its highest filled elevation) are raised to it. A depression with a lake cell on a
+// closed world cell keeps its levels.
+void keepopenlakesopen(planet& latlon, const planet& world)
+{
+    struct Level
+    {
+        float spill = 0.0f;
+        bool lake = false;
+        bool closed = false;
+    };
+    const std::vector<std::uint8_t> closed = physical_layers::closeddepressioncells(world);
+    const mesh::CellGrid& grid = latlon.grid();
+    const mesh::CellGrid& source = world.grid();
+    const worldgrid<std::int32_t>& depression = latlon.depressionid();
+    const worldgrid<float>& filled = latlon.filledelevation();
+    std::unordered_map<std::int32_t, Level> levels;
+    for (mesh::CellId c = 0; c < latlon.cellcount(); c++)
+    {
+        const std::int32_t id = depression[c];
+        if (id == 0)
+            continue;
+        Level& level = levels.try_emplace(id, Level{ filled[c] }).first->second;
+        level.spill = std::max(level.spill, filled[c]);
+        if (latlon.lakesurfacefloat(c) == 0.0f)
+            continue;
+        level.lake = true;
+        const mesh::CellId s = source.locate(grid.centre(c));
+        if (s != mesh::nocell && closed[s] != 0)
+            level.closed = true;
+    }
+    for (mesh::CellId c = 0; c < latlon.cellcount(); c++)
+    {
+        const std::int32_t id = depression[c];
+        const float surface = latlon.lakesurfacefloat(c);
+        if (id == 0 || surface == 0.0f)
+            continue;
+        const Level& level = levels.find(id)->second;
+        if (!level.closed && surface < level.spill)
+            latlon.setlakesurface(c, level.spill);
+    }
+}
 }
 
 const std::vector<FieldId>& exportroutingfields()
 {
     static const std::vector<FieldId> fields = {
         FieldId::flow_direction, FieldId::drainage_area, FieldId::discharge, FieldId::filled_elevation,
-        FieldId::depression_id, FieldId::runoff,
+        FieldId::depression_id, FieldId::runoff, FieldId::lake_surface,
         FieldId::river_direction, FieldId::river_flow_january, FieldId::river_flow_july,
         FieldId::delta_direction, FieldId::delta_flow_january, FieldId::delta_flow_july,
     };
     return fields;
 }
 
-void recomputeexportrouting(planet& latlon)
+void recomputeexportrouting(planet& latlon, const planet& world)
 {
     const planet& view = latlon;
     const mesh::CellGrid& grid = view.grid();
@@ -68,6 +118,7 @@ void recomputeexportrouting(planet& latlon)
         surface[cell] = std::max(filled[static_cast<mesh::CellId>(cell)], inputs.elevation[cell]);
     const flowrouting::Routing routing = flowrouting::route(inputs, &surface, &inputs.sea);
     flowrouting::writeroutingfields(latlon, inputs, routing);
+    keepopenlakesopen(latlon, world);
 
     // hydrology.rivers on the recomputed routing, where the world has rivers.
     if (rivers)

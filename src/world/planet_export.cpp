@@ -453,7 +453,7 @@ std::unique_ptr<planet> exportlatlon(const planet& world, int columns, const Lat
     for (mineralsystems::Deposit& deposit : latlon->mineraldeposits())
         relocate(deposit.surface.cell, deposit.surface.worldX, deposit.surface.worldY);
     if (recompute)
-        recompute(*latlon);
+        recompute(*latlon, world);
     return latlon;
 }
 

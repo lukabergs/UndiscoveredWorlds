@@ -20,8 +20,8 @@
 class planet;
 
 // Recomputes the direction fields (rule direction) of a lat-lon export from its
-// exported fields (the filled elevation).
-using LatlonDirectionRecompute = std::function<void(planet& latlon)>;
+// exported fields (the filled elevation); `world` is the exported world.
+using LatlonDirectionRecompute = std::function<void(planet& latlon, const planet& world)>;
 
 // One field's data moved between two full grids by its catalogue rule. The data
 // is in the planet's encoding (field_encoding.hpp): [layer,] rows, columns on
