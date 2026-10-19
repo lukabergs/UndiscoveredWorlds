@@ -16,8 +16,10 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
+#include "core/mesh/cell_grid.hpp"
 #include "simulations/landscape/regional_grid.hpp"
 
 namespace landscape
@@ -292,4 +294,74 @@ struct HaloChainReport
 // The report of a chain built by halochain for `target`. Throws std::invalid_argument
 // when chain is empty or its element l is not at level l.
 HaloChainReport halochainreport(const RegionalWindow& target, const std::vector<LevelWindow>& chain);
+
+// --- The chain on key sets (docs/architecture/sphere-mesh.md section 8, "Halo by rings";
+// T8 W2-W1b): the same windows on any grid kind, built on the level-0 grid's table. ---
+
+// levelhalo in rings of level-0 cells: levelhalo / factor^(L - 1), a whole number by
+// construction (targethalo at level 1); 0 at level 0.
+int levelhalorings(int targethalo, int factor, int level, int solvemargin = solvemarginglobalcells);
+
+// A level window whose kept box and domain are unions of whole level-0 cells (every
+// window of a chain), held as the ascending keys of those level-0 cells; the level's
+// own keys are their descendants (on the cube the per-face quadtree, on lat-lon the
+// s_L x s_L blocks of the level grid, key row W s_L + column).
+struct KeyLevelWindow
+{
+    mesh::GridKind kind = mesh::GridKind::cube;
+    int basecells = 0;  // level 0: the cube's N or the lat-lon W
+    int factor = 0;
+    int level = 0;
+    int halo = 0;       // levelhalo, parent cells
+    int halorings = 0;  // the same in level-0 rings (8-connected hops on the level-0 table)
+    std::vector<mesh::LevelKey> keptglobal;    // ascending level-0 keys
+    std::vector<mesh::LevelKey> domainglobal;  // ascending level-0 keys, a superset of keptglobal
+
+    std::int64_t scale() const { return levelscale(factor, level); }
+    // The level's cells per face edge (cube) or columns (lat-lon).
+    std::int64_t levelcells() const { return static_cast<std::int64_t>(basecells) * scale(); }
+    std::size_t keptsize() const { return keptglobal.size() * static_cast<std::size_t>(scale() * scale()); }
+    std::size_t domainsize() const { return domainglobal.size() * static_cast<std::size_t>(scale() * scale()); }
+    // The level keys of the kept box and of the domain, ascending.
+    std::vector<mesh::LevelKey> keptkeys() const;
+    std::vector<mesh::LevelKey> domainkeys() const;
+};
+
+// The level-0 cells of a full grid whose centres lie in a box of the lat-lon export's
+// pixels (exportcolumns x exportcolumns / 2; columns x0 .. x1 modulo the export width,
+// x0 > x1 crossing the date line; rows y0 .. y1 from the north): longitudes from
+// -180 + 360 x0 / W eastwards over the box's columns, latitudes from 90 - 180 (y1 + 1) / H
+// (included) to 90 - 180 y0 / H (excluded). On a lat-lon grid of the export's width these
+// are the box's own cells. Ascending keys (cell ids). Throws std::invalid_argument for a
+// subgrid, an odd or too small export width or rows outside 0 .. H - 1 or y0 > y1.
+std::vector<mesh::LevelKey> cellsinpixelbox(const mesh::CellGrid& base, int exportcolumns, int x0, int y0, int x1,
+                                            int y1);
+
+// The keys within `rings` rings of a key set on a full grid's table (ascending).
+std::vector<mesh::LevelKey> dilatecells(const mesh::CellGrid& base, const std::vector<mesh::LevelKey>& keys, int rings);
+
+// The halo chain on keys: windows of levels 0 .. level (index = level) for a target whose
+// kept box is the level-0 cells kept0 (on the cube the cells whose centres lie in the
+// --pixels box, cellsinpixelbox; the target's kept level cells are their descendants)
+// and whose halo is targethalo global cells, on base, the world's full level-0 grid:
+// - the target level's domain: kept0 dilated by levelhalorings(targethalo, ..., level) rings;
+// - level l = level - 1 .. 1: the kept box is the child's domain dilated by
+//   ceil(reach / factor^l) rings (reach level-l cells snapped outwards to whole level-0
+//   cells: 1 ring while reach < factor^l), the domain that dilated by levelhalorings(l);
+// - level 0: the child's domain dilated by reach rings; its domain is its kept box.
+// On lat-lon this is halochain's chain cell for cell (rings of the 8-connected table are
+// the rectangles widened by whole cells, columns wrapping, rows stopping at the poles).
+// level >= 1; throws std::invalid_argument for a subgrid base, level < 1, factor < 2,
+// reach < 0, targethalo < 0, solvemargin < 0, a key out of range, or kept0 empty.
+std::vector<KeyLevelWindow> keyhalochain(const mesh::CellGrid& base, int factor, int level,
+                                         const std::vector<mesh::LevelKey>& kept0, int targethalo, int reach,
+                                         int solvemargin = solvemarginglobalcells);
+
+// The cell grid of a key window's domain (regionalwindowof's analogue): on the cube
+// mesh::cubewindowgrid over the domain's level keys (compact or stored); on lat-lon the
+// domain must be a box of level-0 cells (as every lat-lon chain window is; columns as
+// the wrapped interval outside the widest gap, rows contiguous) and the grid is
+// mesh::latlonwindowgrid of that box at the level (compact not read). Throws
+// std::invalid_argument for a lat-lon domain that is not a box.
+std::shared_ptr<const mesh::CellGrid> keywindowgrid(const KeyLevelWindow& window, double radius_m, bool compact = true);
 }

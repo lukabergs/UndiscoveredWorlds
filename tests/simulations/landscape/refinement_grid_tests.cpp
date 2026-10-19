@@ -6,11 +6,16 @@
 
 #include "landscape_fixture.hpp"
 #include "refinement_test_windows.hpp"
+#include "core/mesh/cell_grid.hpp"
+#include "core/mesh/cube_geometry.hpp"
+#include "core/mesh/window_grid.hpp"
 #include "simulations/landscape/refinement_grid.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <iostream>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -569,4 +574,190 @@ TEST_F(Landscape, RefinementGridRegionalWindowOfALevelWindow)
     EXPECT_THROW(landscape::regionalwindowof(handlevelwindow(16, 4, 2, 4, 4, 16, 16, 16)), std::invalid_argument);
     EXPECT_THROW(landscape::regionalwindowof(handlevelwindow(16, 4, 2, 1, 16, 16, 16, 16)), std::invalid_argument);
     EXPECT_NO_THROW(landscape::regionalwindowof(handlevelwindow(16, 4, 2, 4, 16, 16, 16, 16)));
+}
+
+// --- The chain on key sets (sphere-mesh.md section 8, "Halo by rings"; T8 W2-W1b). ---
+
+namespace
+{
+constexpr double keyradius = 6371000.0;
+
+// The level-0 cells of a level window's kept box or domain (whole global cells), ascending.
+std::vector<mesh::LevelKey> globalcellsof(const landscape::LevelWindow& window, bool domain)
+{
+    const std::int64_t s = window.scale();
+    const std::int64_t column0 = (domain ? window.domaincolumn0 : window.column0) / s;
+    const std::int64_t row0 = (domain ? window.domainrow0 : window.row0) / s;
+    const std::int64_t columns = (domain ? window.domaincolumns : window.columns) / s;
+    const std::int64_t rows = (domain ? window.domainrows : window.rows) / s;
+    std::vector<mesh::LevelKey> keys;
+    for (std::int64_t y = 0; y < rows; y++)
+        for (std::int64_t x = 0; x < columns; x++)
+            keys.push_back(landscape::levelkey(landscape::wraplevel(column0 + x, window.worldwidth), row0 + y, window.worldwidth));
+    std::sort(keys.begin(), keys.end());
+    return keys;
+}
+
+std::vector<mesh::LevelKey> targetcells(const landscape::RegionalWindow& target)
+{
+    std::vector<mesh::LevelKey> keys;
+    for (int y = 0; y < target.rows; y++)
+        for (int x = 0; x < target.columns; x++)
+            keys.push_back(landscape::levelkey((target.column0 + x) % target.worldwidth, target.row0 + y, target.worldwidth));
+    std::sort(keys.begin(), keys.end());
+    return keys;
+}
+}
+
+// On lat-lon the chain on keys is halochain's, window for window and cell for cell, for
+// every test window (date line, both poles, an odd halo, window A, the region-base box).
+TEST_F(Landscape, RefinementGridKeyChainEqualsTheHaloChainOnLatLon)
+{
+    const std::vector<landscape::RegionalWindow> targets = {
+        landscape::regionalwindow(16, 1, 2, 10.0, 5.0, 30.0, 20.0),
+        landscape::regionalwindow(64, 1, 3, 170.0, -10.0, -170.0, 10.0),
+        landscape::regionalwindow(64, 1, 3, -20.0, 70.0, 20.0, 90.0),
+        landscape::regionalwindow(64, 1, 3, -20.0, -90.0, 20.0, -75.0),
+        landscape::regionalwindow(64, 1, 5, 170.0, -10.0, -170.0, 10.0),
+        handtarget(256, 16, 164, 20, 48, 16),
+        handtarget(128, 31, 102, 8, 4, 6)};  // --pixels 102,4,109,9 with the default halo
+    const int reach = 2;
+    for (const landscape::RegionalWindow& target : targets)
+    {
+        const auto base = mesh::makelatlongrid(target.worldwidth, keyradius);
+        const std::vector<mesh::LevelKey> kept0 = targetcells(target);
+        EXPECT_EQ(landscape::cellsinpixelbox(*base, target.worldwidth, target.column0, target.row0,
+                                             (target.column0 + target.columns - 1) % target.worldwidth, target.row0 + target.rows - 1),
+                  kept0);
+        for (int factor : {2, 4})
+            for (int top = 1; top <= 3; top++)
+                for (int margin : {landscape::solvemarginglobalcells, landscape::unboundedsolvemarginglobalcells})
+                {
+                    SCOPED_TRACE(testing::Message() << "width " << target.worldwidth << ", column0 " << target.column0 << ", row0 "
+                                                    << target.row0 << ", halo " << target.halo << ", factor " << factor
+                                                    << ", level " << top << ", margin " << margin);
+                    std::vector<landscape::LevelWindow> chain;
+                    try
+                    {
+                        chain = landscape::halochain(target, factor, top, reach, margin);
+                    }
+                    catch (const std::invalid_argument&)
+                    {
+                        continue;  // a domain wider than the planet: no chain to compare
+                    }
+                    const std::vector<landscape::KeyLevelWindow> keys =
+                        landscape::keyhalochain(*base, factor, top, kept0, target.halo, reach, margin);
+                    ASSERT_EQ(keys.size(), chain.size());
+                    for (std::size_t l = 0; l < chain.size(); l++)
+                    {
+                        const landscape::LevelWindow& window = chain[l];
+                        const landscape::KeyLevelWindow& keyed = keys[l];
+                        EXPECT_EQ(keyed.level, window.level);
+                        EXPECT_EQ(keyed.halo, window.halo);
+                        if (l >= 1)
+                            EXPECT_EQ(static_cast<std::int64_t>(keyed.halorings) * landscape::levelscale(factor, window.level - 1),
+                                      window.halo);
+                        EXPECT_EQ(keyed.keptglobal, globalcellsof(window, false)) << "level " << l;
+                        EXPECT_EQ(keyed.domainglobal, globalcellsof(window, true)) << "level " << l;
+                        EXPECT_EQ(keyed.keptsize(), window.keptsize());
+                        EXPECT_EQ(keyed.domainsize(), window.domainsize());
+                        if (window.domainsize() > 300000)
+                            continue;
+                        // The domain grid in the window's own row-major order.
+                        const auto grid = landscape::keywindowgrid(keyed, keyradius);
+                        ASSERT_EQ(grid->cellcount(), window.domainsize());
+                        for (int y = 0; y < window.domainrows; y++)
+                            for (int x = 0; x < window.domaincolumns; x++)
+                                ASSERT_EQ(grid->globalkey(static_cast<mesh::CellId>(window.index(x, y))), window.absolutekey(x, y));
+                    }
+                }
+    }
+}
+
+// On the cube the chain nests: each level's kept box holds its domain's parents widened by
+// the reach (checked on the level keys themselves, not on the level-0 rule), every domain is
+// its kept box widened by its rings, for boxes on a face edge, at a cube corner and at a pole.
+TEST_F(Landscape, RefinementGridKeyChainNestsOnTheCube)
+{
+    const int n = 8, exportcolumns = 4 * n, factor = 4, top = 2, halo = 6, reach = 2;
+    const auto base = mesh::makecubegrid(n, keyradius);
+    const struct
+    {
+        const char* name;
+        int x0, y0, x1, y1;
+    } boxes[] = {{"face edge 0|1", 19, 7, 20, 8}, {"corner 0|1|4", 19, 4, 20, 5}, {"north pole", 0, 0, 31, 1}, {"date line", 31, 9, 0, 10}};
+    for (const auto& box : boxes)
+    {
+        SCOPED_TRACE(box.name);
+        const std::vector<mesh::LevelKey> kept0 = landscape::cellsinpixelbox(*base, exportcolumns, box.x0, box.y0, box.x1, box.y1);
+        ASSERT_FALSE(kept0.empty());
+        const std::vector<landscape::KeyLevelWindow> chain = landscape::keyhalochain(*base, factor, top, kept0, halo, reach);
+        ASSERT_EQ(chain.size(), static_cast<std::size_t>(top) + 1);
+        EXPECT_EQ(chain[top].keptglobal, kept0);
+        EXPECT_EQ(chain[0].domainglobal, chain[0].keptglobal);
+        for (int l = 0; l <= top; l++)
+        {
+            const landscape::KeyLevelWindow& window = chain[static_cast<std::size_t>(l)];
+            EXPECT_TRUE(std::includes(window.domainglobal.begin(), window.domainglobal.end(), window.keptglobal.begin(),
+                                      window.keptglobal.end()));
+            EXPECT_EQ(window.domainglobal, landscape::dilatecells(*base, window.keptglobal, window.halorings));
+            if (l == top)
+                continue;
+            // The child's domain at this level, widened by the reach in this level's cells.
+            landscape::KeyLevelWindow parents = window;
+            parents.domainglobal = chain[static_cast<std::size_t>(l) + 1].domainglobal;
+            const std::vector<mesh::LevelKey> needed = mesh::dilatekeys(parents.levelcells(), parents.domainkeys(), reach);
+            const std::vector<mesh::LevelKey> kept = window.keptkeys();
+            EXPECT_TRUE(std::includes(kept.begin(), kept.end(), needed.begin(), needed.end())) << "level " << l;
+        }
+        const auto grid = landscape::keywindowgrid(chain[top], keyradius);
+        EXPECT_EQ(grid->cellcount(), chain[top].domainsize());
+        EXPECT_EQ(grid->facecells(), n * 16);
+    }
+}
+
+// The region-base box (--pixels 102,4,109,9, scale 4, halo 31) on the N 32 cube: cells and
+// bytes per level, the rings' size in km, and the first W2-W worker's count (275 level-1
+// cells whose centres lie in the box; 52,854 within 31 cells' km of them).
+TEST_F(Landscape, RefinementGridKeyChainOfTheRegionBaseBoxOnTheCube)
+{
+    constexpr double pi = 3.14159265358979323846;
+    const int n = 32, exportcolumns = 4 * n, factor = 4, halo = 31, reach = 2;
+    const auto base = mesh::makecubegrid(n, keyradius);
+    const std::vector<mesh::LevelKey> kept0 = landscape::cellsinpixelbox(*base, exportcolumns, 102, 4, 109, 9);
+    const std::vector<landscape::KeyLevelWindow> chain = landscape::keyhalochain(*base, factor, 1, kept0, halo, reach);
+    const double ringkm = 2.0 * pi * keyradius / exportcolumns / 1000.0;
+    for (const landscape::KeyLevelWindow& window : chain)
+    {
+        const double sphere = 6.0 * static_cast<double>(window.levelcells()) * static_cast<double>(window.levelcells());
+        std::cout << "level " << window.level << ": kept " << window.keptsize() << " cells, domain " << window.domainsize()
+                  << " cells (" << 100.0 * static_cast<double>(window.domainsize()) / sphere << " % of the level), halo "
+                  << window.halorings << " rings (" << window.halorings * ringkm << " km at the equator); bytes compact "
+                  << window.domainsize() * 80 << ", stored " << window.domainsize() * 288 << "\n";
+    }
+    EXPECT_EQ(chain[1].keptsize(), kept0.size() * 16);
+
+    // The first worker's numbers: level-1 centres in the box and the km halo around them.
+    const auto level1 = mesh::makecubegrid(n * factor, keyradius);
+    const std::vector<mesh::LevelKey> direct = landscape::cellsinpixelbox(*level1, exportcolumns, 102, 4, 109, 9);
+    EXPECT_EQ(direct.size(), 275u);
+    const double limit = halo * 2.0 * pi * keyradius / exportcolumns;
+    std::size_t within = 0;
+    for (mesh::CellId c = 0; c < level1->cellcount(); c++)
+    {
+        const mesh::Vec3 p = level1->centre(c);
+        for (mesh::LevelKey key : direct)
+        {
+            const mesh::Vec3 q = level1->centre(static_cast<mesh::CellId>(key));
+            if (keyradius * std::atan2(mesh::length(mesh::cross(p, q)), mesh::dot(p, q)) <= limit)
+            {
+                within++;
+                break;
+            }
+        }
+    }
+    std::cout << "first worker's rule: " << direct.size() << " level-1 centres in the box, " << within << " level-1 cells within "
+              << limit / 1000.0 << " km of them; kept_0 " << kept0.size() << " level-0 cells (" << kept0.size() * 16
+              << " level-1 descendants)\n";
+    EXPECT_EQ(within, 52854u);
 }

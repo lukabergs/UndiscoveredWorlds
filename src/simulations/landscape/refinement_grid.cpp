@@ -1,7 +1,11 @@
 #include "simulations/landscape/refinement_grid.hpp"
 
+#include "core/mesh/cube_geometry.hpp"
+#include "core/mesh/window_grid.hpp"
+
 #include <algorithm>
 #include <climits>
+#include <cmath>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
@@ -235,5 +239,159 @@ HaloChainReport halochainreport(const RegionalWindow& target, const std::vector<
         report.domaincells += static_cast<std::int64_t>(window.domainsize());
     }
     return report;
+}
+
+int levelhalorings(int targethalo, int factor, int level, int solvemargin)
+{
+    if (level < 1)
+        return 0;
+    return static_cast<int>(levelhalo(targethalo, factor, level, solvemargin) / levelscale(factor, level - 1));
+}
+
+namespace
+{
+std::vector<mesh::LevelKey> descendants(const KeyLevelWindow& window, const std::vector<mesh::LevelKey>& global)
+{
+    const std::int64_t s = window.scale(), n = window.basecells, fine = window.levelcells();
+    std::vector<mesh::LevelKey> keys;
+    keys.reserve(global.size() * static_cast<std::size_t>(s * s));
+    for (mesh::LevelKey key : global)
+    {
+        if (window.kind == mesh::GridKind::cube)
+        {
+            const mesh::CubeCell cell = mesh::cubecell(n, key);
+            for (std::int64_t dj = 0; dj < s; dj++)
+                for (std::int64_t di = 0; di < s; di++)
+                    keys.push_back(mesh::cubekey(fine, cell.face, cell.column * s + di, cell.row * s + dj));
+        }
+        else
+        {
+            const std::int64_t column = static_cast<std::int64_t>(key % static_cast<mesh::LevelKey>(n));
+            const std::int64_t row = static_cast<std::int64_t>(key / static_cast<mesh::LevelKey>(n));
+            for (std::int64_t dj = 0; dj < s; dj++)
+                for (std::int64_t di = 0; di < s; di++)
+                    keys.push_back(levelkey(column * s + di, row * s + dj, fine));
+        }
+    }
+    std::sort(keys.begin(), keys.end());
+    return keys;
+}
+}
+
+std::vector<mesh::LevelKey> KeyLevelWindow::keptkeys() const { return descendants(*this, keptglobal); }
+std::vector<mesh::LevelKey> KeyLevelWindow::domainkeys() const { return descendants(*this, domainglobal); }
+
+std::vector<mesh::LevelKey> cellsinpixelbox(const mesh::CellGrid& base, int exportcolumns, int x0, int y0, int x1, int y1)
+{
+    const int height = exportcolumns / 2;
+    if (base.issubgrid())
+        throw std::invalid_argument("cellsinpixelbox needs a full grid");
+    if (exportcolumns < 4 || exportcolumns % 2 != 0 || y0 < 0 || y1 >= height || y0 > y1)
+        throw std::invalid_argument("cellsinpixelbox: an even export width of at least 4 and rows 0 <= y0 <= y1 < W / 2");
+    constexpr double pi = 3.14159265358979323846;
+    const double west = -pi + 2.0 * pi * static_cast<double>(wraplevel(x0, exportcolumns)) / exportcolumns;
+    const double width = 2.0 * pi * static_cast<double>(wraplevel(static_cast<std::int64_t>(x1) - x0, exportcolumns) + 1) / exportcolumns;
+    const double north = 0.5 * pi - pi * y0 / height, south = 0.5 * pi - pi * (y1 + 1) / height;
+    std::vector<mesh::LevelKey> keys;
+    for (mesh::CellId c = 0; c < base.cellcount(); c++)
+    {
+        const double latitude = base.latitude_rad(c);
+        if (latitude < south || latitude >= north)
+            continue;
+        double offset = std::fmod(base.longitude_rad(c) - west, 2.0 * pi);
+        if (offset < 0.0)
+            offset += 2.0 * pi;
+        if (offset < width)
+            keys.push_back(c);
+    }
+    return keys;
+}
+
+std::vector<mesh::LevelKey> dilatecells(const mesh::CellGrid& base, const std::vector<mesh::LevelKey>& keys, int rings)
+{
+    std::vector<mesh::CellId> seeds;
+    seeds.reserve(keys.size());
+    for (mesh::LevelKey key : keys)
+        seeds.push_back(static_cast<mesh::CellId>(key));
+    const std::vector<int> ring = mesh::ringdistances(base, seeds, rings);
+    std::vector<mesh::LevelKey> result;
+    for (mesh::CellId c = 0; c < base.cellcount(); c++)
+        if (ring[c] >= 0)
+            result.push_back(c);
+    return result;
+}
+
+std::vector<KeyLevelWindow> keyhalochain(const mesh::CellGrid& base, int factor, int level, const std::vector<mesh::LevelKey>& kept0,
+                                         int targethalo, int reach, int solvemargin)
+{
+    if (base.issubgrid() || level < 1 || factor < 2 || reach < 0 || targethalo < 0 || solvemargin < 0 || kept0.empty())
+        throw std::invalid_argument("keyhalochain needs a full base grid, level >= 1, factor >= 2, non-negative reach, halo and "
+                                    "margin, and a kept box");
+    std::vector<mesh::LevelKey> kept = kept0;
+    std::sort(kept.begin(), kept.end());
+    kept.erase(std::unique(kept.begin(), kept.end()), kept.end());
+    if (kept.back() >= base.cellcount())
+        throw std::invalid_argument("keyhalochain: a kept key is out of range");
+    std::vector<KeyLevelWindow> chain(static_cast<std::size_t>(level) + 1);
+    for (int l = level; l >= 0; l--)
+    {
+        KeyLevelWindow& window = chain[static_cast<std::size_t>(l)];
+        window.kind = base.kind();
+        window.basecells = base.kind() == mesh::GridKind::cube ? base.facecells() : base.columns();
+        window.factor = factor;
+        window.level = l;
+        window.halo = levelhalo(targethalo, factor, l, solvemargin);
+        window.halorings = levelhalorings(targethalo, factor, l, solvemargin);
+        if (l == level)
+            window.keptglobal = kept;
+        else
+        {
+            const std::vector<mesh::LevelKey>& child = chain[static_cast<std::size_t>(l) + 1].domainglobal;
+            const std::int64_t scale = levelscale(factor, l);
+            const int rings = l == 0 ? reach : static_cast<int>((reach + scale - 1) / scale);
+            window.keptglobal = dilatecells(base, child, rings);
+        }
+        window.domainglobal = l == 0 ? window.keptglobal : dilatecells(base, window.keptglobal, window.halorings);
+    }
+    return chain;
+}
+
+std::shared_ptr<const mesh::CellGrid> keywindowgrid(const KeyLevelWindow& window, double radius_m, bool compact)
+{
+    if (window.kind == mesh::GridKind::cube)
+        return mesh::cubewindowgrid(static_cast<int>(window.levelcells()), radius_m, window.domainkeys(), compact);
+    const int width = window.basecells;
+    std::vector<int> columns, rows;
+    for (mesh::LevelKey key : window.domainglobal)
+    {
+        columns.push_back(static_cast<int>(key % static_cast<mesh::LevelKey>(width)));
+        rows.push_back(static_cast<int>(key / static_cast<mesh::LevelKey>(width)));
+    }
+    std::sort(columns.begin(), columns.end());
+    columns.erase(std::unique(columns.begin(), columns.end()), columns.end());
+    std::sort(rows.begin(), rows.end());
+    rows.erase(std::unique(rows.begin(), rows.end()), rows.end());
+    if (columns.empty())
+        throw std::invalid_argument("keywindowgrid: an empty domain");
+    // The columns as the wrapped interval outside the widest gap.
+    std::size_t start = 0;
+    int widest = columns.front() + width - columns.back() - 1;
+    for (std::size_t k = 1; k < columns.size(); k++)
+        if (columns[k] - columns[k - 1] - 1 > widest)
+        {
+            widest = columns[k] - columns[k - 1] - 1;
+            start = k;
+        }
+    const std::size_t count = columns.size();
+    if (static_cast<int>(count) + widest != width || rows.back() - rows.front() + 1 != static_cast<int>(rows.size()) ||
+        window.domainglobal.size() != count * rows.size())
+        throw std::invalid_argument("keywindowgrid: a lat-lon domain that is not a box");
+    const std::int64_t s = window.scale();
+    mesh::LatLonWindowBox box;
+    box.column0 = static_cast<std::int64_t>(columns[start]) * s;
+    box.columns = static_cast<int>(static_cast<std::int64_t>(count) * s);
+    box.row0 = static_cast<int>(rows.front() * s);
+    box.rows = static_cast<int>(static_cast<std::int64_t>(rows.size()) * s);
+    return mesh::latlonwindowgrid(static_cast<int>(window.levelcells()), radius_m, box);
 }
 }
