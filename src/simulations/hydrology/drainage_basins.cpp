@@ -1,16 +1,19 @@
 #include "simulations/hydrology/drainage_basins.hpp"
-#include "simulations/resources/physical_layers_internal.hpp"
+#include "core/parallel_rows.hpp"
 #include "simulations/hydrology/flow_routing.hpp"
+#include "simulations/hydrology/hydrology_cells.hpp"
+#include "world/planet.hpp"
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <unordered_map>
 #include <vector>
 
+// On the world's cell grid: cells are ids, neighbours come from the neighbour table
+// (slots 1..8 in the cell's own frame), a direction code is a slot of its cell.
+
 namespace physical_layers
 {
-using namespace detail;
-
 namespace
 {
 enum class DrainageTerminal : std::uint8_t
@@ -20,34 +23,28 @@ enum class DrainageTerminal : std::uint8_t
     endorheic = 2
 };
 
-int physicalindex(int x, int y, int width)
+// Cells per worker of the parallel loops over cells.
+constexpr int cellsperworker = 4096;
+
+bool iswatercell(const planet& world, mesh::CellId c)
 {
-    return y * width + x;
+    return world.sea(c) != 0 || hydrologycells::islake(world, c);
 }
 
-bool iswatercell(const planet& world, int x, int y)
+bool findadjacentsea(const planet& world, mesh::CellId c, mesh::CellId& destination)
 {
-    return world.sea(x, y) != 0 || islakecell(world, x, y);
-}
+    const mesh::CellGrid& grid = world.grid();
 
-bool findadjacentsea(const planet& world, int x, int y, twointegers& destination)
-{
-    const int width = world.width();
-    const int height = world.height();
-
-    for (const auto& offset : drainageoffsets)
+    for (int slot = 1; slot <= mesh::slotcount; slot++)
     {
-        const int ny = y + offset[1];
+        const std::int32_t neighbour = grid.neighbour(c, slot);
 
-        if (ny < 0 || ny > height)
+        if (neighbour < 0)
             continue;
 
-        const int nx = wrap(x + offset[0], width);
-
-        if (world.sea(nx, ny) != 0)
+        if (world.sea(static_cast<mesh::CellId>(neighbour)) != 0)
         {
-            destination.x = nx;
-            destination.y = ny;
+            destination = static_cast<mesh::CellId>(neighbour);
             return true;
         }
     }
@@ -55,33 +52,31 @@ bool findadjacentsea(const planet& world, int x, int y, twointegers& destination
     return false;
 }
 
-bool strictdownhilldestination(const planet& world, int x, int y, twointegers& destination)
+bool strictdownhilldestination(const planet& world, mesh::CellId c, mesh::CellId& destination)
 {
-    const int width = world.width();
-    const int height = world.height();
-    const float currentelevation = world.nomfloat(x, y);
+    const mesh::CellGrid& grid = world.grid();
+    const float currentelevation = world.nomfloat(c);
     int bestelevation = currentelevation;
     bool bestiswater = false;
     bool found = false;
 
-    for (const auto& offset : drainageoffsets)
+    for (int slot = 1; slot <= mesh::slotcount; slot++)
     {
-        const int ny = y + offset[1];
+        const std::int32_t neighbour = grid.neighbour(c, slot);
 
-        if (ny < 0 || ny > height)
+        if (neighbour < 0)
             continue;
 
-        const int nx = wrap(x + offset[0], width);
-        const float candidateelevation = world.nomfloat(nx, ny);
-        const bool candidatewater = iswatercell(world, nx, ny);
+        const mesh::CellId candidate = static_cast<mesh::CellId>(neighbour);
+        const float candidateelevation = world.nomfloat(candidate);
+        const bool candidatewater = iswatercell(world, candidate);
 
         if (candidateelevation < bestelevation
             || (candidatewater && candidateelevation <= currentelevation && (found == false || candidateelevation < bestelevation || bestiswater == false)))
         {
             bestelevation = candidateelevation;
             bestiswater = candidatewater;
-            destination.x = nx;
-            destination.y = ny;
+            destination = candidate;
             found = true;
         }
     }
@@ -89,52 +84,56 @@ bool strictdownhilldestination(const planet& world, int x, int y, twointegers& d
     return found && (bestelevation < currentelevation || bestiswater);
 }
 
-bool nextdrainagedestination(const planet& world, int x, int y, twointegers& destination)
+// The next cell along the legacy drainage: the delta or river direction (the cell
+// itself where the slot has no neighbour), the adjacent sea of a coast, delta or lake,
+// else the strict downhill neighbour.
+bool nextdrainagedestination(const planet& world, mesh::CellId c, mesh::CellId& destination)
 {
-    if (world.sea(x, y) != 0)
+    if (world.sea(c) != 0)
         return false;
 
-    if (world.deltadir(x, y) > 0)
+    const mesh::CellGrid& grid = world.grid();
+
+    if (world.deltadir(c) > 0)
     {
-        destination = wrappeddestination(world, x, y, world.deltadir(x, y));
+        destination = hydrologycells::neighbourorself(grid, c, world.deltadir(c));
         return true;
     }
 
-    if (world.riverdir(x, y) != 0)
+    if (world.riverdir(c) != 0)
     {
-        destination = wrappeddestination(world, x, y, world.riverdir(x, y));
+        destination = hydrologycells::neighbourorself(grid, c, world.riverdir(c));
         return true;
     }
 
-    if ((world.outline(x, y) || isdeltacell(world, x, y) || islakecell(world, x, y)) && findadjacentsea(world, x, y, destination))
+    if ((hydrologycells::outline(world, c) || hydrologycells::isdelta(world, c) || hydrologycells::islake(world, c)) &&
+        findadjacentsea(world, c, destination))
         return true;
 
-    return strictdownhilldestination(world, x, y, destination);
+    return strictdownhilldestination(world, c, destination);
 }
 
-bool reachesseaquickly(const planet& world, int x, int y, int maxsteps)
+bool reachesseaquickly(const planet& world, mesh::CellId c, int maxsteps)
 {
-    int currentx = x;
-    int currenty = y;
+    mesh::CellId current = c;
 
     for (int step = 0; step < maxsteps; step++)
     {
-        if (world.sea(currentx, currenty) != 0 || world.outline(currentx, currenty))
+        if (world.sea(current) != 0 || hydrologycells::outline(world, current))
             return true;
 
-        twointegers destination;
+        mesh::CellId destination = current;
 
-        if (nextdrainagedestination(world, currentx, currenty, destination) == false)
+        if (nextdrainagedestination(world, current, destination) == false)
             return false;
 
-        if (destination.x == currentx && destination.y == currenty)
+        if (destination == current)
             return false;
 
-        currentx = destination.x;
-        currenty = destination.y;
+        current = destination;
     }
 
-    return world.sea(currentx, currenty) != 0 || world.outline(currentx, currenty);
+    return world.sea(current) != 0 || hydrologycells::outline(world, current);
 }
 
 // Eroded worlds (erosion plan, step B3): paths follow flow_direction; the sea is the
@@ -145,22 +144,21 @@ bool reachesseaquickly(const planet& world, int x, int y, int maxsteps)
 // surface at its terrain; a depression without any lake cell is not closed).
 constexpr float closedlakemarginm = 0.01f;
 
-// The receiver of (x, y) along flow_direction; false for a cell without a direction
-// (a root the flood never reached) or one pointing beyond a pole.
-bool flowstep(const worldgrid<std::uint8_t>& direction, int width, int height, int x, int y, int& nextx, int& nexty)
+// The receiver of a cell along flow_direction; false for a cell without a direction
+// (a root the flood never reached) or one whose slot has no neighbour.
+bool flowstep(const mesh::CellGrid& grid, const worldgrid<std::uint8_t>& direction, mesh::CellId c, mesh::CellId& next)
 {
-    const int code = direction[x][y];
+    const int code = direction[c];
 
-    if (code < 1 || code > static_cast<int>(drainageoffsets.size()))
+    if (code < 1 || code > mesh::slotcount)
         return false;
 
-    const auto& offset = drainageoffsets[static_cast<std::size_t>(code - 1)];
-    nexty = y + offset[1];
+    const std::int32_t neighbour = grid.neighbour(c, code);
 
-    if (nexty < 0 || nexty > height)
+    if (neighbour < 0)
         return false;
 
-    nextx = wrap(x + offset[0], width);
+    next = static_cast<mesh::CellId>(neighbour);
     return true;
 }
 
@@ -174,53 +172,46 @@ std::vector<std::uint8_t> closeddepressioncells(const planet& world)
         bool haslake = false;
     };
 
-    const int width = world.width();
-    const int height = world.height();
-    const int cellwidth = width + 1;
+    const std::size_t cellcount = world.cellcount();
     const worldgrid<std::int32_t>& depression = world.depressionid();
     const worldgrid<float>& filled = world.filledelevation();
     std::unordered_map<std::int32_t, DepressionLevel> levels;
 
-    for (int y = 0; y <= height; y++)
+    for (std::size_t cell = 0; cell < cellcount; cell++)
     {
-        for (int x = 0; x <= width; x++)
+        const mesh::CellId c = static_cast<mesh::CellId>(cell);
+        const std::int32_t id = depression[c];
+
+        if (id == 0)
+            continue;
+
+        DepressionLevel& level = levels.try_emplace(id, DepressionLevel{ filled[c], 0.0f, false }).first->second;
+        level.filled = std::max(level.filled, filled[c]);
+        const float surface = world.lakesurfacefloat(c);
+
+        if (surface != 0.0f)
         {
-            const std::int32_t id = depression[x][y];
-
-            if (id == 0)
-                continue;
-
-            DepressionLevel& level = levels.try_emplace(id, DepressionLevel{ filled[x][y], 0.0f, false }).first->second;
-            level.filled = std::max(level.filled, filled[x][y]);
-            const float surface = world.lakesurfacefloat(x, y);
-
-            if (surface != 0.0f)
-            {
-                level.lake = level.haslake ? std::max(level.lake, surface) : surface;
-                level.haslake = true;
-            }
+            level.lake = level.haslake ? std::max(level.lake, surface) : surface;
+            level.haslake = true;
         }
     }
 
-    std::vector<std::uint8_t> closed(static_cast<std::size_t>(cellwidth * (height + 1)), 0);
+    std::vector<std::uint8_t> closed(cellcount, 0);
 
-    for (int y = 0; y <= height; y++)
+    for (std::size_t cell = 0; cell < cellcount; cell++)
     {
-        for (int x = 0; x <= width; x++)
-        {
-            const std::int32_t id = depression[x][y];
+        const std::int32_t id = depression[static_cast<mesh::CellId>(cell)];
 
-            if (id == 0)
-                continue;
+        if (id == 0)
+            continue;
 
-            const DepressionLevel& level = levels.find(id)->second;
+        const DepressionLevel& level = levels.find(id)->second;
 
-            // A depression without any lake cell was dropped by hydrology.lake_levels (its routing
-            // no longer matched the terrain): it is not counted as closed. Dry closed depressions
-            // carry a salt pan whose lake surface is its terrain, so they are found here.
-            if (level.haslake && level.lake < level.filled - closedlakemarginm)
-                closed[static_cast<std::size_t>(physicalindex(x, y, cellwidth))] = 1;
-        }
+        // A depression without any lake cell was dropped by hydrology.lake_levels (its routing
+        // no longer matched the terrain): it is not counted as closed. Dry closed depressions
+        // carry a salt pan whose lake surface is its terrain, so they are found here.
+        if (level.haslake && level.lake < level.filled - closedlakemarginm)
+            closed[cell] = 1;
     }
 
     return closed;
@@ -231,81 +222,69 @@ std::vector<std::uint8_t> closeddepressioncells(const planet& world)
 // cell count is counted as exorheic.
 std::vector<std::uint8_t> classifyerodedbasins(const planet& world, const std::vector<std::uint8_t>& ocean)
 {
-    const int width = world.width();
-    const int height = world.height();
-    const int cellwidth = width + 1;
-    const int cellcount = cellwidth * (height + 1);
+    const mesh::CellGrid& grid = world.grid();
+    const std::size_t cellcount = world.cellcount();
     const worldgrid<std::uint8_t>& direction = world.flowdirection();
     const std::vector<std::uint8_t> closed = closeddepressioncells(world);
-    std::vector<std::uint8_t> drainage(static_cast<std::size_t>(cellcount), static_cast<std::uint8_t>(DrainageTerminal::unknown));
-    std::vector<int> path;
+    std::vector<std::uint8_t> drainage(cellcount, static_cast<std::uint8_t>(DrainageTerminal::unknown));
+    std::vector<mesh::CellId> path;
 
-    for (int y = 0; y <= height; y++)
+    for (std::size_t start = 0; start < cellcount; start++)
     {
-        for (int x = 0; x <= width; x++)
+        if (ocean[start] != 0)
         {
-            const int startindex = physicalindex(x, y, cellwidth);
-
-            if (ocean[static_cast<std::size_t>(startindex)] != 0)
-            {
-                drainage[startindex] = static_cast<std::uint8_t>(DrainageTerminal::exorheic);
-                continue;
-            }
-
-            if (drainage[startindex] != static_cast<std::uint8_t>(DrainageTerminal::unknown))
-                continue;
-
-            path.clear();
-            int currentx = x;
-            int currenty = y;
-            DrainageTerminal terminal = DrainageTerminal::exorheic;
-
-            while (true)
-            {
-                const int index = physicalindex(currentx, currenty, cellwidth);
-
-                if (ocean[static_cast<std::size_t>(index)] != 0)
-                {
-                    terminal = DrainageTerminal::exorheic;
-                    break;
-                }
-
-                if (drainage[index] != static_cast<std::uint8_t>(DrainageTerminal::unknown))
-                {
-                    terminal = static_cast<DrainageTerminal>(drainage[index]);
-                    break;
-                }
-
-                if (static_cast<int>(path.size()) >= cellcount)
-                {
-                    terminal = DrainageTerminal::exorheic;
-                    break;
-                }
-
-                path.push_back(index);
-
-                if (closed[static_cast<std::size_t>(index)] != 0)
-                {
-                    terminal = DrainageTerminal::endorheic;
-                    break;
-                }
-
-                int nextx = 0;
-                int nexty = 0;
-
-                if (flowstep(direction, width, height, currentx, currenty, nextx, nexty) == false)
-                {
-                    terminal = DrainageTerminal::endorheic;
-                    break;
-                }
-
-                currentx = nextx;
-                currenty = nexty;
-            }
-
-            for (int index : path)
-                drainage[index] = static_cast<std::uint8_t>(terminal);
+            drainage[start] = static_cast<std::uint8_t>(DrainageTerminal::exorheic);
+            continue;
         }
+
+        if (drainage[start] != static_cast<std::uint8_t>(DrainageTerminal::unknown))
+            continue;
+
+        path.clear();
+        mesh::CellId current = static_cast<mesh::CellId>(start);
+        DrainageTerminal terminal = DrainageTerminal::exorheic;
+
+        while (true)
+        {
+            if (ocean[current] != 0)
+            {
+                terminal = DrainageTerminal::exorheic;
+                break;
+            }
+
+            if (drainage[current] != static_cast<std::uint8_t>(DrainageTerminal::unknown))
+            {
+                terminal = static_cast<DrainageTerminal>(drainage[current]);
+                break;
+            }
+
+            if (path.size() >= cellcount)
+            {
+                terminal = DrainageTerminal::exorheic;
+                break;
+            }
+
+            path.push_back(current);
+
+            if (closed[current] != 0)
+            {
+                terminal = DrainageTerminal::endorheic;
+                break;
+            }
+
+            mesh::CellId next = current;
+
+            if (flowstep(grid, direction, current, next) == false)
+            {
+                terminal = DrainageTerminal::endorheic;
+                break;
+            }
+
+            current = next;
+        }
+
+        for (const mesh::CellId cell : path)
+            drainage[cell] = static_cast<std::uint8_t>(terminal);
     }
 
     return drainage;
@@ -313,69 +292,61 @@ std::vector<std::uint8_t> classifyerodedbasins(const planet& world, const std::v
 
 // The legacy coastal walk along flow_direction: the sea or a coast within maxsteps.
 bool reachesseaalongflow(const planet& world, const std::vector<std::uint8_t>& ocean,
-                         const worldgrid<std::uint8_t>& direction, int x, int y, int maxsteps)
+                         const worldgrid<std::uint8_t>& direction, mesh::CellId c, int maxsteps)
 {
-    const int width = world.width();
-    const int height = world.height();
-    const int cellwidth = width + 1;
-    int currentx = x;
-    int currenty = y;
+    const mesh::CellGrid& grid = world.grid();
+    mesh::CellId current = c;
 
     for (int step = 0; step < maxsteps; step++)
     {
-        if (ocean[static_cast<std::size_t>(physicalindex(currentx, currenty, cellwidth))] != 0 || world.outline(currentx, currenty))
+        if (ocean[current] != 0 || hydrologycells::outline(world, current))
             return true;
 
-        int nextx = 0;
-        int nexty = 0;
+        mesh::CellId next = current;
 
-        if (flowstep(direction, width, height, currentx, currenty, nextx, nexty) == false)
+        if (flowstep(grid, direction, current, next) == false)
             return false;
 
-        currentx = nextx;
-        currenty = nexty;
+        current = next;
     }
 
-    return ocean[static_cast<std::size_t>(physicalindex(currentx, currenty, cellwidth))] != 0 || world.outline(currentx, currenty);
+    return ocean[current] != 0 || hydrologycells::outline(world, current);
 }
 
 void generateerodedbasins(planet& world)
 {
     const planet& view = world;
-    const int width = view.width();
-    const int height = view.height();
-    const int cellwidth = width + 1;
+    const std::size_t cellcount = view.cellcount();
     const std::vector<std::uint8_t> ocean = flowrouting::oceancells(view);
     const std::vector<std::uint8_t> drainage = classifyerodedbasins(view, ocean);
     const worldgrid<std::uint8_t>& direction = view.flowdirection();
     const float coastalceiling = static_cast<float>(view.sealevel()) + 250.0f;
 
-    parallelforrows(0, height, [&](int startrow, int endrow)
+    parallelforrows(0, static_cast<int>(cellcount) - 1, [&](int first, int last)
     {
-        for (int y = startrow; y <= endrow; y++)
+        for (int cell = first; cell <= last; cell++)
         {
-            for (int x = 0; x <= width; x++)
+            const mesh::CellId c = static_cast<mesh::CellId>(cell);
+
+            if (ocean[c] != 0)
             {
-                if (ocean[static_cast<std::size_t>(physicalindex(x, y, cellwidth))] != 0)
-                {
-                    world.setbasinclass(x, y, BasinClass::none);
-                    continue;
-                }
-
-                const DrainageTerminal terminal = static_cast<DrainageTerminal>(drainage[physicalindex(x, y, cellwidth)]);
-                const bool coastal = terminal == DrainageTerminal::exorheic
-                    && view.mapfloat(x, y) <= coastalceiling
-                    && (view.outline(x, y) || reachesseaalongflow(view, ocean, direction, x, y, 3));
-
-                if (coastal)
-                    world.setbasinclass(x, y, BasinClass::coastal);
-                else if (terminal == DrainageTerminal::exorheic)
-                    world.setbasinclass(x, y, BasinClass::exorheic);
-                else
-                    world.setbasinclass(x, y, BasinClass::endorheic);
+                world.setbasinclass(c, BasinClass::none);
+                continue;
             }
+
+            const DrainageTerminal terminal = static_cast<DrainageTerminal>(drainage[c]);
+            const bool coastal = terminal == DrainageTerminal::exorheic
+                && view.mapfloat(c) <= coastalceiling
+                && (hydrologycells::outline(view, c) || reachesseaalongflow(view, ocean, direction, c, 3));
+
+            if (coastal)
+                world.setbasinclass(c, BasinClass::coastal);
+            else if (terminal == DrainageTerminal::exorheic)
+                world.setbasinclass(c, BasinClass::exorheic);
+            else
+                world.setbasinclass(c, BasinClass::endorheic);
         }
-    }, 16);
+    }, cellsperworker);
 }
 }
 
@@ -387,112 +358,102 @@ void generate_drainage_basins(planet& world)
         return;
     }
 
-    const int width = world.width();
-    const int height = world.height();
-    const int cellwidth = width + 1;
-    const int cellcount = cellwidth * (height + 1);
+    const std::size_t cellcount = world.cellcount();
 
     std::vector<std::uint8_t> drainage(cellcount, static_cast<std::uint8_t>(DrainageTerminal::unknown));
     std::vector<int> visitstamp(cellcount, 0);
     int currentstamp = 1;
 
-    for (int y = 0; y <= height; y++)
+    for (std::size_t start = 0; start < cellcount; start++)
     {
-        for (int x = 0; x <= width; x++)
-        {
-            const int startindex = physicalindex(x, y, cellwidth);
+        const mesh::CellId startcell = static_cast<mesh::CellId>(start);
 
-            if (world.sea(x, y) != 0)
+        if (world.sea(startcell) != 0)
+        {
+            drainage[start] = static_cast<std::uint8_t>(DrainageTerminal::exorheic);
+            continue;
+        }
+
+        if (drainage[start] != static_cast<std::uint8_t>(DrainageTerminal::unknown))
+            continue;
+
+        std::vector<mesh::CellId> path;
+        path.reserve(32);
+        mesh::CellId current = startcell;
+        DrainageTerminal terminal = DrainageTerminal::endorheic;
+
+        while (true)
+        {
+            if (world.sea(current) != 0)
             {
-                drainage[startindex] = static_cast<std::uint8_t>(DrainageTerminal::exorheic);
-                continue;
+                terminal = DrainageTerminal::exorheic;
+                break;
             }
 
-            if (drainage[startindex] != static_cast<std::uint8_t>(DrainageTerminal::unknown))
-                continue;
-
-            std::vector<int> path;
-            path.reserve(32);
-            int currentx = x;
-            int currenty = y;
-            DrainageTerminal terminal = DrainageTerminal::endorheic;
-
-            while (true)
+            if (drainage[current] != static_cast<std::uint8_t>(DrainageTerminal::unknown))
             {
-                const int index = physicalindex(currentx, currenty, cellwidth);
+                terminal = static_cast<DrainageTerminal>(drainage[current]);
+                break;
+            }
 
-                if (world.sea(currentx, currenty) != 0)
-                {
-                    terminal = DrainageTerminal::exorheic;
-                    break;
-                }
+            if (visitstamp[current] == currentstamp)
+            {
+                terminal = DrainageTerminal::endorheic;
+                break;
+            }
 
-                if (drainage[index] != static_cast<std::uint8_t>(DrainageTerminal::unknown))
-                {
-                    terminal = static_cast<DrainageTerminal>(drainage[index]);
-                    break;
-                }
+            visitstamp[current] = currentstamp;
+            path.push_back(current);
 
-                if (visitstamp[index] == currentstamp)
+            mesh::CellId destination = current;
+
+            if (nextdrainagedestination(world, current, destination))
+            {
+                if (destination == current)
                 {
                     terminal = DrainageTerminal::endorheic;
                     break;
                 }
 
-                visitstamp[index] = currentstamp;
-                path.push_back(index);
-
-                twointegers destination;
-
-                if (nextdrainagedestination(world, currentx, currenty, destination))
-                {
-                    if (destination.x == currentx && destination.y == currenty)
-                    {
-                        terminal = DrainageTerminal::endorheic;
-                        break;
-                    }
-
-                    currentx = destination.x;
-                    currenty = destination.y;
-                    continue;
-                }
-
-                terminal = world.outline(currentx, currenty) || isdeltacell(world, currentx, currenty) ? DrainageTerminal::exorheic : DrainageTerminal::endorheic;
-                break;
+                current = destination;
+                continue;
             }
 
-            for (int index : path)
-                drainage[index] = static_cast<std::uint8_t>(terminal);
-
-            currentstamp++;
+            terminal = hydrologycells::outline(world, current) || hydrologycells::isdelta(world, current)
+                ? DrainageTerminal::exorheic : DrainageTerminal::endorheic;
+            break;
         }
+
+        for (const mesh::CellId cell : path)
+            drainage[cell] = static_cast<std::uint8_t>(terminal);
+
+        currentstamp++;
     }
 
-    parallelforrows(0, height, [&](int startrow, int endrow)
+    parallelforrows(0, static_cast<int>(cellcount) - 1, [&](int first, int last)
     {
-        for (int y = startrow; y <= endrow; y++)
+        for (int cell = first; cell <= last; cell++)
         {
-            for (int x = 0; x <= width; x++)
+            const mesh::CellId c = static_cast<mesh::CellId>(cell);
+
+            if (world.sea(c) != 0)
             {
-                if (world.sea(x, y) != 0)
-                {
-                    world.setbasinclass(x, y, BasinClass::none);
-                    continue;
-                }
-
-                const DrainageTerminal terminal = static_cast<DrainageTerminal>(drainage[physicalindex(x, y, cellwidth)]);
-                const bool coastal = terminal == DrainageTerminal::exorheic
-                    && world.mapfloat(x, y) <= world.sealevel() + 250
-                    && (world.outline(x, y) || reachesseaquickly(world, x, y, 3));
-
-                if (coastal)
-                    world.setbasinclass(x, y, BasinClass::coastal);
-                else if (terminal == DrainageTerminal::exorheic)
-                    world.setbasinclass(x, y, BasinClass::exorheic);
-                else
-                    world.setbasinclass(x, y, BasinClass::endorheic);
+                world.setbasinclass(c, BasinClass::none);
+                continue;
             }
+
+            const DrainageTerminal terminal = static_cast<DrainageTerminal>(drainage[c]);
+            const bool coastal = terminal == DrainageTerminal::exorheic
+                && world.mapfloat(c) <= world.sealevel() + 250
+                && (hydrologycells::outline(world, c) || reachesseaquickly(world, c, 3));
+
+            if (coastal)
+                world.setbasinclass(c, BasinClass::coastal);
+            else if (terminal == DrainageTerminal::exorheic)
+                world.setbasinclass(c, BasinClass::exorheic);
+            else
+                world.setbasinclass(c, BasinClass::endorheic);
         }
-    }, 16);
+    }, cellsperworker);
 }
 }

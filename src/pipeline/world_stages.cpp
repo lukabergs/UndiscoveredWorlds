@@ -808,7 +808,7 @@ void applyaridfeatures(planet& world, const GenerationExecutionContext& context)
     createsaltpans(world, context.smalllake, context.largelake);
 }
 
-void applydeltawetlandstage(planet& world, const GenerationExecutionContext& context)
+void applydeltawetlandstage(planet& world, GenerationScratch& scratch, const GenerationExecutionContext& context)
 {
     // The deltas come from the erosion (erosion plan C5b): marine deposition builds land at
     // river mouths and hydrology.rivers writes the distributaries over it. With deltas turned off, the
@@ -830,11 +830,16 @@ void applydeltawetlandstage(planet& world, const GenerationExecutionContext& con
     removeexcesswetlands(world);
     refineroughnessmap(world);
     // The lakes are hydrology.lake_levels' (erosion plan H4); nothing here spreads or joins them.
-    checkpoleclimates(world.climate());
-    world.syncseasonalclimatefromlegacy();
-    createclimatemap(world.climate());
-    createbiomemap(world.climate());
-    writeclimatediagnostics(world.climate());
+    // The climate classes and biomes through the climate adapter: the world itself on lat-lon,
+    // its shadow on a cube.
+    runclimateprocess(GenerationStageId::deltas_wetlands_and_roughness, world, scratch.climateShadow, [](planet& target)
+    {
+        checkpoleclimates(target.climate());
+        target.syncseasonalclimatefromlegacy();
+        createclimatemap(target.climate());
+        createbiomemap(target.climate());
+        writeclimatediagnostics(target.climate());
+    });
 }
 
 }
@@ -1125,7 +1130,7 @@ bool executegenerationstage(GenerationStageId stageId, planet& world, Generation
         return true;
 
     case GenerationStageId::deltas_wetlands_and_roughness:
-        applydeltawetlandstage(world, context);
+        applydeltawetlandstage(world, scratch, context);
         return true;
 
     case GenerationStageId::subgrid_statistics:

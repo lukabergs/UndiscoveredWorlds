@@ -127,6 +127,13 @@ if(TARGET world_pipeline)
     target_link_libraries(resources_cube_tests PRIVATE uw_headless GTest::gtest GTest::gtest_main)
     target_include_directories(resources_cube_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     gtest_discover_tests(resources_cube_tests)
+    # Hydrology on a cube planet (sphere-mesh.md section 12, W2-H).
+    add_executable(hydrology_cube_tests
+        simulations/hydrology/hydrology_cube_tests.cpp
+    )
+    target_link_libraries(hydrology_cube_tests PRIVATE uw_headless GTest::gtest GTest::gtest_main)
+    target_include_directories(hydrology_cube_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    gtest_discover_tests(hydrology_cube_tests)
 
     # The climate adapter on a cube world (sphere-mesh.md section 10).
     add_executable(climate_adapter_tests

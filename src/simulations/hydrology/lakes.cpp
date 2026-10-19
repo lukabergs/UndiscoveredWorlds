@@ -3,112 +3,32 @@
 #include "core/classes.hpp"
 #include "world/planet.hpp"
 #include "world/functions.hpp"
+#include "simulations/hydrology/hydrology_cells.hpp"
 #include "simulations/hydrology/lakes.hpp"
 
 using namespace std;
 
 namespace
 {
-// This checks whether a given tile is on the edge of a given lake.
+// This checks whether a given tile is on the edge of a given lake: a neighbour (any of the
+// eight) outside it. thislake is the caller's lat-lon array, read at the neighbours' columns
+// and rows.
 
 int lakeoutline(planet& world, vector<vector<int>>& thislake, int lakeno, int x, int y)
 {
-    int width = world.width();
-    int height = world.height();
+    const mesh::CellGrid& grid = world.grid();
+    const mesh::CellId c = grid.cellof(x, y);
 
-    int xx = x - 1;
-    int yy = y;
-
-    if (xx<0 || xx>width)
-        xx = wrap(xx, width);
-
-    if (yy >= 0 && yy <= height)
+    for (int slot = 1; slot <= mesh::slotcount; slot++)
     {
-        if (thislake[xx][yy] != lakeno)
-            return(1);
-    }
+        const std::int32_t neighbour = grid.neighbour(c, slot);
 
-    xx = x + 1;
-    yy = y;
+        if (neighbour < 0)
+            continue;
 
-    if (xx<0 || xx>width)
-        xx = wrap(xx, width);
+        const mesh::CellId n = static_cast<mesh::CellId>(neighbour);
 
-    if (yy >= 0 && yy <= height)
-    {
-        if (thislake[xx][yy] != lakeno)
-            return(1);
-    }
-
-    xx = x;
-    yy = y - 1;
-
-    if (xx<0 || xx>width)
-        xx = wrap(xx, width);
-
-    if (yy >= 0 && yy <= height)
-    {
-        if (thislake[xx][yy] != lakeno)
-            return(1);
-    }
-
-    xx = x;
-    yy = y + 1;
-
-    if (xx<0 || xx>width)
-        xx = wrap(xx, width);
-
-    if (yy >= 0 && yy <= height)
-    {
-        if (thislake[xx][yy] != lakeno)
-            return(1);
-    }
-
-    xx = x - 1;
-    yy = y - 1;
-
-    if (xx<0 || xx>width)
-        xx = wrap(xx, width);
-
-    if (yy >= 0 && yy <= height)
-    {
-        if (thislake[xx][yy] != lakeno)
-            return(1);
-    }
-
-    xx = x + 1;
-    yy = y + 1;
-
-    if (xx<0 || xx>width)
-        xx = wrap(xx, width);
-
-    if (yy >= 0 && yy <= height)
-    {
-        if (thislake[xx][yy] != lakeno)
-            return(1);
-    }
-
-    xx = x + 1;
-    yy = y - 1;
-
-    if (xx<0 || xx>width)
-        xx = wrap(xx, width);
-
-    if (yy >= 0 && yy <= height)
-    {
-        if (thislake[xx][yy] != lakeno)
-            return(1);
-    }
-
-    xx = x - 1;
-    yy = y + 1;
-
-    if (xx<0 || xx>width)
-        xx = wrap(xx, width);
-
-    if (yy >= 0 && yy <= height)
-    {
-        if (thislake[xx][yy] != lakeno)
+        if (thislake[grid.column(n)][grid.row(n)] != lakeno)
             return(1);
     }
 
@@ -116,32 +36,30 @@ int lakeoutline(planet& world, vector<vector<int>>& thislake, int lakeno, int x,
 }
 }
 
-// This function tells us whether a tile is next to a lake.
+// This function tells us whether a cell is next to a lake: the first lake surface of its
+// 3 x 3 neighbourhood (in the legacy order).
 
-float nexttolake(planet& world, int x, int y)
+float nexttolake(planet& world, mesh::CellId c)
 {
-    int width = world.width();
-    int height = world.height();
-
-    int dist = 1;
-
-    for (int i = x - dist; i <= x + dist; i++)
+    for (const mesh::CellId candidate : hydrologycells::square(world.grid(), c))
     {
-        int ii = i;
-
-        if (ii<0 || ii>width)
-            ii = wrap(ii, width);
-
-        for (int j = y - dist; j <= y + dist; j++)
-        {
-            if (j >= 0 && j <= height && world.lakesurfacefloat(ii, j) != 0)
-                return world.lakesurfacefloat(ii, j);
-        }
+        if (world.lakesurfacefloat(candidate) != 0)
+            return world.lakesurfacefloat(candidate);
     }
     return 0.0f;
 }
 
-// Select the river source cell for a lake or terrain water feature.
+float nexttolake(planet& world, int x, int y)
+{
+    const mesh::CellGrid& grid = world.grid();
+    if (y < 0 || y >= grid.rows())
+        return 0.0f;
+    const int columns = grid.columns();
+    return nexttolake(world, grid.cellof(((x % columns) + columns) % columns, y));
+}
+
+// Select the river source cell for a lake or terrain water feature. Lat-lon worlds only: the
+// lake is the caller's (x, y) array and box.
 void makelakestartpoint(planet& world, vector<vector<int>>& thislake, int lakeno, int leftx, int lefty, int rightx, int righty)
 {
     twointegers startpoint;

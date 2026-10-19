@@ -17,8 +17,12 @@ class planet;
 
 namespace flowrouting
 {
-// The kernel's view of the planet: the metric from planetbody.radius, the base
-// elevation per cell (row-major, north row first), the sea mask (oceancells: the
+// The metric of the world's own cell grid (a cube or the lat-lon grid; worldmetric):
+// its cell index is the world's cell id. A view, valid while the world keeps its grid.
+landscape::SphereMetric worldmetric(const planet& world);
+
+// The kernel's view of the planet: the metric of the world's grid, the base
+// elevation per cell (in cell id order), the sea mask (oceancells: the
 // below-sea regions that count as ocean), the sea level, the potential evaporation and the runoff in m/yr
 // of every cell (sea included). The potential evaporation is the open-water law
 // of landscape.lakes (landscape::openwaterevaporation) applied to each season's
@@ -67,8 +71,7 @@ bool belowsea(float elevation, float sealevel);
 std::vector<uint8_t> seamask(const landscape::SphereMetric& metric, const std::vector<float>& elevation, float sealevel);
 
 // The planet's sea for hydrology (erosion plan H3): seamask of the base elevation on
-// the metric of gatherinputs (row-major, north row first, (width + 1) x (height + 1)
-// cells) in an eroded world (geosphere.erosion_duration > 0). A world without erosion
+// the metric of gatherinputs (in cell id order) in an eroded world (geosphere.erosion_duration > 0). A world without erosion
 // (imported terrain) takes its sea from the import: every cell at or below the sea
 // level that hydrosphere.imported_lake does not mark, whatever its region's size. The one rule of the routing, the lake levels, the rivers and the eroded
 // drainage basins; planet::sea (the surface without a lake surface) stays the rule

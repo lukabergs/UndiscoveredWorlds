@@ -26,8 +26,6 @@ void applylakelevelstage(planet& world)
     const planet& view = world;  // reads through the const getters, which the access tracking sees
     flowrouting::Inputs routing = flowrouting::gatherinputs(view);
     const landscape::SphereMetric& metric = routing.metric;
-    const int columns = metric.width;
-    const int rows = metric.height;
     const std::size_t size = metric.size();
 
     const worldgrid<float>& filled = view.filledelevation();
@@ -47,29 +45,27 @@ void applylakelevelstage(planet& world)
     inputs.receiver.resize(size);
     inputs.discharge_m3_yr.resize(size);
     inputs.precipitation_m_yr.resize(size);
-    for (int y = 0; y < rows; y++)
+    // The metric's cell index is the world's cell id (both in the grid's id order).
+    for (std::size_t cell = 0; cell < size; cell++)
     {
-        for (int x = 0; x < columns; x++)
+        const mesh::CellId c = static_cast<mesh::CellId>(cell);
+        inputs.filledelevation[cell] = filled[c];
+        inputs.depressionid[cell] = depression[c];
+        inputs.discharge_m3_yr[cell] = static_cast<double>(discharge[c]) * secondsperyear;
+        int32_t receiver = -1;
+        const int code = direction[c];
+        if (code >= 1 && code <= landscape::directioncount)
         {
-            const std::size_t cell = metric.index(x, y);
-            inputs.filledelevation[cell] = filled[x][y];
-            inputs.depressionid[cell] = depression[x][y];
-            inputs.discharge_m3_yr[cell] = static_cast<double>(discharge[x][y]) * secondsperyear;
-            int32_t receiver = -1;
-            const int code = direction[x][y];
-            if (code >= 1 && code <= landscape::directioncount)
-            {
-                const std::size_t neighbour = metric.neighbour(cell, code);
-                if (neighbour != cell && routing.sea[neighbour] == 0)
-                    receiver = static_cast<int32_t>(neighbour);
-            }
-            inputs.receiver[cell] = receiver;
-            // Seasonal precipitation is mm/month; four seasons of three months make the year.
-            double rain_mm = 0.0;
-            for (int season = 0; season < CLIMATESEASONCOUNT; season++)
-                rain_mm += view.seasonalrainfloat(season, x, y);
-            inputs.precipitation_m_yr[cell] = static_cast<float>(3.0 * rain_mm / 1000.0);
+            const std::size_t neighbour = metric.neighbour(cell, code);
+            if (neighbour != cell && routing.sea[neighbour] == 0)
+                receiver = static_cast<int32_t>(neighbour);
         }
+        inputs.receiver[cell] = receiver;
+        // Seasonal precipitation is mm/month; four seasons of three months make the year.
+        double rain_mm = 0.0;
+        for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+            rain_mm += view.seasonalrainfloat(season, c);
+        inputs.precipitation_m_yr[cell] = static_cast<float>(3.0 * rain_mm / 1000.0);
     }
 
     // The routing fields come from the last routing (hydrology.flow_routing, or the final routing of
@@ -118,35 +114,29 @@ void applylakelevelstage(planet& world)
     const worldgrid<std::uint8_t>& importedlake = view.importedlake();
     std::vector<uint8_t> imported(size, 0);
     bool anyimported = false;
-    for (int y = 0; y < rows; y++)
+    for (std::size_t cell = 0; cell < size; cell++)
     {
-        for (int x = 0; x < columns; x++)
+        if (importedlake[static_cast<mesh::CellId>(cell)] != 0 && inputs.depressionid[cell] == 0)
         {
-            if (importedlake[x][y] != 0 && inputs.depressionid[metric.index(x, y)] == 0)
-            {
-                imported[metric.index(x, y)] = 1;
-                anyimported = true;
-            }
+            imported[cell] = 1;
+            anyimported = true;
         }
     }
 
     // The stage owns the lake surfaces (every cell is rewritten below) and the salt lakes and pans.
     // procedural-world runs it before and after the full climate, so the previous run's features are
     // cleared first; no other stage of a recipe with this one writes special 100 or 110 before it.
-    for (int y = 0; y < rows; y++)
+    for (std::size_t cell = 0; cell < size; cell++)
     {
-        for (int x = 0; x < columns; x++)
-        {
-            const int feature = view.special(x, y);
-            if (feature == saltlake || feature == saltpan)
-                world.setspecial(x, y, 0);
-        }
+        const mesh::CellId c = static_cast<mesh::CellId>(cell);
+        const int feature = view.special(c);
+        if (feature == saltlake || feature == saltpan)
+            world.setspecial(c, 0);
     }
 
     const landscape::LakeBalance balance = landscape::balancelakes(inputs);
-    for (int y = 0; y < rows; y++)
-        for (int x = 0; x < columns; x++)
-            world.setlakesurface(x, y, balance.surface[metric.index(x, y)]);
+    for (std::size_t cell = 0; cell < size; cell++)
+        world.setlakesurface(static_cast<mesh::CellId>(cell), balance.surface[cell]);
     // A dry closed depression is a salt pan on its lowest cell. In every closed depression, dry or
     // holding a lake, each cell at or below the sea level that the lake does not cover is a salt pan
     // too (erosion plan H3: an enclosed below-sea basin is not sea; Death Valley, Qattara, the salt
@@ -162,8 +152,8 @@ void applylakelevelstage(planet& world)
     {
         if (pan[cell] == 0)
             continue;
-        world.setlakesurface(metric.column(cell), metric.row(cell), inputs.elevation[cell]);
-        world.setspecial(metric.column(cell), metric.row(cell), saltpan);
+        world.setlakesurface(static_cast<mesh::CellId>(cell), inputs.elevation[cell]);
+        world.setspecial(static_cast<mesh::CellId>(cell), saltpan);
     }
     for (std::size_t cell = 0; cell < size; cell++)
     {
@@ -174,7 +164,7 @@ void applylakelevelstage(planet& world)
         const auto lake = std::lower_bound(balance.lakes.begin(), balance.lakes.end(), id,
                                            [](const landscape::LakeLevel& entry, int32_t value) { return entry.id < value; });
         if (lake != balance.lakes.end() && lake->id == id && !lake->overflowing)
-            world.setspecial(metric.column(cell), metric.row(cell), saltlake);
+            world.setspecial(static_cast<mesh::CellId>(cell), saltlake);
     }
 
     // Imported lake cells inside a depression (depression_id != 0, after the stale ones are dropped)
@@ -213,6 +203,6 @@ void applylakelevelstage(planet& world)
         }
         for (const std::size_t cell : members)
             if (balance.surface[cell] == 0.0f)
-                world.setlakesurface(metric.column(cell), metric.row(cell), level);
+                world.setlakesurface(static_cast<mesh::CellId>(cell), level);
     }
 }

@@ -1,139 +1,60 @@
-// Questions about drainage on the world grid: slopes, flow destinations, inflows, lakes nearby.
-// Moved unchanged from misc.cpp (Jonathan Hill, 2022).
+// Questions about drainage on the world grid: flatness, flow destinations, inflows, lakes nearby.
+// Moved from misc.cpp (Jonathan Hill, 2022); on the cell grid since the sphere mesh (W2-H).
 
 #include "simulations/hydrology/flow_queries.hpp"
 
-#include <iostream>
+#include <algorithm>
 #include <cmath>
-#include <fstream>
-#include <stdio.h>
-#include <queue>
+#include <vector>
 
-#include "core/classes.hpp"
+#include "simulations/hydrology/hydrology_cells.hpp"
 #include "world/planet.hpp"
-#include "world/functions.hpp"
 
-using namespace std;
-
-// This function returns the direction from one tile to another.
-
-// This function finds the direction of the lowest neighbouring tile.
-
-int findlowestdir(planet& world, int neighbours[8][2], int x, int y)
+namespace
 {
-    int width = world.width();
-    int height = world.height();
-    const std::uint64_t directionseed = deterministiccontextseed(world.seed(), 0x6101);
-
-    float lowest = static_cast<float>(world.maxelevation() * 2);
-    int nnn = -1;
-
-    int start = deterministicrandom(directionseed, 0, 7, x, y);
-
-    for (int n = start; n <= start + 7; n++)
-    {
-        int nn = wrap(n, 7);
-
-        int i = x + neighbours[nn][0];
-
-        if (i<0 || i>width)
-            i = wrap(i, width);
-
-        int j = y + neighbours[nn][1];
-
-        if (j >= 0 && j <= height)
-        {
-            float pointelev = world.nomfloat(i, j);
-
-            if (pointelev < lowest)
-            {
-                lowest = pointelev;
-                nnn = nn;
-            }
-        }
-    }
-
-    int dir = nnn + 1;
-
-    return (dir);
+// The lat-lon cell of legacy (x, y) coordinates: x taken round the globe, nocell
+// beyond a pole (the legacy loops skipped those rows).
+mesh::CellId latloncell(const planet& world, int x, int y)
+{
+    const mesh::CellGrid& grid = world.grid();
+    if (y < 0 || y >= grid.rows())
+        return mesh::nocell;
+    const int columns = grid.columns();
+    return grid.cellof(((x % columns) + columns) % columns, y);
 }
 
-// This gets the amount the land is sloping between two points.
-
-float getslope(planet& world, int x, int y, int xx, int yy)
+twointegers coordinates(const planet& world, mesh::CellId c)
 {
-    int width = world.width();
-    int height = world.height();
-
-    if (x<0 || x>width)
-        x = wrap(x, width);
-
-    if (xx<0 || xx>width)
-        xx = wrap(xx, width);
-
-    if (y<0 || y>height)
-        return (-1.0f);
-
-    if (yy<0 || yy>height)
-        return (-1.0f);
-
-    float slope = world.mapfloat(xx, yy) - world.mapfloat(x, y);
-
-    return (slope);
+    twointegers point;
+    point.x = world.grid().column(c);
+    point.y = world.grid().row(c);
+    return point;
+}
 }
 
-// This function checks how flat the land is at a given point.
+// This function checks how flat the land is at a given point: the mean difference of the
+// water-level elevation to the west, north-west, north, north-east, south-west, south and
+// south-east neighbours, divided by their number plus one (the legacy count, which had a
+// place for the east neighbour but never added it).
 
-int getflatness(planet& world, int x, int y)
+int getflatness(planet& world, mesh::CellId c)
 {
-    int width = world.width();
-    int height = world.height();
-
-    int xminus = x - 1;
-
-    if (xminus < 0)
-        xminus = width;
-
-    int xplus = x + 1;
-
-    if (xplus > width)
-        xplus = 0;
-
-    const float thiselev = getflatelevation(world, x, y);
+    const mesh::CellGrid& grid = world.grid();
+    const float thiselev = getflatelevation(world, c);
 
     float flatness = 0.0f;
+    float crount = 1.0f;
 
-    float thatelev = getflatelevation(world, xminus, y);
-    flatness = flatness + std::fabs(thiselev - thatelev);
-
-    float crount = 2.0f;
-
-    if (y > 0)
+    for (const int slot : { 7, 8, 1, 2, 6, 5, 4 })
     {
-        thatelev = getflatelevation(world, xminus, y - 1);
+        const std::int32_t neighbour = grid.neighbour(c, slot);
+
+        if (neighbour < 0)
+            continue;
+
+        const float thatelev = getflatelevation(world, static_cast<mesh::CellId>(neighbour));
         flatness = flatness + std::fabs(thiselev - thatelev);
-
-        thatelev = getflatelevation(world, x, y - 1);
-        flatness = flatness + std::fabs(thiselev - thatelev);
-
-        thatelev = getflatelevation(world, xplus, y - 1);
-        flatness = flatness + std::fabs(thiselev - thatelev);
-
-        crount = crount + 3.0f;
-    }
-
-    if (y < height)
-    {
-        thatelev = getflatelevation(world, xminus, y + 1);
-        flatness = flatness + std::fabs(thiselev - thatelev);
-
-        thatelev = getflatelevation(world, x, y + 1);
-        flatness = flatness + std::fabs(thiselev - thatelev);
-
-        thatelev = getflatelevation(world, xplus, y + 1);
-        flatness = flatness + std::fabs(thiselev - thatelev);
-
-        crount = crount + 3.0f;
+        crount = crount + 1.0f;
     }
 
     flatness = flatness / crount;
@@ -143,368 +64,255 @@ int getflatness(planet& world, int x, int y)
 
 // This function gets the elevation of a point, incorporating water level.
 
-float getflatelevation(planet& world, int x, int y)
+float getflatelevation(planet& world, mesh::CellId c)
 {
     float elev;
 
-    float surface = world.lakesurfacefloat(x, y);
+    float surface = world.lakesurfacefloat(c);
 
     if (surface > 0)
         elev = surface;
     else
     {
-        if (world.sea(x, y) == 1)
+        if (world.sea(c) == 1)
             elev = static_cast<float>(world.sealevel());
         else
-            elev = world.nomfloat(x, y);
+            elev = world.nomfloat(c);
     }
 
     return (elev);
 }
 
-// This function finds a neighbouring sea tile that isn't the one we just came from.
+// This returns the cell that the river in the given cell is flowing into.
 
-twointegers findseatile(planet& world, int x, int y, int dir)
+mesh::CellId getflowdestination(planet& world, mesh::CellId c, int dir)
 {
-    int width = world.width();
-    int height = world.height();
-
-    twointegers newtile;
-
-    newtile.x = -1;
-    newtile.y = -1;
-
-    int oldx = x;
-    int oldy = y;
-
-    if (dir == 8 || dir == 1 || dir == 2)
-        oldy = y + 1;
-
-    if (dir == 4 || dir == 5 || dir == 6)
-        oldy = y - 1;
-
-    if (dir == 2 || dir == 3 || dir == 4)
-        oldx = x - 1;
-
-    if (dir == 6 || dir == 7 || dir == 8)
-        oldx = x + 1;
-
-    if (oldx<0 || oldx>width)
-        oldx = wrap(oldx, width);
-
-    // oldx and oldy are the coordinates of where we are coming to this tile from. We want to avoid going back there!
-
-    float lowest = world.mapfloat(x, y);
-
-    for (int i = x - 1; i <= x + 1; i++)
-    {
-        int ii = i;
-
-        if (ii<0 || ii>width)
-            ii = wrap(ii, width);
-
-        for (int j = y - 1; j <= y + 1; j++)
-        {
-            if (ii != x && j != y && ii != oldx && j != oldy && j >= 0 && j <= height && world.sea(ii, j) == 1 && world.mapfloat(ii, j) < lowest)
-            {
-                newtile.x = ii;
-                newtile.y = j;
-                lowest = world.mapfloat(ii, j);
-            }
-        }
-    }
-
-    if (newtile.x != -1)
-        return (newtile);
-
-    // If it didn't find a neighbouring sea tile that's lower, just find one at all.
-
-    for (int i = x - 1; i <= x + 1; i++)
-    {
-        int ii = i;
-
-        if (ii<0 || ii>width)
-            ii = wrap(ii, width);
-
-        for (int j = y - 1; j <= y + 1; j++)
-        {
-            if (ii != x && j != y && ii != oldx && j != oldy && j >= 0 && j <= height && world.sea(ii, j) == 1)
-            {
-                newtile.x = ii;
-                newtile.y = j;
-            }
-        }
-    }
-    return (newtile);
-}
-
-// This returns the coordinate that the river in the given tile is flowing into.
-
-twointegers getflowdestination(planet& world, int x, int y, int dir)
-{
-    int width = world.width();
-    int height = world.height();
-
-    twointegers destpoint;
-
     if (dir == 0)
-        dir = world.riverdir(x, y);
+        dir = world.riverdir(c);
 
-    if (dir == 8 || dir == 1 || dir == 2)
-        y--;
-
-    if (dir == 4 || dir == 5 || dir == 6)
-        y++;
-
-    if (dir == 2 || dir == 3 || dir == 4)
-        x++;
-
-    if (dir == 6 || dir == 7 || dir == 8)
-        x--;
-
-    if (x<0 || x>width)
-        x = wrap(x, width);
-
-    if (y < 0)
-        y = 0;
-
-    if (y > height)
-        y = height;
-
-    destpoint.x = x;
-    destpoint.y = y;
-
-    return (destpoint);
+    return hydrologycells::neighbourorself(world.grid(), c, dir);
 }
 
 // This function finds the cell with the largest flow into the current one.
 
-twointegers getupstreamcell(planet& world, int x, int y)
+std::int32_t getupstreamcell(planet& world, mesh::CellId c)
 {
-    int width = world.width();
-    int height = world.height();
-
-    twointegers upcell, destpoint;
-
-    upcell.x = -1;
-    upcell.y = -1;
-
+    std::int32_t upcell = -1;
     int largest = 0;
 
-    int riverjan, riverjul;
-
-    for (int i = x - 1; i <= x + 1; i++)
+    for (const mesh::CellId candidate : hydrologycells::square(world.grid(), c))
     {
-        int ii = i;
+        const int riverjan = world.riverjan(candidate);
+        const int riverjul = world.riverjul(candidate);
 
-        if (ii<0 || ii>width)
-            ii = wrap(ii, width);
-
-        for (int j = y - 1; j <= y + 1; j++)
+        if (riverjan + riverjul > largest) // If this is larger than the current largest inflow
         {
-            if (j >= 0 && y <= height)
+            if (getflowdestination(world, candidate, 0) == c) // If this is actually flowing into our cell
             {
-                riverjan = world.riverjan(ii, j);
-                riverjul = world.riverjul(ii, j);
-
-                if (riverjan + riverjul > largest) // If this is larger than the current largest inflow
-                {
-                    destpoint = getflowdestination(world, ii, j, 0);
-
-                    if (destpoint.x == x && destpoint.y == y) // If this is actually flowing into our cell
-                    {
-                        upcell.x = ii;
-                        upcell.y = j;
-
-                        largest = riverjan + riverjul;
-                    }
-
-                }
+                upcell = static_cast<std::int32_t>(candidate);
+                largest = riverjan + riverjul;
             }
         }
     }
     return (upcell);
 }
 
-// This function checks to see whether a tile on the global map has any water flowing into it.
+// This function checks to see whether a cell has any water flowing into it: a neighbour
+// whose river direction is the slot by which it reaches this cell.
 
-int checkwaterinflow(planet& world, int x, int y)
+int checkwaterinflow(planet& world, mesh::CellId c)
 {
-    int i, j;
+    const mesh::CellGrid& grid = world.grid();
 
-    int width = world.width();
-    int height = world.height();
+    for (int slot = 1; slot <= mesh::slotcount; slot++)
+    {
+        const std::int32_t neighbour = grid.neighbour(c, slot);
 
-    // From the north
-
-    i = x;
-    j = y - 1;
-
-    if (j >= 0 && world.riverdir(i, j) == 5)
-        return 1;
-
-    // From the northeast
-
-    i = x + 1;
-    if (i > width)
-        i = 0;
-    j = y - 1;
-
-    if (j >= 0 && world.riverdir(i, j) == 6)
-        return 1;
-
-    // From the east
-
-    i = x + 1;
-    if (i > width)
-        i = 0;
-    j = y;
-
-    if (j >= 0 && world.riverdir(i, j) == 7)
-        return 1;
-
-    // From the southeast
-
-    i = x + 1;
-    if (i > width)
-        i = 0;
-    j = y + 1;
-
-    if (j <= height && world.riverdir(i, j) == 8)
-        return 1;
-
-    // From the south
-
-    i = x;
-    j = y + 1;
-
-    if (j <= height && world.riverdir(i, j) == 1)
-        return 1;
-
-    // From the southwest
-
-    i = x - 1;
-    if (i < 0)
-        i = width;
-    j = y + 1;
-
-    if (j <= height && world.riverdir(i, j) == 2)
-        return 1;
-
-    // From the west
-
-    i = x - 1;
-    if (i < 0)
-        i = width;
-    j = y;
-
-    if (j <= height && world.riverdir(i, j) == 3)
-        return 1;
-
-    // From the northwest
-
-    i = x - 1;
-    if (i < 0)
-        i = width;
-    j = y - 1;
-
-    if (j >= 0 && world.riverdir(i, j) == 4)
-        return 1;
+        if (neighbour >= 0 && world.riverdir(static_cast<mesh::CellId>(neighbour)) == grid.reverse(c, slot))
+            return 1;
+    }
 
     return 0;
 }
 
-// This function gets the total water inflow into a given tile on the global map.
+// This function gets the total water inflow (January, July) into a given cell.
 
-twointegers gettotalinflow(planet& world, int x, int y)
+twointegers gettotalinflow(planet& world, mesh::CellId c)
 {
-    int width = world.width();
-    int height = world.height();
-
     twointegers total;
-    twointegers dest;
 
     total.x = 0;
     total.y = 0;
 
-    for (int i = x - 1; i <= x + 1; i++)
+    for (const mesh::CellId candidate : hydrologycells::square(world.grid(), c))
     {
-        int ii = i;
-
-        if (ii<0 || ii>width)
-            ii = wrap(ii, width);
-
-        for (int j = y - 1; j <= y + 1; j++)
+        if (getflowdestination(world, candidate, 0) == c)
         {
-            if (j >= 0 && j <= height)
-            {
-                dest = getflowdestination(world, i, j, 0);
-
-                if (dest.x == x && dest.y == y)
-                {
-                    total.x = total.x + world.riverjan(i, j);
-                    total.y = total.y + world.riverjul(i, j);
-                }
-            }
+            total.x = total.x + world.riverjan(candidate);
+            total.y = total.y + world.riverjul(candidate);
         }
     }
     return total;
 }
 
-// This function tells whether a given point on the world map is in or next to a lake.
+// This function tells whether a given cell is in or next to a lake: the first lake surface
+// found in the 3 x 3 neighbourhood (in the legacy order), then ring by ring outwards for a
+// larger dist (each ring in ascending id).
 
-float nearlake(planet& world, int x, int y, int dist, bool rift)
+float nearlake(planet& world, mesh::CellId c, int dist, bool rift)
 {
-    int width = world.width();
-    int height = world.height();
+    const mesh::CellGrid& grid = world.grid();
 
-    for (int i = x - dist; i <= x + dist; i++)
+    const auto lakeat = [&](mesh::CellId cell)
     {
-        int ii = i;
+        if (world.lakesurfacefloat(cell) != 0)
+            return world.lakesurfacefloat(cell);
 
-        if (ii<0 || ii>width)
-            ii = wrap(ii, width);
+        if (rift == 1 && world.riftlakesurfacefloat(cell) != 0)
+            return world.riftlakesurfacefloat(cell);
 
-        for (int j = y - dist; j <= y + dist; j++)
+        return 0.0f;
+    };
+
+    if (dist < 1)
+        return lakeat(c);
+
+    std::vector<mesh::CellId> seen = hydrologycells::square(grid, c);
+
+    for (const mesh::CellId cell : seen)
+    {
+        const float surface = lakeat(cell);
+
+        if (surface != 0)
+            return surface;
+    }
+
+    std::vector<mesh::CellId> ring = seen;
+    std::sort(seen.begin(), seen.end());
+
+    for (int step = 2; step <= dist; step++)
+    {
+        std::vector<mesh::CellId> next;
+
+        for (const mesh::CellId cell : ring)
         {
-            if (j >= 0 && j <= height)
+            for (int slot = 1; slot <= mesh::slotcount; slot++)
             {
-                if (world.lakesurfacefloat(ii, j) != 0)
-                    return world.lakesurfacefloat(ii, j);
+                const std::int32_t neighbour = grid.neighbour(cell, slot);
 
-                if (rift == 1 && world.riftlakesurfacefloat(ii, j) != 0)
-                    return world.riftlakesurfacefloat(ii, j);
+                if (neighbour < 0)
+                    continue;
+
+                const mesh::CellId candidate = static_cast<mesh::CellId>(neighbour);
+
+                if (!std::binary_search(seen.begin(), seen.end(), candidate) &&
+                    std::find(next.begin(), next.end(), candidate) == next.end())
+                    next.push_back(candidate);
             }
         }
+
+        std::sort(next.begin(), next.end());
+
+        for (const mesh::CellId cell : next)
+        {
+            const float surface = lakeat(cell);
+
+            if (surface != 0)
+                return surface;
+        }
+
+        seen.insert(seen.end(), next.begin(), next.end());
+        std::sort(seen.begin(), seen.end());
+        ring = next;
     }
     return 0.0f;
 }
 
-// This function tells us whether a tile is a lake tile on the edge.
+// This function tells us whether a cell is a lake cell on the edge.
+
+int getlakeedge(planet& world, mesh::CellId c)
+{
+    if (world.lakesurfacefloat(c) == 0)
+        return 0;
+
+    for (const mesh::CellId candidate : hydrologycells::square(world.grid(), c))
+    {
+        if (world.lakesurfacefloat(candidate) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+/// The (x, y) forms: lat-lon worlds only; a row beyond a pole has no cell (nothing flows,
+// no lake, no flatness).
+
+int getflatness(planet& world, int x, int y)
+{
+    const mesh::CellId c = latloncell(world, x, y);
+    return c == mesh::nocell ? 0 : getflatness(world, c);
+}
+
+float getflatelevation(planet& world, int x, int y)
+{
+    const mesh::CellId c = latloncell(world, x, y);
+    return c == mesh::nocell ? 0.0f : getflatelevation(world, c);
+}
+
+twointegers getflowdestination(planet& world, int x, int y, int dir)
+{
+    const mesh::CellId c = latloncell(world, x, y);
+    if (c == mesh::nocell)
+    {
+        twointegers point;
+        point.x = x;
+        point.y = std::clamp(y, 0, world.grid().rows() - 1);
+        return point;
+    }
+    return coordinates(world, getflowdestination(world, c, dir));
+}
+
+twointegers getupstreamcell(planet& world, int x, int y)
+{
+    const mesh::CellId c = latloncell(world, x, y);
+    const std::int32_t upcell = c == mesh::nocell ? -1 : getupstreamcell(world, c);
+
+    if (upcell < 0)
+    {
+        twointegers none;
+        none.x = -1;
+        none.y = -1;
+        return none;
+    }
+    return coordinates(world, static_cast<mesh::CellId>(upcell));
+}
+
+int checkwaterinflow(planet& world, int x, int y)
+{
+    const mesh::CellId c = latloncell(world, x, y);
+    return c == mesh::nocell ? 0 : checkwaterinflow(world, c);
+}
+
+twointegers gettotalinflow(planet& world, int x, int y)
+{
+    const mesh::CellId c = latloncell(world, x, y);
+    if (c == mesh::nocell)
+    {
+        twointegers none;
+        none.x = 0;
+        none.y = 0;
+        return none;
+    }
+    return gettotalinflow(world, c);
+}
+
+float nearlake(planet& world, int x, int y, int dist, bool rift)
+{
+    const mesh::CellId c = latloncell(world, x, y);
+    return c == mesh::nocell ? 0.0f : nearlake(world, c, dist, rift);
+}
 
 int getlakeedge(planet& world, int x, int y)
 {
-    if (world.lakesurfacefloat(x, y) == 0)
-        return 0;
-
-    int width = world.width();
-    int height = world.height();
-
-    for (int i = x - 1; i <= x + 1; i++)
-    {
-        int ii = i;
-
-        if (ii<0 || ii>width)
-            ii = wrap(ii, width);
-
-        for (int j = y - 1; j <= y + 1; j++)
-        {
-            if (j >= 0 && j <= height)
-            {
-                if (world.lakesurfacefloat(ii, j) == 0)
-                    return 1;
-            }
-        }
-    }
-    return 0;
+    const mesh::CellId c = latloncell(world, x, y);
+    return c == mesh::nocell ? 0 : getlakeedge(world, c);
 }

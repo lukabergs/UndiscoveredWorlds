@@ -60,7 +60,7 @@ std::vector<WorldProcessDefinition> buildprocesses()
         { S::rainfall, "climate.rainfall_and_coupling", K::evolver, false, {}, {}, {}, {},
           "Runs the coupled wind/pressure/ocean/SST/rainfall iteration.", {}, true },
         { S::flow_routing, "hydrology.flow_routing", K::diagnoser, false, {}, {}, {}, {},
-          "Runoff from Fu's Budyko curve of the annual precipitation and the open-water evaporation law of the lakes; discharge loses evaporation from channel and floodplain where PET exceeds P (erosion plan C2); every depression overflows at its spill." },
+          "Runoff from Fu's Budyko curve of the annual precipitation and the open-water evaporation law of the lakes; discharge loses evaporation from channel and floodplain where PET exceeds P (erosion plan C2); every depression overflows at its spill.", {}, true },
         { S::fluvial_erosion, "terrain.fluvial_erosion", K::evolver, false, {}, {}, {}, {},
           "Writes its final routing fields too, so no second routing step follows it. A checkpoint writes the "
           "same fields as of its time (the routing of the terrain then, rates over the elapsed time). Glaciers "
@@ -71,9 +71,9 @@ std::vector<WorldProcessDefinition> buildprocesses()
             "configs/parameters/landscape.json; the last step is shortened to end at the duration; a checkpoint "
             "follows the step that reaches its time" } },
         { S::rivers, "hydrology.rivers", K::diagnoser, false, {}, {}, {}, {},
-          "River directions and the January and July flows in legacy units from the routing (erosion plan B1); in an eroded world also the distributaries on prograded land, in the delta fields, whatever the deltas option (erosion plan C5b)." },
+          "River directions and the January and July flows in legacy units from the routing (erosion plan B1); in an eroded world also the distributaries on prograded land, in the delta fields, whatever the deltas option (erosion plan C5b).", {}, true },
         { S::lake_levels, "hydrology.lake_levels", K::diagnoser, false, {}, {}, {}, {},
-          "Lake levels by water balance in the routing's depressions; salt lakes and pans where closed (erosion plan B2)." },
+          "Lake levels by water balance in the routing's depressions; salt lakes and pans where closed (erosion plan B2).", {}, true },
         { S::mountain_temperature_lapse, "climate.mountain_lapse", K::diagnoser, false, {}, {}, {}, {}, "", {}, true },
         { S::climates_and_biomes, "climate.classification", K::diagnoser, false, {}, {}, {}, {}, "Writes biomes as well as climate classes.", {}, true },
         { S::arid_features, "terrain.arid_features", K::detailer, false, {}, {}, {}, {}, "", {}, true },
