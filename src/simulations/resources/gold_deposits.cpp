@@ -17,7 +17,6 @@ using namespace cellqueries;
 namespace
 {
 constexpr double kPi = 3.14159265358979323846;
-constexpr double kCircumferenceKm = 2.0 * kPi * 6371.0; // As assumed by the climate solvers.
 // e-folding travel distance of detrital gold in an ordinary channel; gold is
 // dense, so most settles within tens of km of its source.
 constexpr double kChannelTransportKm = 25.0;
@@ -130,8 +129,9 @@ void exhumeaftererosion(mineralsystems::Deposit& deposit, double lowering_m, dou
     }
 }
 
-// Present drainage on the final world, by cell id. On lat-lon the step lengths treat rows
-// as latitudes; on a cube they are the neighbour table's great-circle distances.
+// Present drainage on the final world, by cell id; a step is the neighbour table's distance
+// to the receiver on the world's sphere (on lat-lon SphereMetric's: dy, the row's dx, or
+// the hypotenuse with the two rows' mean dx for a diagonal).
 mineralsystems::DrainageNetwork drainagenetwork(const planet& world)
 {
     const mesh::CellGrid& grid = world.grid();
@@ -160,28 +160,13 @@ mineralsystems::DrainageNetwork drainagenetwork(const planet& world)
     network.stepLengthKm.assign(count, 0.0f);
     network.transportLengthKm.assign(count, 0.0f);
 
-    const double cellkm = kCircumferenceKm / exportcolumns(grid);
     for (CellId c = 0; c < count; ++c)
     {
         const bool delta = isdeltacell(world, c);
         network.sea[c] = world.sea(c) != 0 && !delta ? 1 : 0;
         network.sink[c] = islakecell(world, c) ? 1 : 0;
-        double step = cellkm;
-        const int32_t next = network.receiver[c];
-        if (next >= 0 && cube)
-            step = grid.distance_m(c, slots[c]) / 1000.0;
-        else if (next >= 0)
-        {
-            const int x = grid.column(c);
-            const int y = grid.row(c);
-            const double latitude = kPi * (0.5 - (y + 0.5) / network.height);
-            const double eastwest = cellkm * std::cos(latitude);
-            int dx = static_cast<int>(next % network.width) - x;
-            if (dx > network.width / 2) dx -= network.width;
-            if (dx < -network.width / 2) dx += network.width;
-            const int dy = static_cast<int>(next / network.width) - y;
-            step = std::hypot(dx * eastwest, dy * cellkm);
-        }
+        // The routing stops at a cell without a receiver, so its step is never read.
+        const double step = network.receiver[c] >= 0 ? grid.distance_m(c, slots[c]) / 1000.0 : 0.0;
         network.stepLengthKm[c] = static_cast<float>(step);
         const double deposition = world.depositionpotential(c) / 100.0;
         network.transportLengthKm[c] = static_cast<float>(kChannelTransportKm

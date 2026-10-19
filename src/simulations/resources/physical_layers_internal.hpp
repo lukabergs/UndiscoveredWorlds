@@ -105,18 +105,16 @@ inline int averageriverflow(const planet& world, CellId c)
     return std::max(riverflow, deltaflow);
 }
 
-// planet::outline and planet::coast on any grid (terrain's cell-grid forms).
+// planet::outline and planet::coast on any grid (terrain's cell-grid forms). On lat-lon
+// they differ from the planet's only in the first and last columns, whose west and east
+// neighbours planet::wrapx takes one column short (it wraps by W - 1).
 inline bool isoutline(const planet& world, CellId c)
 {
-    if (world.grid().kind() == mesh::GridKind::latlon)
-        return world.outline(world.grid().column(c), world.grid().row(c));
     return terrain::coastgrid::outline(world, c);
 }
 
 inline bool iscoast(const planet& world, CellId c)
 {
-    if (world.grid().kind() == mesh::GridKind::latlon)
-        return world.coast(world.grid().column(c), world.grid().row(c));
     return terrain::coastgrid::coast(world, c);
 }
 
