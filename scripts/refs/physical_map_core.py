@@ -24,6 +24,7 @@ from rasterio.warp import reproject, Resampling
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from uwtools import palettes
 from uwtools.hashing import sha256
+from uwtools.protected_io import staged, write_text_into
 from cell_grid import conservative_remap, grid_dimensions
 
 REPO = Path(__file__).resolve().parents[2]
@@ -393,7 +394,9 @@ class Atlas:
             tif.parent.mkdir(parents=True,exist_ok=True)
             Image.fromarray(rgba(values,layer)).save(png)
             crs = 'EPSG:4326' if layer.body=='Earth' else MOON_CRS
-            with rasterio.open(tif,'w',driver='GTiff',width=width,height=width//2,count=1,
+            # GDAL deletes an existing file before writing it; refs/ forbids that, so write outside and copy.
+            with staged(tif,companions=True) as temporary, \
+                 rasterio.open(temporary,'w',driver='GTiff',width=width,height=width//2,count=1,
                                dtype='float32',crs=crs,transform=from_bounds(*GLOBAL,width,width//2),
                                nodata=NODATA,compress='deflate',predictor=3,tiled=True) as out:
                 out.write(np.where(np.isfinite(values),values,NODATA),1)
@@ -421,7 +424,4 @@ class Atlas:
         manifest = dict(version=1,grid='Cell centres, 2:1, longitude [-180,180), north-up',
                         widths=self.widths,nodata=NODATA,png_nodata='Transparent black',
                         products=self.products,sources=self.used,datasets=self.status)
-        path = self.output/'manifest.json'
-        temporary = path.with_suffix('.json.tmp')
-        temporary.write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf-8')
-        temporary.replace(path)
+        write_text_into(self.output/'manifest.json',json.dumps(manifest,indent=2)+'\n')

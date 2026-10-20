@@ -26,6 +26,7 @@ import requests
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from uwtools import glo30
 from uwtools.hashing import sha256
+from uwtools.protected_io import staged
 
 TILE_MAX_MIB = 120
 TIFF_SIGNATURES = (b'II*\x00', b'MM\x00*', b'II+\x00', b'MM\x00+')
@@ -81,7 +82,6 @@ def fetch(lat, lon, root, minimum_free, verify_only, client=None):
     if shutil.disk_usage(root).free < minimum_free:
         raise ValueError('Free-space floor reached')
     limit = TILE_MAX_MIB * 1024**2
-    partial = path.with_name(path.name + '.part')
     size = 0
     client = client or requests.Session()
     with client.get(request['url'], stream=True, timeout=(20, 120)) as response:
@@ -97,7 +97,7 @@ def fetch(lat, lon, root, minimum_free, verify_only, client=None):
         expected = int(response.headers.get('Content-Length', 0))
         if expected > limit:
             raise ValueError(f'Tile exceeds {TILE_MAX_MIB} MiB: {expected} bytes')
-        try:
+        with staged(path) as partial:
             with partial.open('wb') as stream:
                 for block in response.iter_content(1024**2):
                     size += len(block)
@@ -108,9 +108,6 @@ def fetch(lat, lon, root, minimum_free, verify_only, client=None):
                 raise ValueError('Incomplete response body')
             validate(partial)
             checksum = sha256(partial)
-            partial.replace(path)
-        finally:
-            partial.unlink(missing_ok=True)
         result = dict(request=request, bytes=size, sha256=checksum,
                       retrieved_utc=datetime.now(timezone.utc).isoformat(),
                       final_url=_clean(response.url),

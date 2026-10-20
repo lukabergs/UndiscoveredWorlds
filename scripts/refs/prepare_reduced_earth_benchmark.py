@@ -16,6 +16,7 @@ from PIL import Image
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from uwtools import palettes, references
 from uwtools.hashing import sha256
+from uwtools.protected_io import write_text_into
 from cell_grid import conservative_remap, grid_dimensions, latitude_centres
 from reference_climate_maps import export_additional, export_diagnostics, export_koppen, load_diagnostics
 from reference_map_rendering import write_float32_geotiff
@@ -178,9 +179,7 @@ def refresh_additional_maps(args, widths):
         record["unavailable"] = [p for p in record["unavailable"] if p["product"] not in available]
         print(f"Refreshed {len(products)} additional products at {width}x{height}", flush=True)
     receipt.setdefault("diagnostic_sources", {}).update(sources)
-    temporary = manifest_path.with_suffix(".json.tmp")
-    temporary.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
-    temporary.replace(manifest_path)
+    write_text_into(manifest_path, json.dumps(receipt, indent=2) + "\n")
     write_sidecars(args.output_root)
 
 

@@ -15,6 +15,7 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from uwtools.hashing import sha256
+from uwtools.protected_io import staged
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -81,7 +82,6 @@ def fetch(entry, root, budget, minimum_free, verify_only):
     limit = min(entry.get("max_mib", 512) * 1024**2, budget - used)
     if limit <= 0 or shutil.disk_usage(root).free < minimum_free:
         raise ValueError("Collection budget or free-space floor reached")
-    partial = path.with_name(path.name + ".part")
     size = 0
     with session(entry.get("earthdata", False)).get(entry["url"], stream=True, timeout=(20, 60)) as response:
         if response.status_code != 200:
@@ -89,7 +89,7 @@ def fetch(entry, root, budget, minimum_free, verify_only):
         expected = int(response.headers.get("Content-Length", 0))
         if expected > limit:
             raise ValueError(f"Provider file exceeds limit: {expected} > {limit}")
-        try:
+        with staged(path) as partial:
             with partial.open("wb") as stream:
                 for block in response.iter_content(1024**2):
                     size += len(block)
@@ -102,9 +102,6 @@ def fetch(entry, root, budget, minimum_free, verify_only):
             checksum = sha256(partial)
             if entry.get("sha256") and entry["sha256"] != checksum:
                 raise ValueError("Provider checksum mismatch")
-            partial.replace(path)
-        finally:
-            partial.unlink(missing_ok=True)
         url = urlsplit(response.url)
         result = dict(request=entry, bytes=size, sha256=checksum,
                       retrieved_utc=datetime.now(timezone.utc).isoformat(),

@@ -8,6 +8,7 @@ from PIL import Image
 
 from . import grid
 from .hashing import sha256
+from .protected_io import write_text_into
 
 
 QUANTILES = np.linspace(0, 1, 201)
@@ -117,11 +118,8 @@ def load_earth_reference(root, width=2048, *, refresh=False):
                              f"--width {width} --refresh")
     else:
         reference = measure_earth_reference(root, width)
-        cache.parent.mkdir(parents=True, exist_ok=True)
-        temporary = cache.with_suffix(".json.tmp")
-        temporary.write_text(json.dumps({"schema": CACHE_SCHEMA, "reference": reference},
-                                       indent=2, allow_nan=False) + "\n", encoding="utf-8")
-        temporary.replace(cache)
+        write_text_into(cache, json.dumps({"schema": CACHE_SCHEMA, "reference": reference},
+                                          indent=2, allow_nan=False) + "\n")
     # Cheap derived curve checks use only the cached 201 points.
     reference["metrics"]["hypsography_shape"] = hypsography_shape(reference["metrics"]["hypsography"])
     return {**reference, "cache": {"path": cache.relative_to(root).as_posix(),

@@ -2,6 +2,9 @@
 
 Dry run by default. --apply journals and stages file renames so January/April
 folders cannot overwrite each other. Re-running resumes an interrupted move.
+
+A one-off migration built on renames: on a tree under the deny-delete permission of
+scripts/uwtools/protect.py (refs/) --apply fails until the user lifts it with `protect.py unlock`.
 """
 
 import argparse

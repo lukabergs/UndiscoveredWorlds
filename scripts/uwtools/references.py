@@ -15,7 +15,6 @@ layout monthly|annual, dtype, shape, units, file, sha256).
 """
 import hashlib
 import json
-import os
 from pathlib import Path
 from typing import NamedTuple
 
@@ -23,6 +22,7 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
 from .paths import DATA_ROOT  # noqa: E402
+from .protected_io import staged, write_text_into  # noqa: E402
 PROCESSED = DATA_ROOT / 'refs/processed'
 SCHEMA = 'uw-reference/v1'
 DTYPE = '<f4'
@@ -211,9 +211,7 @@ def update_manifest(dataset, width, entry_value, root=PROCESSED):
     lines.append('  "fields": [')
     lines.append(',\n'.join(f'    {json.dumps(item)}' for item in manifest['fields']))
     lines += ['  ]', '}', '']
-    temporary = path.with_suffix('.json.part')
-    temporary.write_text('\n'.join(lines), encoding='utf-8')
-    os.replace(temporary, path)
+    write_text_into(path, '\n'.join(lines))
     return path
 
 
@@ -230,12 +228,10 @@ def write(dataset, name, variable, layers, shape=None, units='', root=PROCESSED,
     if not name.startswith(variable):
         raise ValueError(f'{dataset}.{name}: the field name must begin with its variable {variable!r}')
     target = field_path(dataset, name, columns, root)
-    temporary = target.with_name(target.name + '.part')
-    digest = write_npy(temporary, layers, (count, rows, columns), mode='wb')
-    if mode == 'xb' and target.exists():
-        temporary.unlink()
-        raise FileExistsError(target)
-    os.replace(temporary, target)
+    with staged(target) as temporary:
+        digest = write_npy(temporary, layers, (count, rows, columns), mode='wb')
+        if mode == 'xb' and target.exists():
+            raise FileExistsError(target)
     update_manifest(dataset, columns, {
         'id': f'{dataset}.{name}', 'variable': variable, 'layout': 'annual' if count == 1 else 'monthly',
         'dtype': DTYPE, 'shape': [count, rows, columns], 'units': units, 'file': f'fields/{name}.npy',

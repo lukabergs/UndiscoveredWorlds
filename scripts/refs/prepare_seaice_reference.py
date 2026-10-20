@@ -13,6 +13,7 @@ import xarray as xr
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from uwtools.hashing import sha256
+from uwtools.protected_io import staged
 
 
 SOURCE = "https://nsidc.org/data/g02202/versions/6"
@@ -54,18 +55,20 @@ def prepare(input_path: Path, output_path: Path, hemisphere: str) -> None:
             "source": SOURCE,
         }
     )
-    result.to_netcdf(
-        output_path,
-        engine="h5netcdf",
-        encoding={
-            "sea_ice_concentration": {
-                "dtype": "float32",
-                "compression": "gzip",
-                "compression_opts": 4,
-                "shuffle": True,
-            }
-        },
-    )
+    # Written outside refs/ and copied in: refs/ forbids the writer deleting a file.
+    with staged(output_path) as temporary:
+        result.to_netcdf(
+            temporary,
+            engine="h5netcdf",
+            encoding={
+                "sea_ice_concentration": {
+                    "dtype": "float32",
+                    "compression": "gzip",
+                    "compression_opts": 4,
+                    "shuffle": True,
+                }
+            },
+        )
     dataset.close()
 
 

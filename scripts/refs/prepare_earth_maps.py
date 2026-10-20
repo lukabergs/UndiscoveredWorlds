@@ -19,6 +19,7 @@ from rasterio.warp import Resampling, reproject
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from uwtools import grid, palettes
 from uwtools.hashing import sha256
+from uwtools.protected_io import staged
 
 ROOT = Path(__file__).resolve().parents[2] / "refs"
 SOURCES = ROOT / "source"
@@ -91,8 +92,11 @@ def downsample(array):
 
 
 def save_png(path, selected):
-    with rasterio.open(path, "w", driver="PNG", width=WIDTH, height=HEIGHT,
-                       count=1, dtype="uint8", crs="EPSG:4326", transform=TRANSFORM) as output:
+    # GDAL deletes an existing file before writing it; refs/ forbids that, so write outside and copy
+    # (with the .aux.xml GDAL may write beside it).
+    with staged(path, companions=True) as temporary, \
+            rasterio.open(temporary, "w", driver="PNG", width=WIDTH, height=HEIGHT,
+                          count=1, dtype="uint8", crs="EPSG:4326", transform=TRANSFORM) as output:
         output.write(selected.astype(np.uint8) * 255, 1)
     # Standard world-file order; centre of upper-left pixel, no rotation.
     values = [TRANSFORM.a, 0, 0, TRANSFORM.e,
@@ -154,9 +158,10 @@ def prepare_height(classes, weights, shares, land, lakes):
         height[selected] = numerator[selected] / shares[category][selected]
         del weighted
     assert np.isfinite(height).all()
-    with rasterio.open(HEIGHTMAP, "w", driver="GTiff", width=WIDTH, height=HEIGHT,
-                       count=1, dtype="float32", crs="EPSG:4326", transform=TRANSFORM,
-                       tiled=True, compress="deflate", predictor=3) as output:
+    with staged(HEIGHTMAP, companions=True) as temporary, \
+            rasterio.open(temporary, "w", driver="GTiff", width=WIDTH, height=HEIGHT,
+                          count=1, dtype="float32", crs="EPSG:4326", transform=TRANSFORM,
+                          tiled=True, compress="deflate", predictor=3) as output:
         output.write(height, 1)
         output.set_band_description(1, "ETOPO 2022 surface elevation / bathymetry (metres, EGM2008)")
         output.set_band_unit(1, "m")

@@ -9,6 +9,7 @@ import xarray as xr
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from uwtools.hashing import sha256
+from uwtools.protected_io import install, staged, staging
 
 
 def record(path):
@@ -32,16 +33,16 @@ def marine(root, start, end):
                 raise ValueError(f"Cached source differs: {path}")
             print(f"Verified {path.name}", flush=True)
             continue
-        partial = path.with_suffix(".part.nc")
-        copernicusmarine.subset(**request, output_directory=directory,
-                               output_filename=partial.name, overwrite=True,
-                               disable_progress_bar=True, netcdf_compression_level=1)
-        with xr.open_dataset(partial) as data:
-            if data.sizes.get("time") != 12 or data.sizes.get("depth") != 1:
-                raise ValueError("Expected twelve months at one surface depth")
-            if not set(request["variables"]).issubset(data.data_vars):
-                raise ValueError("Missing requested ocean variables")
-        partial.replace(path)
+        # The subset is written outside refs/ (overwrite=True deletes) and copied in.
+        with staged(path) as partial:
+            copernicusmarine.subset(**request, output_directory=partial.parent,
+                                   output_filename=partial.name, overwrite=True,
+                                   disable_progress_bar=True, netcdf_compression_level=1)
+            with xr.open_dataset(partial) as data:
+                if data.sizes.get("time") != 12 or data.sizes.get("depth") != 1:
+                    raise ValueError("Expected twelve months at one surface depth")
+                if not set(request["variables"]).issubset(data.data_vars):
+                    raise ValueError("Missing requested ocean variables")
         receipt.write_text(json.dumps(dict(request=request, output=record(path)), indent=2) + "\n")
         print(f"Downloaded {path}", flush=True)
 
@@ -66,13 +67,15 @@ def ceres(root, start, end):
         raise ValueError("No CERES EBAF Edition4.2.1 granule found")
     # Each EBAF granule is the complete monthly series. Keep the latest revision.
     selected = max(results, key=lambda g: g["umm"]["TemporalExtent"]["RangeDateTime"]["EndingDateTime"])
-    paths = earthaccess.download([selected], local_path=directory, threads=1, show_progress=False)
-    if len(paths) != 1:
-        raise ValueError("CERES download did not return one source file")
-    path = Path(paths[0])
-    with xr.open_dataset(path) as data:
-        if not data.data_vars:
-            raise ValueError("Empty CERES source")
+    # Downloaded outside refs/ and copied in, as for the marine subsets.
+    with staging() as folder:
+        paths = earthaccess.download([selected], local_path=folder, threads=1, show_progress=False)
+        if len(paths) != 1:
+            raise ValueError("CERES download did not return one source file")
+        with xr.open_dataset(paths[0]) as data:
+            if not data.data_vars:
+                raise ValueError("Empty CERES source")
+        path = install(paths[0], directory / Path(paths[0]).name)
     receipt.write_text(json.dumps(dict(collection="CERES_EBAF", version="Edition4.2.1",
                                       granule=selected["umm"]["GranuleUR"],
                                       output=record(path)), indent=2) + "\n")

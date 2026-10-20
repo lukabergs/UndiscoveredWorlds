@@ -9,6 +9,7 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from uwtools.hashing import sha256
+from uwtools.protected_io import install, staging, write_text_into
 
 MONTHLY = "reanalysis-era5-single-levels-monthly-means"
 GROUPS = {
@@ -40,9 +41,7 @@ GROUPS = {
 
 
 def write_json(path, value):
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
-    temporary.replace(path)
+    write_text_into(path, json.dumps(value, indent=2) + "\n")
 
 
 def file_record(path):
@@ -111,21 +110,23 @@ def cds_download(group, root, start, end):
         receipt["request_id"] = remote.request_id
         write_json(receipt_path, receipt)
     print(f"CDS {group}: request {receipt['request_id']}", flush=True)
-    partial = path.with_suffix(".nc.part")
-    remote.download(str(partial))
-    # CDS may package mixed step types in a ZIP even when unarchived was requested.
-    import zipfile
-    if zipfile.is_zipfile(partial):
-        with zipfile.ZipFile(partial) as archive:
-            if archive.testzip() is not None:
-                raise ValueError("CDS archive CRC failure")
-        path = path.with_suffix(".zip")
-    else:
-        import xarray as xr
-        with xr.open_dataset(partial, engine="netcdf4") as data:
-            if not data.data_vars:
-                raise ValueError("Empty CDS dataset")
-    partial.replace(path)
+    # Downloaded outside refs/ and copied in (refs/ forbids replacing a file by rename).
+    with staging() as folder:
+        partial = folder / path.name
+        remote.download(str(partial))
+        # CDS may package mixed step types in a ZIP even when unarchived was requested.
+        import zipfile
+        if zipfile.is_zipfile(partial):
+            with zipfile.ZipFile(partial) as archive:
+                if archive.testzip() is not None:
+                    raise ValueError("CDS archive CRC failure")
+            path = path.with_suffix(".zip")
+        else:
+            import xarray as xr
+            with xr.open_dataset(partial, engine="netcdf4") as data:
+                if not data.data_vars:
+                    raise ValueError("Empty CDS dataset")
+        install(partial, path)
     receipt.update(status="downloaded", output=file_record(path))
     write_json(receipt_path, receipt)
     print(f"Downloaded {path} ({path.stat().st_size / 1e6:.1f} MB)", flush=True)
@@ -135,8 +136,9 @@ def download_oisst(root, start, end):
     output = root / f"noaa-oisst-v2.1-{start}-{end}"
     output.mkdir(parents=True, exist_ok=True)
     url = "https://psl.noaa.gov/thredds/ncss/grid/Datasets/noaa.oisst.v2.highres/sst.mon.mean.nc"
-    # Monthly subsets avoid the server dropping larger annual responses.
-    def transfer(date):
+    # Monthly subsets avoid the server dropping larger annual responses. Partial files go to
+    # a temp folder outside refs/ and are copied in, so a transfer resumes only within a run.
+    def transfer(date, folder):
         year, month = date
         path = output / f"oisst_sst_monthly_{year}-{month:02d}.nc"
         receipt_path = path.with_suffix(".json")
@@ -147,24 +149,24 @@ def download_oisst(root, start, end):
             raise ValueError(f"Source checksum mismatch: {path}")
         params = dict(var="sst", north=90, south=-90, west=0, east=360,
                       time=f"{year}-{month:02d}-01T00:00:00Z", accept="netcdf4")
-        partial = path.with_suffix(".nc.part")
+        partial = folder / path.with_suffix(".nc.part").name
         http_download(url, params, partial)
         return path, receipt_path, params
 
     from concurrent.futures import ThreadPoolExecutor
     import xarray as xr
     dates = [(year, month) for year in range(start, end+1) for month in range(1, 13)]
-    with ThreadPoolExecutor(max_workers=3) as workers:
-        for path, receipt_path, params in workers.map(transfer, dates):
+    with staging() as folder, ThreadPoolExecutor(max_workers=3) as workers:
+        for path, receipt_path, params in workers.map(transfer, dates, [folder] * len(dates)):
             if params is not None:
-                partial = path.with_suffix(".nc.part")
+                partial = folder / path.with_suffix(".nc.part").name
                 # netCDF/HDF5 validation stays on the main thread.
                 with xr.open_dataset(partial, engine="netcdf4") as data:
                     if data.sizes.get("time") != 1 or "sst" not in data:
                         raise ValueError(f"Incomplete OISST month: {path.name}")
                     if str(data.time.values[0])[:7] != params["time"][:7]:
                         raise ValueError(f"OISST server returned the wrong month: {path.name}")
-                partial.replace(path)
+                install(partial, path)
                 write_json(receipt_path, dict(source=url, request=params, output=file_record(path)))
             print(f"Verified OISST {path.stem}", flush=True)
 

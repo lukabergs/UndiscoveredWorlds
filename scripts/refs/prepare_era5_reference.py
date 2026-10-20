@@ -14,6 +14,7 @@ import xarray as xr
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from uwtools.hashing import sha256
+from uwtools.protected_io import staged
 
 
 DEFAULT_VARIABLES = (
@@ -103,18 +104,20 @@ def prepare_variable(variable: str, start_year: int, end_year: int, output: Path
         }
     )
 
-    result.to_netcdf(
-        output_path,
-        engine="h5netcdf",
-        encoding={
-            variable: {
-                "dtype": "float32",
-                "compression": "gzip",
-                "compression_opts": 4,
-                "shuffle": True,
-            }
-        },
-    )
+    # Written outside refs/ and copied in: refs/ forbids the writer deleting a file.
+    with staged(output_path) as temporary:
+        result.to_netcdf(
+            temporary,
+            engine="h5netcdf",
+            encoding={
+                variable: {
+                    "dtype": "float32",
+                    "compression": "gzip",
+                    "compression_opts": 4,
+                    "shuffle": True,
+                }
+            },
+        )
     dataset.close()
 
     return {

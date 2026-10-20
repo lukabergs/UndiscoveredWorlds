@@ -17,6 +17,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from uwtools import palettes, references
 from uwtools.hashing import sha256
+from uwtools.protected_io import staged, write_text_into
 from cell_grid import conservative_remap, grid_dimensions
 
 # source variable: (bundle prefix, stored variable, units, scale, offset,
@@ -178,10 +179,8 @@ def netcdf_paths(directory):
                 target = destination / Path(info.filename).name
                 if not target.exists() or target.stat().st_size != info.file_size:
                     import shutil
-                    partial = target.with_suffix(".nc.part")
-                    with archive.open(info) as src, partial.open("wb") as dst:
+                    with staged(target) as partial, archive.open(info) as src, partial.open("wb") as dst:
                         shutil.copyfileobj(src, dst)
-                    partial.replace(target)
                 paths.append(target)
     return paths
 
@@ -242,13 +241,11 @@ def prepare(directory, output, family, width, start, end):
     if not records:
         raise ValueError("No supported variables in the downloaded sources")
     metadata = dataset / f"{family}-additional-preparation.json"
-    temporary = metadata.with_suffix(".json.tmp")
-    temporary.write_text(json.dumps(dict(
+    write_text_into(metadata, json.dumps(dict(
         family=family, width=width, height=height,
         grid="cell-centred W x W/2; north to south; no stored pole rows",
         sources=[dict(file=p.as_posix(), sha256=sha256(p)) for p in paths],
-        products=records), indent=2) + "\n", encoding="utf-8")
-    temporary.replace(metadata)
+        products=records), indent=2) + "\n")
 
 
 def main():

@@ -22,6 +22,7 @@ import requests
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from uwtools import etopo
 from uwtools.hashing import sha256
+from uwtools.protected_io import staged
 
 SOURCE = 'ETOPO 2022 v1 15 arc-second surface elevation (DOI 10.25921/fd45-gt74)'
 TILE_MAX_MIB = 64
@@ -69,7 +70,6 @@ def fetch(name, root, budget, minimum_free, verify_only, client=None):
     limit = min(TILE_MAX_MIB * 1024**2, budget - stored_bytes(root))
     if limit <= 0 or shutil.disk_usage(root).free < minimum_free:
         raise ValueError('Size budget or free-space floor reached')
-    partial = path.with_name(path.name + '.part')
     size = 0
     client = client or requests.Session()
     with client.get(request['url'], stream=True, timeout=(20, 120)) as response:
@@ -78,7 +78,7 @@ def fetch(name, root, budget, minimum_free, verify_only, client=None):
         expected = int(response.headers.get('Content-Length', 0))
         if expected > limit:
             raise ValueError(f'Tile exceeds the remaining budget: {expected} > {limit}')
-        try:
+        with staged(path) as partial:
             with partial.open('wb') as stream:
                 for block in response.iter_content(1024**2):
                     size += len(block)
@@ -89,9 +89,6 @@ def fetch(name, root, budget, minimum_free, verify_only, client=None):
                 raise ValueError('Incomplete response body')
             validate(partial)
             checksum = sha256(partial)
-            partial.replace(path)
-        finally:
-            partial.unlink(missing_ok=True)
         url = urlsplit(response.url)
         result = dict(request=request, bytes=size, sha256=checksum,
                       retrieved_utc=datetime.now(timezone.utc).isoformat(),
