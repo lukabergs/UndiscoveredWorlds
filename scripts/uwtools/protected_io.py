@@ -3,7 +3,7 @@
 Inside the protected trees a file can be created or overwritten in place, but nothing can
 be deleted, renamed or moved away: a temporary file renamed onto its target fails, and so
 do libraries that delete a file before writing it again (GDAL/rasterio 'w', NetCDF writers,
-download clients). Such writes go to a fresh folder in the system temp, outside the
+download clients). Such writes go to a fresh staging folder on D (see staging_root), outside the
 protected trees, and are copied onto the target, which is overwritten in place:
 
     with staged(target) as temporary:
@@ -21,10 +21,25 @@ from pathlib import Path
 from .hashing import sha256
 
 
+def staging_root():
+    """<storage root>/staging on D when storage is configured (C is short of space and downloads can be large; the
+    folder is not protected), else the system temp."""
+    try:
+        from . import storage
+        root = storage.storage_root()
+    except (ImportError, OSError, ValueError):
+        root = None
+    if root is None:
+        return None
+    folder = root / 'staging'
+    folder.mkdir(parents=True, exist_ok=True)
+    return str(folder)
+
+
 @contextmanager
 def staging():
-    """A fresh folder in the system temp; it and its contents go on exit."""
-    with tempfile.TemporaryDirectory(prefix='uw-staged-', ignore_cleanup_errors=True) as folder:
+    """A fresh folder under staging_root(); it and its contents go on exit."""
+    with tempfile.TemporaryDirectory(prefix='uw-staged-', dir=staging_root(), ignore_cleanup_errors=True) as folder:
         yield Path(folder)
 
 

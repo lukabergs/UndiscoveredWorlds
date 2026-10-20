@@ -19,6 +19,7 @@ which agents never get). Removing the protection, for the user: `unlock PLACE` f
 hardened (from a normal one before).
 """
 import argparse
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -40,11 +41,34 @@ def icacls(*args):
     return result.returncode, result.stdout + result.stderr
 
 
+def sddl(place):
+    result = subprocess.run(['powershell', '-NoProfile', '-Command', f"(Get-Acl -LiteralPath '{place}').Sddl"],
+                            capture_output=True, text=True)
+    return result.stdout.strip()
+
+
+def denies(text, inherited):
+    """True when an SDDL string holds a deny ACE for Everyone (WD) with DELETE (SD) and DELETE_CHILD (DT); the
+    folder itself must carry it explicitly with OI and CI, a child as inherited (ID). Read in the language-neutral
+    SDDL form: icacls prints localised names."""
+    for flags, rights in re.findall(r'\(D;([A-Z]*);([A-Za-z0-9]*);;;WD\)', text):
+        if 'SD' not in rights:
+            continue
+        if inherited and 'ID' in flags:
+            return True
+        if not inherited and 'ID' not in flags and 'OI' in flags and 'CI' in flags and 'DT' in rights:
+            return True
+    return False
+
+
 def locked(place):
     """True when the place itself carries the explicit deny-delete ACE (not inherited)."""
-    code, out = icacls(str(place))
-    lines = [line for line in out.splitlines() if 'DENY' in line.upper() and '(I)' not in line]
-    return code == 0 and any('(DE,DC)' in line and '(OI)(CI)' in line for line in lines)
+    return denies(sddl(place), inherited=False)
+
+
+def covered(path):
+    """True when a file or folder inside a place carries the inherited deny-delete ACE."""
+    return denies(sddl(path), inherited=True)
 
 
 def owner(place):
@@ -66,7 +90,10 @@ def main():
     if args.command == 'status':
         for place in PLACES:
             state = 'missing' if not place.exists() else 'locked' if locked(place) else 'NOT locked'
-            print(f'{state:10}  owner {owner(place) if place.exists() else "-":36}  {place}')
+            # One file deep inside shows whether the protection reached the existing tree.
+            sample = next((item for item in place.rglob('*') if item.is_file()), None) if state == 'locked' else None
+            reach = '' if sample is None else ('  (reaches ' if covered(sample) else '  (NOT on ') + str(sample) + ')'
+            print(f'{state:10}  owner {owner(place) if place.exists() else "-":36}  {place}{reach}')
         return
     if args.command == 'lock':
         chosen = [Path(item).resolve() for item in args.places] or PLACES
