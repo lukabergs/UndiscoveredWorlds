@@ -200,6 +200,22 @@ class CubeTest(unittest.TestCase):
         self.assertLess(np.abs(north - np.cos(self.grid.latitude))[interior].max(), 0.05)
         self.assertLess(np.abs(east)[interior].max(), 0.05)
 
+    def test_wide_smoothing(self):
+        """smooth_wide (dilated 3 x 3 means along straight walks) keeps a constant (a delta's total within 3 %) and
+        spreads a delta as the 3 x 3 passes of the same variance do; the walks cross face edges by the S rule."""
+        table = cube_domain.cube_table(EXE, 32, RADIUS_KM, self.root)
+        constant = np.full(table.n, 2.5)
+        self.assertLess(np.abs(table.smooth_wide(constant, 20.0) - 2.5).max(), 1e-12)
+        spacing = 2.0 * math.pi * RADIUS_KM / 128.0
+        for cell in (0, 32 * 16 + 16):   # a face corner cell and a face centre
+            delta = np.zeros(table.n)
+            delta[cell] = 1.0
+            d2 = (np.linalg.norm(table.centre - table.centre[cell], axis=1) * RADIUS_KM / spacing) ** 2
+            wide = table.smooth_wide(delta, 20.0)
+            passes = table.smooth(delta, math.sqrt(20.0))
+            self.assertLess(abs(wide.sum() - 1.0), 0.03, cell)   # a gather mean keeps constants, sums only about
+            self.assertLess(abs((wide * d2).sum() / (passes * d2).sum() - 1.0), 0.15, cell)
+
     def test_noise_has_no_face_imprint(self):
         table = cube_domain.cube_table(EXE, 64, RADIUS_KM, self.root)
         domain = cube_domain.CubeDomain("noise", table, 8, RADIUS_KM)
@@ -247,9 +263,61 @@ class CubeTest(unittest.TestCase):
         self.assertTrue((native > 0).any() and (native < 0).any())
         for name in ("index.html", "global-relief.png", "global-stage1-base.png", "global-diag-strike.png"):
             self.assertTrue((label / name).is_file(), name)
-        with self.assertRaises(ValueError):   # windows on a cube base are W2-SB2
-            config = ts.load_config(ts.DEFAULT_CONFIG, ["cube.enabled=true"])
+        with self.assertRaises(ValueError):   # nesting (rule B) has no cube form
+            config = ts.load_config(ts.DEFAULT_CONFIG, ["cube.enabled=true", "nesting.enabled=true"])
             ts.make_domains(config, self.bundle, ["B"], self.root)
+
+    def cube_world(self, config):
+        world = ts.world_fields(self.bundle, native=True)
+        world["precipitation"] = ts.precipitation(world, config["precipitation"], RADIUS_KM * 1000.0)
+        world["elevation"] = ts.damp_abyss(world, config["seafloor"]["abyss"])
+        world["ocean"] = ts.ocean_world(world, ts.seafloor_spec(config), config["seed"], RADIUS_KM, self.root)
+        world["provinces"] = ts.provinces_world(world, config["platform"], 2.0 * math.pi * RADIUS_KM / self.bundle.columns)
+        return world
+
+    def test_cube_window_overlap(self):
+        """Two cube windows sharing cells, one across the face 0 / 1 edge (longitude 45, pixel column 20 of 32):
+        every pointwise layer bit-identical on the shared level keys."""
+        config = ts.load_config(ts.DEFAULT_CONFIG, ["cube.enabled=true", "physics.use_levels=false"])
+        config["domains"] = {"T1": {"pixels": [18, 6, 20, 8], "scale": 64, "margin": 1},
+                             "T2": {"pixels": [19, 7, 21, 9], "scale": 64, "margin": 1}}
+        world = self.cube_world(config)
+        domains = ts.make_domains(config, self.bundle, ["T1", "T2"], self.root)
+        faces = [np.unique(domain.grid.keys // np.uint64(domain.grid.N * domain.grid.N)) for domain in domains]
+        self.assertTrue(set(faces[0].tolist()) >= {0, 1}, faces[0])   # the first window crosses the face edge
+        results = [layers(ts.procedural(domain, world, config, config["seed"])[0], domain, world, config)
+                   for domain in domains]
+        # Away from either window's edge by more than the widest filter (the trench crest's maximum over k / 2 rings).
+        interior = []
+        for domain in domains:
+            edge = ~domain.grid.valid[:, list(cube_domain.CARDINAL)].all(1)
+            interior.append(~domain.grid.dilate(edge, domain.k // 2 + 2))
+        shared, first, second = np.intersect1d(domains[0].grid.keys, domains[1].grid.keys, return_indices=True)
+        keep = interior[0][first] & interior[1][second]
+        shared, first, second = shared[keep], first[keep], second[keep]
+        self.assertGreater(shared.size, 1000)
+        shared_faces = np.unique(shared // np.uint64(domains[0].grid.N * domains[0].grid.N))
+        self.assertTrue(set(shared_faces.tolist()) >= {0, 1}, shared_faces)   # shared cells on both faces
+        for name in results[0]:
+            a, b = np.asarray(results[0][name])[..., first], np.asarray(results[1][name])[..., second]
+            self.assertTrue(np.array_equal(a, b), f"{name} differs on the shared cells")
+            if name in ("relief_noise", "warp0", "hardness", "base"):
+                self.assertGreater(float(np.std(a)), 0.0, name)
+
+    def test_window_run_on_the_cube(self):
+        label = self.root / "window-run"
+        run = subprocess.run([sys.executable, str(SCRIPTS / "sandbox" / "terrain_sandbox.py"), "--label", str(label),
+                              "--domains", "W", "--set", f"base_bundle={self.base.as_posix()}",
+                              "--set", "cube.enabled=true",
+                              "--set", 'domains.W={"pixels": [18, 6, 20, 8], "scale": 16, "margin": 1}'],
+                             capture_output=True, text=True)
+        self.assertEqual(run.returncode, 0, run.stdout[-2000:] + run.stderr[-4000:])
+        exported = np.load(label / "W-elevation.npy")
+        self.assertEqual(exported.shape, (3 * 16, 3 * 16))   # the box at k pixels per pixel
+        native = np.load(label / "W-elevation-native.npy")
+        self.assertEqual(native.shape, np.load(label / "W-keys.npy").shape)
+        self.assertTrue(np.isfinite(native).all() and np.isfinite(exported).all())
+        self.assertTrue((label / "W-relief.png").is_file())
 
 
 if __name__ == "__main__":

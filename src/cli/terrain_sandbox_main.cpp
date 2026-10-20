@@ -30,10 +30,13 @@
 #include <vector>
 
 #include "core/mesh/cell_grid.hpp"
+#include "core/mesh/cube_geometry.hpp"
 #include "core/mesh/mesh_remap.hpp"
+#include "core/mesh/window_grid.hpp"
 #include "simulations/landscape/depressions.hpp"
 #include "simulations/landscape/flow_graph.hpp"
 #include "simulations/landscape/glacial.hpp"
+#include "simulations/landscape/refinement_grid.hpp"
 #include "simulations/landscape/sphere_metric.hpp"
 #include "simulations/landscape/stream_power.hpp"
 
@@ -763,6 +766,132 @@ int exportcommand(const Options& options)
     return 0;
 }
 
+// The level keys of a set of level-0 cells' descendants at levelcells = basecells x factor per face edge
+// (sphere-mesh.md section 8: the per-face quadtree), ascending.
+std::vector<mesh::LevelKey> descendantkeys(const std::vector<mesh::LevelKey>& base, std::int64_t basecells,
+                                           std::int64_t factor)
+{
+    const std::int64_t level = basecells * factor;
+    std::vector<mesh::LevelKey> keys;
+    keys.reserve(base.size() * static_cast<std::size_t>(factor * factor));
+    for (const mesh::LevelKey key : base)
+    {
+        const std::int64_t k = static_cast<std::int64_t>(key);
+        const std::int64_t face = k / (basecells * basecells), row = (k / basecells) % basecells, column = k % basecells;
+        for (std::int64_t b = 0; b < factor; b++)
+            for (std::int64_t a = 0; a < factor; a++)
+                keys.push_back(static_cast<mesh::LevelKey>(face * level * level + (row * factor + b) * level
+                                                           + column * factor + a));
+    }
+    std::sort(keys.begin(), keys.end());
+    return keys;
+}
+
+std::vector<int> intlist(const std::string& text)
+{
+    std::vector<int> values;
+    std::size_t start = 0;
+    while (start < text.size())
+    {
+        std::size_t end = text.find(',', start);
+        if (end == std::string::npos)
+            end = text.size();
+        values.push_back(std::stoi(text.substr(start, end - start)));
+        start = end + 1;
+    }
+    return values;
+}
+
+// `terrain_sandbox window --base-face-cells N --factor K --pixels x0,y0,x1,y1 --margin M [--radius-km R] --out DIR`:
+// a sandbox window on a cube base (sphere-mesh.md section 8): the level-0 cells whose centres lie in the box of the
+// base's lat-lon export pixels (landscape::cellsinpixelbox), the domain those dilated by M rings, and its cells at
+// N K per face edge (their descendants) as mesh::cubewindowgrid (compact): DIR/keys.npy (u8, ascending), kept.npy
+// (u1: the box's descendants) and the window's cell table (neighbours as local ids, -1 outside the window).
+int windowcommand(const Options& options)
+{
+    const int basecells = std::stoi(option(options, "--base-face-cells", "0"));
+    const int factor = std::stoi(option(options, "--factor", "0"));
+    const double radius_m = numberoption(options, "--radius-km", 6371.0) * 1000.0;
+    const std::vector<int> box = intlist(option(options, "--pixels", ""));
+    if (box.size() != 4 || basecells < 1 || factor < 1)
+        throw std::runtime_error("window: --base-face-cells, --factor and --pixels x0,y0,x1,y1 are required");
+    const auto base = mesh::makecubegrid(basecells, radius_m);
+    const std::vector<mesh::LevelKey> kept0 = landscape::cellsinpixelbox(*base, 4 * basecells, box[0], box[1], box[2], box[3]);
+    const std::vector<mesh::LevelKey> domain0 = landscape::dilatecells(*base, kept0,
+                                                                       std::stoi(option(options, "--margin", "1")));
+    const std::vector<mesh::LevelKey> keys = descendantkeys(domain0, basecells, factor);
+    const std::vector<mesh::LevelKey> keptkeys = descendantkeys(kept0, basecells, factor);
+    const auto grid = mesh::cubewindowgrid(basecells * factor, radius_m, keys, true);
+    std::vector<std::uint8_t> kept(keys.size(), 0);
+    for (const mesh::LevelKey key : keptkeys)
+        kept[static_cast<std::size_t>(std::lower_bound(keys.begin(), keys.end(), key) - keys.begin())] = 1;
+    const std::filesystem::path directory = option(options, "--out", ".");
+    savearray(directory, "keys.npy", "keys", "<u8", { keys.size() }, keys);
+    savearray(directory, "kept.npy", "kept", "|u1", { kept.size() }, kept);
+    writecelltable(*grid, directory, "");
+    std::printf("window cells %zu kept %zu level-0 %zu kept level-0 %zu\n", keys.size(), keptkeys.size(), domain0.size(),
+                kept0.size());
+    return 0;
+}
+
+// `terrain_sandbox stencils --base-face-cells N --level-cells NL (--keys FILE | --all) --out PREFIX`: for each level
+// cell (FILE: raw uint64 level keys; --all: every cell of the level) the G stencil of section 8 at its centre over the
+// base cube (mesh::cubicstencil, true-position ghosts): PREFIX-offsets.i8 (count + 1), -ids.i4, -weights.f8 (CSR rows in
+// the keys' order, entries in ascending base id), so the sandbox samples world fields by G.
+int stencilscommand(const Options& options)
+{
+    const std::int64_t basecells = std::stoll(option(options, "--base-face-cells", "0"));
+    const std::int64_t level = std::stoll(option(options, "--level-cells", "0"));
+    std::vector<mesh::LevelKey> keys;
+    if (options.count("--all"))
+    {
+        keys.resize(static_cast<std::size_t>(6 * level * level));
+        for (std::size_t i = 0; i < keys.size(); i++)
+            keys[i] = static_cast<mesh::LevelKey>(i);
+    }
+    else
+    {
+        std::ifstream in(option(options, "--keys", ""), std::ios::binary | std::ios::ate);
+        if (!in)
+            throw std::runtime_error("stencils: cannot open --keys");
+        keys.resize(static_cast<std::size_t>(in.tellg()) / sizeof(mesh::LevelKey));
+        in.seekg(0);
+        in.read(reinterpret_cast<char*>(keys.data()), static_cast<std::streamsize>(keys.size() * sizeof(mesh::LevelKey)));
+    }
+    std::vector<std::int64_t> offsets(keys.size() + 1, 0);
+    std::vector<std::int32_t> ids;
+    std::vector<double> weights;
+    ids.reserve(keys.size() * 16);
+    weights.reserve(keys.size() * 16);
+    for (std::size_t c = 0; c < keys.size(); c++)
+    {
+        const std::int64_t k = static_cast<std::int64_t>(keys[c]);
+        const int face = static_cast<int>(k / (level * level));
+        const int row = static_cast<int>((k / level) % level), column = static_cast<int>(k % level);
+        const mesh::Vec3 p = mesh::cubepoint(face, mesh::cubecentrea(static_cast<int>(level), column),
+                                             mesh::cubecentreb(static_cast<int>(level), row));
+        const mesh::KeyStencil stencil = mesh::cubicstencil(basecells, p);
+        for (std::size_t n = 0; n < stencil.key.size(); n++)
+        {
+            ids.push_back(static_cast<std::int32_t>(stencil.key[n]));
+            weights.push_back(stencil.weight[n]);
+        }
+        offsets[c + 1] = static_cast<std::int64_t>(ids.size());
+    }
+    const std::string prefix = option(options, "--out", "");
+    const auto write = [&](const std::string& path, const void* data, std::size_t bytes) {
+        std::ofstream out(path, std::ios::binary);
+        out.write(static_cast<const char*>(data), static_cast<std::streamsize>(bytes));
+        if (!out)
+            throw std::runtime_error("cannot write " + path);
+    };
+    write(prefix + "-offsets.i8", offsets.data(), offsets.size() * sizeof(std::int64_t));
+    write(prefix + "-ids.i4", ids.data(), ids.size() * sizeof(std::int32_t));
+    write(prefix + "-weights.f8", weights.data(), weights.size() * sizeof(double));
+    std::printf("cells %zu entries %zu\n", keys.size(), ids.size());
+    return 0;
+}
+
 // The synthetic cube base (`terrain_sandbox synthetic-base --face-cells N [--radius-km R] --out DIR`): a bundle v2 of
 // grid kind cube with the fields the sandbox reads, analytic functions of the unit vector: three continents (one over
 // the north pole, one across a cube corner, one on the equator astride a face edge) joined by a collision belt along a
@@ -959,7 +1088,12 @@ void usage()
                  "terrain_sandbox grid --face-cells N [--radius-km R] --out DIR (the cube's cell table as .npy)\n"
                  "terrain_sandbox export --face-cells N --columns W --input FILE --rules bilinear|mean|nearest,...\n"
                  "  --output FILE [--radius-km R] [--depth D 4] (F stacked cube fields to F stacked lat-lon rasters)\n"
-                 "terrain_sandbox synthetic-base --face-cells N [--radius-km R] --out DIR (an analytic cube base bundle)\n";
+                 "terrain_sandbox synthetic-base --face-cells N [--radius-km R] --out DIR (an analytic cube base bundle)\n"
+                 "terrain_sandbox window --base-face-cells N --factor K --pixels x0,y0,x1,y1 --margin M [--radius-km R]\n"
+                 "  --out DIR (a cube window's keys, kept mask and cell table)\n"
+                 "terrain_sandbox stencils --base-face-cells N --level-cells NL (--keys FILE | --all) --out PREFIX\n"
+                 "  (the G stencils of the level cells over the base, CSR)\n"
+                 "physics on a cube window: --level-cells NL --window-keys FILE (raw uint64 keys) instead of --face-cells\n";
 }
 }
 
@@ -987,6 +1121,10 @@ int main(int argc, char** argv)
                 return exportcommand(options);
             if (command == "synthetic-base")
                 return syntheticbasecommand(options);
+            if (command == "window")
+                return windowcommand(options);
+            if (command == "stencils")
+                return stencilscommand(options);
         }
         catch (const std::exception& error)
         {
@@ -996,7 +1134,9 @@ int main(int argc, char** argv)
         usage();
         return 2;
     }
-    const bool cube = options.count("--face-cells") != 0;
+    // A cube window (--level-cells NL --window-keys FILE: raw uint64 level keys, ascending): mesh::cubewindowgrid.
+    const bool cubewindow = options.count("--window-keys") != 0;
+    const bool cube = options.count("--face-cells") != 0 || cubewindow;
     if (argc < 2 || (options.count("--columns") == 0 && !cube) || options.count("--elevation") == 0)
     {
         usage();
@@ -1010,7 +1150,20 @@ int main(int argc, char** argv)
         if (cube && options.count("--pixel-deg"))
             throw std::runtime_error("--pixel-deg is a lat-lon window's; a cube domain is the whole sphere");
         // A cube domain: the kernels on SphereMetric(makecubegrid(N)); --cells checks the caller's neighbour table.
-        landscape::SphereMetric metric = cube
+        std::vector<mesh::LevelKey> windowkeys;
+        if (cubewindow)
+        {
+            std::ifstream in(text("--window-keys", ""), std::ios::binary | std::ios::ate);
+            if (!in)
+                throw std::runtime_error("cannot open --window-keys");
+            windowkeys.resize(static_cast<std::size_t>(in.tellg()) / sizeof(mesh::LevelKey));
+            in.seekg(0);
+            in.read(reinterpret_cast<char*>(windowkeys.data()),
+                    static_cast<std::streamsize>(windowkeys.size() * sizeof(mesh::LevelKey)));
+        }
+        landscape::SphereMetric metric = cubewindow
+            ? landscape::SphereMetric(mesh::cubewindowgrid(std::stoi(text("--level-cells", "0")), radius_m, windowkeys, true))
+            : cube
             ? landscape::SphereMetric(mesh::makecubegrid(std::stoi(text("--face-cells", "0")), radius_m))
             : options.count("--pixel-deg")
             ? windowmetric(columns, rows, number("--north", 90.0), number("--pixel-deg", 180.0 / rows), radius_m)
@@ -1048,12 +1201,17 @@ int main(int argc, char** argv)
             lowestlevel = seahistory.front().level_m;
             for (const SeaPoint& point : seahistory)
                 lowestlevel = std::min(lowestlevel, point.level_m);
-            const bool window = options.count("--pixel-deg") != 0;
+            const bool window = options.count("--pixel-deg") != 0 || cubewindow;
             seaseeds.assign(count, 0);
             for (std::size_t i = 0; i < count; i++)
             {
                 bool ring = false;
-                if (window)
+                if (cubewindow)  // the window's edge: a cell missing a cardinal slot (the full level has all four)
+                {
+                    for (int k = 1; k <= mesh::slotcount; k += 2)
+                        ring = ring || metric.grid->neighbour(static_cast<mesh::CellId>(i), k) < 0;
+                }
+                else if (window)
                 {
                     const int column = static_cast<int>(i % static_cast<std::size_t>(columns));
                     const int row = static_cast<int>(i / static_cast<std::size_t>(columns));

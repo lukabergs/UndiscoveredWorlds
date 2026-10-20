@@ -16,9 +16,12 @@ slot reads the cell itself):
   the table, a missing corner diagonal's weight shared by the other three);
 - priority_flood and sloped_fill: the raster code's Priority-Floods on the slots.
 A CubeDomain is the sandbox's global domain on a cube of N_d = k N cells per face edge over a base cube of N: its
-cells' unit vectors (km) carry the noise (section 11); world fields reach it by the bilinear stencil from the base
-followed by smooth(0.41 k) (the cubic B-spline's variance, 1/6 base cell^2, the raster code's sampler); the
-physics runs on it in terrain_sandbox.exe (--face-cells N_d) and its renders come from the exe's lat-lon export.
+cells' unit vectors (km) carry the noise (section 11); world fields reach it by G (g_stencils: section 8's Catmull-Rom
+stencil at each cell centre over the base cube; without stencils the bilinear stencil then smooth(0.41 k)); the
+physics runs on it in terrain_sandbox.exe (--face-cells N_d) and its renders come from the exe's lat-lon export. A
+CubeWindowDomain is a window of k N cells per face edge over a key set (cube_window: a pixel box's level-0 cells and
+margin rings; the CubeGrid holds the window's table with its keys, neighbours outside -1), the physics on
+mesh::cubewindowgrid (--level-cells, --window-keys).
 """
 import heapq
 from collections import deque
@@ -40,17 +43,23 @@ CARDINAL = (0, 2, 4, 6)  # columns of slots 1 N, 3 E, 5 S, 7 W
 class CubeGrid:
     """A cube's cell table (centre, latitude_deg, longitude_deg, area_m2, neighbours, reverse) and its operations."""
 
-    def __init__(self, cells, face_cells, radius_km):
+    def __init__(self, cells, face_cells, radius_km, keys=None):
+        """A full cube of face_cells per face edge, or with keys (ascending level keys at face_cells per face edge) a
+        window of that level (sphere-mesh.md section 8: mesh::cubewindowgrid; local ids in key order, neighbours
+        outside it -1)."""
         self.N = int(face_cells)
-        self.n = 6 * self.N * self.N
+        self.keys = None if keys is None else np.asarray(keys, dtype=np.uint64)
+        self.n = 6 * self.N * self.N if keys is None else int(self.keys.size)
         self.radius_km = float(radius_km)
         self.centre = np.asarray(cells['centre'], dtype=np.float64)
         if self.centre.shape != (self.n, 3):
-            raise ValueError(f'cell table of {self.centre.shape[0]} cells, expected 6 x {self.N}^2')
+            raise ValueError(f'cell table of {self.centre.shape[0]} cells, expected {self.n}')
         self.latitude = np.radians(np.asarray(cells['latitude_deg'], dtype=np.float64))
         self.longitude = np.radians(np.asarray(cells['longitude_deg'], dtype=np.float64))
         self.area_km2 = np.asarray(cells['area_m2'], dtype=np.float64) / 1e6
         self.neighbours = np.asarray(cells['neighbours'], dtype=np.int64)
+        self.reverse = np.asarray(cells['reverse'], dtype=np.int64)
+        self._walks = {}
         self.valid = self.neighbours >= 0
         self.safe = np.where(self.valid, self.neighbours, np.arange(self.n)[:, None])
         sl, cl = np.sin(self.latitude), np.cos(self.latitude)
@@ -79,9 +88,21 @@ class CubeGrid:
         return cls(bundle.cells(), bundle.face_cells, bundle.radius_km or 6371.0)
 
     @classmethod
-    def from_directory(cls, directory, face_cells, radius_km):
+    def from_directory(cls, directory, face_cells, radius_km, keys=None):
         names = ('centre', 'latitude_deg', 'longitude_deg', 'area_m2', 'neighbours', 'reverse')
-        return cls({name: np.load(Path(directory) / f'{name}.npy') for name in names}, face_cells, radius_km)
+        return cls({name: np.load(Path(directory) / f'{name}.npy') for name in names}, face_cells, radius_km, keys)
+
+    @property
+    def whole(self):
+        return self.keys is None
+
+    def local(self, ids):
+        """Local ids of level ids (the ids themselves on a full cube; -1 outside a window)."""
+        if self.keys is None:
+            return ids
+        ids = np.asarray(ids)
+        where = np.minimum(np.searchsorted(self.keys, ids.astype(np.uint64)), self.n - 1)
+        return np.where(self.keys[where] == ids.astype(np.uint64), where, -1)
 
     # -------------------------------------------------------------- neighbourhood operations
 
@@ -89,10 +110,57 @@ class CubeGrid:
         """(n, 8, ...) neighbour values; a missing slot reads the cell itself."""
         return np.asarray(values)[self.safe]
 
+    WIDE_PASSES = 200  # above this many 3 x 3 passes, smooth uses dilated passes (smooth_wide)
+
+    def walks(self, hops):
+        """(cells, slots) (n, 8) after `hops` straight steps (section 8's S rule: the next slot is the opposite of the
+        reverse slot) from each cell in each slot 1..8; a walk stops where a slot has no neighbour. hops a power of 2."""
+        if hops not in self._walks:
+            if hops == 1:
+                ok = self.neighbours >= 0
+                slots = np.arange(1, 9)[None, :].repeat(self.n, 0)
+                opposite = (self.reverse - 1 + 4) % 8 + 1
+                self._walks[1] = (np.where(ok, self.neighbours, np.arange(self.n)[:, None]).astype(np.int32),
+                                  np.where(ok, opposite, slots).astype(np.int8))
+            else:
+                cells, slots = self.walks(hops // 2)
+                self._walks[hops] = (cells[cells, slots - 1], slots[cells, slots - 1])
+        return self._walks[hops]
+
+    def smooth_wide(self, values, variance):
+        """A Gaussian of `variance` cells^2 (about) by dilated 3 x 3 means: a pass with hop h averages each cell with the
+        cells h straight steps away in the four cardinal slots and the four reached by h steps then h steps turned by 90
+        degrees (variance 2 h^2 / 3 per axis); hops 1, 2, 4, ... chosen greedily from the largest, applied smallest
+        first, then 3 x 3 passes for the rest."""
+        hops, rest = [], float(variance)
+        h = 1
+        while (2.0 / 3.0) * (2 * h) ** 2 <= rest:
+            h *= 2
+        while h >= 1:
+            while (2.0 / 3.0) * h * h <= rest and h > 1:
+                hops.append(h)
+                rest -= (2.0 / 3.0) * h * h
+            h //= 2
+        out = np.asarray(values, dtype=np.float64)
+        for h in sorted(hops):
+            cells, slots = self.walks(h)
+            total = out.copy()
+            for k in (1, 3, 5, 7):
+                total = total + out[cells[:, k - 1]]
+            for first, turn in ((3, 1), (3, 5), (7, 1), (7, 5)):
+                middle, heading = cells[:, first - 1], slots[:, first - 1]
+                turned = (heading - 1 + (turn - first)) % 8
+                total = total + out[cells[middle, turned]]
+            out = total / 9.0
+        return self.smooth(out, math.sqrt(max(rest, 0.0)))
+
     def smooth(self, values, sigma_cells):
-        """A Gaussian of sigma_cells cells (about): round(1.5 sigma^2) passes of the 3 x 3 mean over the existing slots."""
+        """A Gaussian of sigma_cells cells (about): round(1.5 sigma^2) passes of the 3 x 3 mean over the existing slots
+        (above WIDE_PASSES of them smooth_wide)."""
         out = np.asarray(values, dtype=np.float64)
         passes = int(round(1.5 * float(sigma_cells) ** 2))
+        if passes > self.WIDE_PASSES and out.ndim == 1:
+            return self.smooth_wide(out, float(sigma_cells) ** 2)
         valid = self.valid if out.ndim == 1 else self.valid[..., None]
         count = self.count if out.ndim == 1 else self.count[:, None]
         for _ in range(passes):
@@ -216,10 +284,31 @@ class CubeGrid:
         ids = face * self.N * self.N + j * self.N + i
         return ids.reshape(shape), (sa - i - 0.5).reshape(shape), (sb - j - 0.5).reshape(shape)
 
-    def bilinear(self, values, points):
-        """values (n,) at points (3, ...): the bilinear stencil of section 5 on the cell table."""
+    def bilinear(self, values, points, fallback=None):
+        """values (n,) at points (3, ...): the bilinear stencil of section 5 on the cell table. In a window a point
+        outside it reads the cell `fallback` (local ids, the points' shape) and a stencil cell outside it the located
+        cell's value."""
         values = np.asarray(values, dtype=np.float64)
         ids, ta, tb = self.locate(points)
+        if self.keys is not None:
+            ids = self.local(ids)
+            outside = ids < 0
+            if outside.any():
+                if fallback is None:
+                    raise ValueError('bilinear: a point lies outside the window and no fallback was given')
+                ids = np.where(outside, np.asarray(fallback).reshape(ids.shape), ids)
+                ta, tb = np.where(outside, 0.0, ta), np.where(outside, 0.0, tb)
+            east, south = ta >= 0.0, tb >= 0.0
+            wa, wb = np.abs(ta), np.abs(tb)
+            slots = [np.where(east, 2, 6), np.where(south, 4, 0),
+                     np.where(east, np.where(south, 3, 1), np.where(south, 5, 7))]
+            cells = [ids] + [np.where(self.neighbours[ids, slot] >= 0, self.neighbours[ids, slot], ids) for slot in slots]
+            weights = [(1 - wa) * (1 - wb), wa * (1 - wb), (1 - wa) * wb, wa * wb]
+            first = values[ids]
+            total = first.copy()
+            for w, cell in zip(weights[1:], cells[1:]):
+                total = total + w * (values[cell] - first)
+            return total
         east = ta >= 0.0
         south = tb >= 0.0
         wa, wb = np.abs(ta), np.abs(tb)
@@ -242,7 +331,7 @@ class CubeGrid:
     def resample(self, values, points_km, east_km, north_km):
         """values at the cells' points moved by (east_km, north_km) on the tangent plane (bilinear)."""
         moved = points_km + east_km * self.east + north_km * self.north
-        return self.bilinear(values, moved)
+        return self.bilinear(values, moved, fallback=np.arange(self.n))
 
     # -------------------------------------------------------------- Priority-Floods
 
@@ -353,8 +442,40 @@ class CubeDomain:
     def area_km2(self):
         return self.grid.area_km2
 
+    def level_ids(self):
+        """The cells' level ids (keys) at grid.N per face edge."""
+        return np.arange(self.grid.n, dtype=np.int64) if self.grid.keys is None else self.grid.keys.astype(np.int64)
+
+    def broad(self, values, base):
+        """A field's component over about a level-0 cell (the raster code's Gaussian of k / 2 cells, mean_preserve):
+        its mean over each level-0 parent (the per-face quadtree's k x k children in the domain), prolonged by the
+        bilinear stencil on the base cube at the cells' centres; parents outside the domain take the mean of their
+        neighbours' (passes over the base table). A diffusion of k / 2 cells would cost 1.5 (k / 2)^2 passes."""
+        level, factor, base_cells = self.grid.N, self.k, base.N
+        ids = self.level_ids()
+        face, row, column = ids // (level * level), (ids // level) % level, ids % level
+        parent = face * base_cells * base_cells + (row // factor) * base_cells + column // factor
+        total = np.bincount(parent, weights=np.asarray(values, dtype=np.float64), minlength=base.n)
+        count = np.bincount(parent, minlength=base.n).astype(np.float64)
+        mean = np.where(count > 0, total / np.maximum(count, 1.0), np.nan)
+        for _ in range(8):  # parents outside the domain: the mean of their neighbours' (an edge's bilinear reads them)
+            missing = np.isnan(mean)
+            if not missing.any():
+                break
+            around = np.where(base.valid, mean[base.safe], np.nan)
+            seen = np.isfinite(around)
+            filled = np.where(seen, around, 0.0).sum(1) / np.maximum(seen.sum(1), 1)
+            mean = np.where(missing & seen.any(1), filled, mean)
+        mean = np.where(np.isnan(mean), 0.0, mean)
+        return base.bilinear(mean, self.points())
+
     def sampler(self, base):
-        """World fields on the base cube to this domain: the bilinear stencil, then smooth(smoothing x k)."""
+        """World fields on the base cube to this domain: by G (the stencils, set_stencils: the Catmull-Rom stencil of
+        section 8 at each cell's centre over the base cube, a sparse matrix whose rows sum in ascending base id, so a
+        cell gets the same bits in every domain), else the bilinear stencil then smooth(smoothing x k)."""
+        if getattr(self, 'stencils', None) is not None:
+            matrix = self.stencils
+            return lambda field: matrix @ np.asarray(field, dtype=np.float64).reshape(-1)  # noqa: E731
         points = self.points()
         sigma = self.smoothing * self.k
 
@@ -380,3 +501,51 @@ def export(exe, domain, arrays, directory, columns=None):
         raise RuntimeError(f'terrain_sandbox export failed: {result.stderr.strip()}')
     stacked = np.fromfile(target, dtype='<f4').reshape(len(names), columns // 2, columns).astype(np.float64)
     return {name: stacked[index] for index, name in enumerate(names)}
+
+
+def g_stencils(exe, base_face_cells, level_cells, keys, directory, tag):
+    """The G stencils (`terrain_sandbox stencils`) of a level's cells over the base cube as a CSR matrix (cells x base
+    cells): keys None for every cell of the level. Files <tag>-g-*.{i8,i4,f8} and <tag>-keys.u8 in directory."""
+    directory = Path(directory)
+    prefix = directory / f'{tag}-g'
+    command = [str(exe), 'stencils', '--base-face-cells', str(base_face_cells), '--level-cells', str(level_cells),
+               '--out', str(prefix)]
+    if keys is None:
+        command += ['--all', '1']
+        count = 6 * level_cells * level_cells
+    else:
+        np.asarray(keys, dtype='<u8').tofile(directory / f'{tag}-keys.u8')
+        command += ['--keys', str(directory / f'{tag}-keys.u8')]
+        count = len(keys)
+    result = subprocess.run(command, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f'terrain_sandbox stencils failed: {result.stderr.strip()}')
+    offsets = np.fromfile(f'{prefix}-offsets.i8', dtype='<i8')
+    ids = np.fromfile(f'{prefix}-ids.i4', dtype='<i4')
+    weights = np.fromfile(f'{prefix}-weights.f8', dtype='<f8')
+    return sparse.csr_matrix((weights, ids, offsets), shape=(count, 6 * base_face_cells * base_face_cells))
+
+
+def cube_window(exe, name, base_face_cells, factor, pixels, margin, radius_km, directory):
+    """A sandbox window on a cube base (`terrain_sandbox window`): its CubeGrid (keys, table) and kept mask."""
+    target = Path(directory) / f'window-{name}'
+    target.mkdir(parents=True, exist_ok=True)
+    result = subprocess.run([str(exe), 'window', '--base-face-cells', str(base_face_cells), '--factor', str(factor),
+                             '--pixels', ','.join(str(value) for value in pixels), '--margin', str(margin),
+                             '--radius-km', str(radius_km), '--out', str(target)], capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f'terrain_sandbox window failed: {result.stderr.strip()}')
+    keys = np.load(target / 'keys.npy')
+    grid = CubeGrid.from_directory(target, base_face_cells * factor, radius_km, keys)
+    return grid, np.load(target / 'kept.npy').astype(bool)
+
+
+class CubeWindowDomain(CubeDomain):
+    """A window on a cube base: the level cells of its pixel box's level-0 cells and of `margin` rings around them
+    (cube_window), kept: the box's (crop is that mask), drawn from its lat-lon export of the box (pixels)."""
+
+    def __init__(self, name, grid, kept, base_face_cells, radius_km, pixels, exaggeration=3.0, physics=None):
+        super().__init__(name, grid, base_face_cells, radius_km, exaggeration=exaggeration, physics=physics)
+        self.crop = kept
+        self.whole = False
+        self.pixels = pixels

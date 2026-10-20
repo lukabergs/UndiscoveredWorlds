@@ -37,7 +37,16 @@ to the cube) and the physics (terrain_sandbox.exe --face-cells) run on the cube;
 lat-lon export (cube.export_columns, default 4 k N; bilinear for continuous fields, nearest for masks, codes, the
 discharge and the lakes). A cube domain saves its arrays as <domain>-<name>-native.npy ((6, N_d, N_d)) and the
 elevations also as the lat-lon export <domain>-<name>.npy, so the lat-lon measurement scripts read them as before.
-Windows on a cube base are W2-SB2; with a cube base and cube.enabled false the sandbox runs on its lat-lon export.
+Windows on a cube base (W2-SB2, sphere-mesh.md section 8): a window's `pixels` box (the base's lat-lon export pixels)
+selects the level-0 cells whose centres lie in it (landscape::cellsinpixelbox), dilated by `margin` rings, at k cells
+per level-0 cell edge (`terrain_sandbox window`: the keys, the kept mask of the box's cells, the cell table); the
+physics runs on mesh::cubewindowgrid of those keys (compact); its outer ring (cells missing a cardinal slot) drains
+the window and the ring inside it is pinned, as on lat-lon; world fields reach the global and the windows by G (the
+Catmull-Rom stencil of section 8 at each cell centre over the base cube, `terrain_sandbox stencils`), so a cell has
+the same inputs in every domain; its maps come from its box at k pixels per base pixel, sampled on the window's
+table; its native arrays are saved flat in key order (<window>-keys.npy). Nesting (rule B, nesting.enabled, false
+by default) has no cube form: refused on a cube base. With a cube base and cube.enabled false the sandbox runs on
+its lat-lon export.
 
 Config groups: domains, seafloor, warp, structure, zones, relief, coast, micro, uplands, hardness, platform, filter,
 physics, sea_level, history, glacial, precipitation, lakes, rivers, render, nesting.
@@ -301,6 +310,14 @@ def grid_label(domain, mask):
     return ndimage.label(mask, structure=EIGHT)
 
 
+def kept_components(domain, mask):
+    """8-connected components of a mask within the kept window (a lat-lon window cropped; a cube window's kept cells on
+    its table)."""
+    if domain.kind == 'cube' and not domain.whole:
+        return int(domain.grid.label(np.asarray(mask) & domain.crop)[1])
+    return int(grid_label(domain, crop(domain, mask))[1])
+
+
 def connected_sea(domain, water, seed):
     """The cells of `water` 8-connected to a cell of `seed` within it."""
     labels, _ = grid_label(domain, water)
@@ -368,6 +385,17 @@ def cube_on(config, bundle):
     return enabled
 
 
+BASE_CUBES = {}
+
+
+def base_cube(bundle):
+    """The base bundle's cube grid (its cell table), read once."""
+    key = str(bundle.path)
+    if key not in BASE_CUBES:
+        BASE_CUBES[key] = cube_domain.CubeGrid.from_bundle(bundle)
+    return BASE_CUBES[key]
+
+
 def make_domains(config, bundle, names, directory=None):
     radius_km = float(bundle.manifest.get('parameters', {}).get('world.body.radius_km', 6371.0))
     W, H = bundle.columns, bundle.rows
@@ -377,12 +405,29 @@ def make_domains(config, bundle, names, directory=None):
         if name == 'global' and cube_on(config, bundle):
             k = spec['columns'] // W
             grid = cube_domain.cube_table(PHYSICS, bundle.face_cells * k, radius_km, directory)
-            domains.append(cube_domain.CubeDomain(name, grid, bundle.face_cells, radius_km,
-                                                  exaggeration=spec.get('exaggeration', 10.0),
-                                                  physics=config['physics']['global'],
-                                                  smoothing=config['cube'].get('sample_smoothing', 0.41)))
+            domain = cube_domain.CubeDomain(name, grid, bundle.face_cells, radius_km,
+                                            exaggeration=spec.get('exaggeration', 10.0), physics=config['physics']['global'])
+            domain.stencils = cube_domain.g_stencils(PHYSICS, bundle.face_cells, grid.N, None, directory, name)
+            domain.base_grid = base_cube(bundle)
+            domains.append(domain)
         elif cube_on(config, bundle):
-            raise ValueError(f'{name}: windows on a cube base are W2-SB2; run --domains global')
+            # A window on the cube (sphere-mesh.md section 8): the level-0 cells of its pixel box and `margin` rings
+            # around them at k cells per level-0 cell edge, world fields by G. Nesting (rule B) has no cube form yet.
+            if nesting_on(config) and spec.get('parent'):
+                raise ValueError(f'{name}: nesting (rule B) on a cube base is not ported; nesting.enabled is false by '
+                                 'default')
+            k = spec['scale']
+            grid, kept = cube_domain.cube_window(PHYSICS, name, bundle.face_cells, k, spec['pixels'], spec['margin'],
+                                                 radius_km, directory)
+            physics = config['physics']['window']
+            if config['physics'].get('use_levels', False):
+                physics = {**physics, **level_physics(config, k)}
+            domain = cube_domain.CubeWindowDomain(name, grid, kept, bundle.face_cells, radius_km, spec['pixels'],
+                                                  exaggeration=spec.get('exaggeration', 3.0), physics=physics)
+            domain.stencils = cube_domain.g_stencils(PHYSICS, bundle.face_cells, grid.N, grid.keys,
+                                                     directory / f'window-{name}', name)
+            domain.base_grid = base_cube(bundle)
+            domains.append(domain)
         elif name == 'global':
             k = spec['columns'] // W
             domains.append(Domain(name, W * k, H * k, 0.0, 0.0, k, W, H, radius_km,
@@ -1259,7 +1304,18 @@ def procedural(domain, world, config, seed):
 
     sea = connected_sea(domain, filtered <= 0.0, sea_seed)
     pinned = np.zeros_like(sea)
-    if not domain.whole:
+    if not domain.whole and domain.kind == 'cube':
+        # The same rings on a cube window: the outer ring its cells missing a cardinal slot, the pinned ring the
+        # cells next to it, the floor the minimum over (size // 2) rings.
+        grid = domain.grid
+        ring = ~grid.valid[:, list(cube_domain.CARDINAL)].all(1)
+        pinned = grid.dilate(ring, 1) & ~ring & ~sea
+        size = max(3, domain.k // 2) | 1
+        floor = grid.minimum(filtered, size // 2)
+        filtered = np.where(pinned, np.maximum(floor, 1.0), filtered)
+        sea |= ring
+        filtered = np.where(ring, np.minimum(filtered, -1.0), filtered)
+    elif not domain.whole:
         # The outer ring drains the window (sea at or below -1 m); the ring inside it is pinned at the lowest
         # terrain within half a world cell (a valley floor's height), so a river leaving the window keeps the
         # land's height as its base level. With the sea ring alone, every large river crossing the edge was
@@ -2090,6 +2146,11 @@ def run_physics(domain, fields, config, directory):
         files['cells'] = stem.with_name(f'{domain.name}-cells.i32')
         np.asarray(domain.grid.neighbours, dtype='<i4').tofile(files['cells'])
         grid_options = ['--face-cells', str(domain.grid.N), '--cells', str(files['cells'])]
+        if domain.grid.keys is not None:  # a window: mesh::cubewindowgrid of its keys
+            files['keys'] = stem.with_name(f'{domain.name}-keys.u8')
+            np.asarray(domain.grid.keys, dtype='<u8').tofile(files['keys'])
+            grid_options = ['--level-cells', str(domain.grid.N), '--window-keys', str(files['keys']), '--cells',
+                            str(files['cells'])]
     else:
         grid_options = ['--columns', str(domain.columns), '--rows', str(domain.rows)]
     command = [str(PHYSICS)] + grid_options + [
@@ -2103,7 +2164,7 @@ def run_physics(domain, fields, config, directory):
                '--random-routing', '1' if spec.get('random_routing', False) else '0', '--seed', str(config['seed']),
                '--out-elevation', str(out_elevation), '--out-discharge', str(out_discharge),
                '--out-fields', str(totals_prefix)]
-    if not domain.whole:
+    if not domain.whole and domain.kind != 'cube':
         command += ['--north', str(domain.north_deg), '--pixel-deg', str(domain.pixel_deg)]
     if spec.get('lake_trap', False):  # lakes keep the sediment reaching them (filled up to their spill)
         command += ['--lake-trap', '1']
@@ -2296,10 +2357,14 @@ def find_lakes(domain, elevation, sea, spec, physics_lakes=None):
 
 def lake_statistics(domain, elevation, surface):
     """Lake count, area (km^2) and the deepest lake (m) in the kept window."""
+    if domain.kind == 'cube' and not domain.whole:  # a cube window: components of its kept cells on its table
+        labels, count = domain.grid.label(np.isfinite(surface) & domain.crop)
+        labels = crop(domain, labels)
     surface, elevation = crop(domain, surface), crop(domain, elevation)
     lake = np.isfinite(surface)
     area = np.where(lake, crop(domain, domain.area_km2()), 0.0)
-    labels, count = grid_label(domain, lake)
+    if not (domain.kind == 'cube' and not domain.whole):
+        labels, count = grid_label(domain, lake)
     depth = np.where(lake, surface - elevation, 0.0)
     return {'lakes': int(count), 'lake_area_km2': round(float(area.sum()), 1),
             'deepest_lake_m': round(float(depth.max()) if count else 0.0, 1),
@@ -2325,6 +2390,8 @@ def equilibrium_line(domain, precipitation, spec):
 def crop(domain, values):
     if domain.crop is None:
         return values
+    if isinstance(domain.crop, np.ndarray):  # a cube window: the mask of its box's cells
+        return np.asarray(values)[..., domain.crop]
     r0, r1, c0, c1 = domain.crop
     return values[r0:r1, c0:c1]
 
@@ -2700,7 +2767,10 @@ def write_page(directory, label, sections, config, timings, bundle=None):
 
 def save_array(domain, directory, key, values, dtype=np.float32):
     """<domain>-<key>.npy (lat-lon, cropped to the kept window) or <domain>-<key>-native.npy ((6, N, N), a cube)."""
-    if domain.kind == 'cube':
+    if domain.kind == 'cube' and not domain.whole:  # a window: its cells in key order (<domain>-keys.npy)
+        np.save(directory / f'{domain.name}-{key}-native.npy', np.asarray(values).astype(dtype))
+        np.save(directory / f'{domain.name}-keys.npy', domain.grid.keys)
+    elif domain.kind == 'cube':
         N = domain.grid.N
         np.save(directory / f'{domain.name}-{key}-native.npy', np.asarray(values).astype(dtype).reshape(6, N, N))
     else:
@@ -2797,7 +2867,7 @@ def finish_physics(domain, fields, config, run_config, directory, band, nest_inf
     if lakes['enabled']:  # the closed depressions the physics left, before the filter (which spares them)
         levels = find_lakes(domain, elevation, sea, lakes)
         lake = np.isfinite(levels)
-        timing['lakes_before_filter'] = int(grid_label(domain, crop(domain, lake))[1])
+        timing['lakes_before_filter'] = kept_components(domain, lake)
     if spec['enabled'] and spec.get('when', 'before') == 'after':  # fine texture on the eroded surface
         field = filter_field(domain, fields, ice, spec, config['seed'])
         detail = erosion_pass(domain, elevation, fields['coords'], fields['amplitude'], fields['erodibility'], spec,
@@ -2808,8 +2878,12 @@ def finish_physics(domain, fields, config, run_config, directory, band, nest_inf
             # the averages over world cells stay close to the physics' (not exact: the pipeline's
             # projection does that).
             sigma = domain.k / 2.0
-            weight = domain_smooth(domain, land.astype(float), sigma)
-            broad = domain_smooth(domain, np.where(land, detail, 0.0), sigma) / np.maximum(weight, 1e-6)
+            if domain.kind == 'cube':  # the block means of the level-0 parents, prolonged (CubeDomain.broad)
+                weight = domain.broad(land.astype(float), domain.base_grid)
+                broad = domain.broad(np.where(land, detail, 0.0), domain.base_grid) / np.maximum(weight, 1e-6)
+            else:
+                weight = domain_smooth(domain, land.astype(float), sigma)
+                broad = domain_smooth(domain, np.where(land, detail, 0.0), sigma) / np.maximum(weight, 1e-6)
             detail = detail - broad
         elevation = np.where(land, np.maximum(elevation + detail, 1.0), elevation)
         if spec.get('fill_pits', False):
@@ -2846,12 +2920,18 @@ def export_for_render(domain, fields, result, config, directory):
     """A cube domain's arrays on its lat-lon export (cube_domain.export: bilinear for continuous fields, nearest for
     the sea, the codes, the angles, the discharge and the lakes) and the lat-lon Domain the maps are drawn on.
     Saves the elevations' and the lake surface's exports as <domain>-<name>.npy. Returns (view, fields, result)."""
-    columns = config.get('cube', {}).get('export_columns') or domain.columns
     base = domain.base_face_cells
-    if columns % (4 * base):
-        raise ValueError(f'cube.export_columns {columns} is not a multiple of the base\'s {4 * base}')
-    view = Domain(domain.name, columns, columns // 2, 0.0, 0.0, columns // (4 * base), 4 * base, 2 * base,
-                  domain.radius_km, exaggeration=domain.exaggeration, physics=domain.physics)
+    if not domain.whole:  # a window: its pixel box at k cells per pixel, sampled on the window's own table
+        c0, r0, c1, r1 = domain.pixels
+        columns, rows = (c1 - c0 + 1) * domain.k, (r1 - r0 + 1) * domain.k
+        view = Domain(domain.name, columns, rows, float(c0), float(r0), domain.k, 4 * base, 2 * base, domain.radius_km,
+                      crop=(0, rows, 0, columns), exaggeration=domain.exaggeration, physics=domain.physics)
+    else:
+        columns = config.get('cube', {}).get('export_columns') or domain.columns
+        if columns % (4 * base):
+            raise ValueError(f'cube.export_columns {columns} is not a multiple of the base\'s {4 * base}')
+        view = Domain(domain.name, columns, columns // 2, 0.0, 0.0, columns // (4 * base), 4 * base, 2 * base,
+                      domain.radius_km, exaggeration=domain.exaggeration, physics=domain.physics)
     stages = fields['stages']
     arrays = {f'stage-{key}': (stages[key], 'bilinear') for key in STAGE_KEYS}
     arrays.update({f'warp-{axis}': (stages['warp'][axis], 'bilinear') for axis in range(3)})
@@ -2869,7 +2949,12 @@ def export_for_render(domain, fields, result, config, directory):
         if result['lake_surface'] is not None:
             arrays['lake-surface'] = (result['lake_surface'], 'nearest')
         arrays.update({f'total-{name}': (values, 'bilinear') for name, values in result['totals'].items()})
-    out = cube_domain.export(PHYSICS, domain, arrays, directory, columns)
+        if result.get('filter_field') is not None:
+            arrays['filter-field'] = (result['filter_field'], 'bilinear')
+    if domain.whole:
+        out = cube_domain.export(PHYSICS, domain, arrays, directory, columns)
+    else:
+        out = window_export(domain, view, arrays)
     vstages = {key: out[f'stage-{key}'] for key in STAGE_KEYS}
     vstages.update(warp=np.stack([out[f'warp-{axis}'] for axis in range(3)]),
                    stretch=(out['stretch-ratio'], out['stretch-axis']),
@@ -2877,7 +2962,7 @@ def export_for_render(domain, fields, result, config, directory):
     vfields = {'stages': vstages, 'sea': out['sea'] > 0.5, 'surface': out['surface'],
                'procedural_sea': out['procedural-sea'] > 0.5, 'stability': out.get('stability'),
                'province': None if 'province' not in out else np.rint(out['province']).astype(np.uint8)}
-    vresult = {'filter_field': None}
+    vresult = {'filter_field': out.get('filter-field')}
     if result.get('elevation') is not None:
         vresult.update(elevation=out['elevation'], discharge=out['discharge'], ice=out.get('ice'),
                        lake_surface=out.get('lake-surface'), elevation_physics=out['elevation-physics'],
@@ -2888,6 +2973,22 @@ def export_for_render(domain, fields, result, config, directory):
                 np.save(directory / f'{domain.name}-{key}.npy', values.astype(np.float32))
     np.save(directory / f'{domain.name}-elevation-procedural.npy', out['stage-fill'].astype(np.float32))
     return view, vfields, vresult
+
+
+def window_export(domain, view, arrays):
+    """A cube window's fields on the lat-lon pixels of its box (view): bilinear on the window's table (stencil cells
+    outside the window read the located cell) or the cell containing each pixel centre (nearest)."""
+    points = view.points().reshape(3, -1)
+    ids, _, _ = domain.grid.locate(points)
+    located = domain.grid.local(ids)
+    if (located < 0).any():
+        raise ValueError(f'{domain.name}: {int((located < 0).sum())} box pixels lie outside the window')
+    out = {}
+    for name, (values, rule) in arrays.items():
+        values = np.asarray(values, dtype=np.float64)
+        sampled = values[located] if rule == 'nearest' else domain.grid.bilinear(values, points, fallback=located)
+        out[name] = sampled.reshape(view.rows, view.columns)
+    return out
 
 
 def render_domain(domain, fields, result, config, directory, physics_on, nest_info):
@@ -2962,7 +3063,8 @@ def main():
     names = run_order(config, names, arguments.parent_run)
     physics_on = config['physics']['enabled'] and not arguments.no_physics
     sections, timings = [], {}
-    for domain in make_domains(config, bundle, names, directory):
+    # Each domain made when its turn comes (a cube window holds its table and its G stencils, about 1 GB at k 64).
+    for domain in (make_domains(config, bundle, [name], directory)[0] for name in names):
         started = time.perf_counter()
         parent_name = config['domains'][domain.name].get('parent') if nesting_on(config) else None
         run_config, nest_info, band = config, None, {}
@@ -3002,11 +3104,9 @@ def main():
                               'after_physics': {key: value for key, value in nest_info.get('after_physics', {}).items()
                                                 if key != 'inflow_continuity'}}
         if domain.kind == 'cube':
-            if not physics_on:
-                np.save(directory / f'{domain.name}-elevation.npy',
-                        cube_domain.export(PHYSICS, domain, {'elevation': (fields['surface'], 'bilinear')}, directory,
-                                           config.get('cube', {}).get('export_columns'))['elevation'].astype(np.float32))
             view, view_fields, view_result = export_for_render(domain, fields, result, config, directory)
+            if not physics_on:  # the procedural surface's export, as a lat-lon run saves it
+                np.save(directory / f'{domain.name}-elevation.npy', view_fields['surface'].astype(np.float32))
             timing['cube'] = {'face_cells': domain.grid.N, 'base_face_cells': domain.base_face_cells, 'k': domain.k,
                               'cells': domain.grid.n, 'export_columns': view.columns}
         else:
