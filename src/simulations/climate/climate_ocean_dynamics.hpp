@@ -179,6 +179,7 @@ struct PeriodicOceanState
     std::array<OceanState, 4> seasons;
     int years = 0;
     double annualEnthalpyDriftK = 0.0;
+    std::vector<double> annualEnthalpyDriftHistoryK; // one value per spin-up year (diagnostic)
     double circulationSeconds = 0.0, heatSeconds = 0.0, zonalHeatSeconds = 0.0;
     double heatFluxSeconds = 0.0, heatUpdateSeconds = 0.0;
     int circulationSolves = 0;

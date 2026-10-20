@@ -163,6 +163,7 @@ PeriodicOceanState solvePeriodicOcean(int columns, int rows,
         result.years = year + 1;
         result.accepted = true;
         result.annualEnthalpyDriftK = std::sqrt(std::max(change, surfaceChange) / std::max(1.0e-30, area));
+        result.annualEnthalpyDriftHistoryK.push_back(result.annualEnthalpyDriftK);
         result.converged = result.annualEnthalpyDriftK <= toleranceK;
         if (result.converged) break;
     }

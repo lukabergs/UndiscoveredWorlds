@@ -465,12 +465,73 @@ void convergeclimatecoupling(climateworld& world, vector<vector<int>>& fractal)
         }
         return std::sqrt(change / std::max(static_cast<double>(std::max<std::size_t>(1, old.size())), scale));
     };
+    // Residual diagnostics (log only; nothing below reads them back): the share of each
+    // component's squared change by latitude band and over land, and the cosine between
+    // successive change vectors (near +1 a slow monotone approach, near -1 an oscillation,
+    // near -0.5 or 0 a noise floor).
+    static constexpr int residualBandCount = 7;
+    std::vector<int> snapshotBand;
+    std::vector<char> snapshotLand;
+    std::vector<std::size_t> snapshotSeaCells;
+    for (int season = 0; season < CLIMATESEASONCOUNT; ++season)
+    {
+        const auto& fields = climate.processes[season];
+        for (int y = 0; y < fields.rows; ++y)
+            for (int x = 0; x < fields.columns; ++x)
+            {
+                const int xx = std::min(world.width(), static_cast<int>((x + 0.5) * (world.width() + 1) / fields.columns));
+                const int yy = std::min(world.height(), static_cast<int>((y + 0.5) * (world.height() + 1) / fields.rows));
+                const double latitude = 90.0 - 180.0 * (y + 0.5) / fields.rows;
+                constexpr double edges[residualBandCount - 1] = {-60.0, -30.0, -10.0, 10.0, 30.0, 60.0};
+                int band = 0;
+                while (band < residualBandCount - 1 && latitude >= edges[band]) ++band;
+                const bool sea = world.sea(xx, yy) != 0;
+                if (sea) snapshotSeaCells.push_back(snapshotBand.size());
+                snapshotBand.push_back(band);
+                snapshotLand.push_back(sea ? 0 : 1);
+            }
+    }
+    std::array<vector<double>, 4> previousdelta;
+    const auto residualprofile = [&](int component, const char* name, const vector<double>& before, const vector<double>& after)
+    {
+        constexpr std::array<std::size_t, 4> entriesPerCell{4, 1, 3, 1};
+        std::ostringstream text;
+        const std::size_t expected = component == 1 ? snapshotSeaCells.size() : entriesPerCell[component] * snapshotBand.size();
+        if (before.size() != after.size() || after.size() != expected) { text << ' ' << name << "_profile=size-mismatch"; return text.str(); }
+        std::array<double, residualBandCount> band{};
+        double total = 0.0, land = 0.0, dot = 0.0, previousnorm = 0.0;
+        vector<double> delta(after.size());
+        const bool hasprevious = previousdelta[component].size() == after.size();
+        for (std::size_t i = 0; i < after.size(); ++i)
+        {
+            const double change = after[i] - before[i];
+            delta[i] = change;
+            const std::size_t cell = component == 1 ? snapshotSeaCells[i] : i / entriesPerCell[component];
+            band[snapshotBand[cell]] += change * change;
+            if (snapshotLand[cell]) land += change * change;
+            total += change * change;
+            if (hasprevious)
+            {
+                dot += change * previousdelta[component][i];
+                previousnorm += previousdelta[component][i] * previousdelta[component][i];
+            }
+        }
+        previousdelta[component] = std::move(delta);
+        const double cosine = hasprevious && total > 0.0 && previousnorm > 0.0
+            ? dot / std::sqrt(total * previousnorm) : std::numeric_limits<double>::quiet_NaN();
+        text << ' ' << name << "_cos=" << cosine << ' ' << name << "_land=" << (total > 0.0 ? land / total : 0.0)
+             << ' ' << name << "_bands=";
+        for (int b = 0; b < residualBandCount; ++b)
+            text << (b ? "/" : "") << (total > 0.0 ? band[b] / total : 0.0);
+        return text.str();
+    };
     auto old = snapshot();
     auto previousforcing = climate.processes;
     vector<double> previousinput, previousresidual;
     double relaxation = couplingHeatingRelaxation;
     for (int iteration = 1; iteration <= iterationLimit; ++iteration)
     {
+        const auto iterationstart = std::chrono::steady_clock::now();
         if (iteration > 1)
         {
             auto residual = snapshot()[2];
@@ -546,6 +607,22 @@ void convergeclimatecoupling(climateworld& world, vector<vector<int>>& fractal)
             << " heating_peak_lon=" << -180.0 + 360.0 * (peakCell % forcingColumns + 0.5) / forcingColumns
             << " heating_peak_area_scaled_wm2=" << peakHeatingChange
             << " inner_accepted=" << d.innerSolvesAccepted << " converged=" << d.converged << '\n';
+        const auto& hydrologyspinup = climatephysics::lastHydrologySpinupDiagnostics();
+        std::cout << "Climate coupling inner iteration=" << iteration
+            << " ocean_accepted=" << std::count(climate.oceanAccepted.begin(), climate.oceanAccepted.end(), true) << "/4"
+            << " atmosphere_accepted=" << std::count(climate.atmosphereAccepted.begin(), climate.atmosphereAccepted.end(), true) << "/4"
+            << " ocean_periodic=" << climate.oceanStorage.periodic
+            << " ocean_drift_k=" << climate.oceanStorage.annualEnthalpyDriftK
+            << " hydrology_converged=" << hydrologyspinup.converged
+            << " hydrology_cycles=" << hydrologyspinup.cyclesCompleted
+            << " hydrology_storage_change=" << hydrologyspinup.relativeStorageChange
+            << " hydrology_snow_change=" << hydrologyspinup.relativeSnowStorageChange
+            << " land_drift_k=" << climate.landAnnualDriftK
+            << " iteration_seconds=" << std::chrono::duration<double>(std::chrono::steady_clock::now() - iterationstart).count() << '\n';
+        std::cout << "Climate coupling residual iteration=" << iteration
+            << " band_edges=-60/-30/-10/10/30/60"
+            << residualprofile(0, "wind", old[0], now[0]) << residualprofile(1, "sst", old[1], now[1])
+            << residualprofile(2, "heating", old[2], now[2]) << residualprofile(3, "rainfall", old[3], now[3]) << '\n';
         if (d.converged) break;
         old = now;
     }

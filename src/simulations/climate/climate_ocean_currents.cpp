@@ -261,7 +261,10 @@ void createoceancurrentmap(climateworld& world)
     }
     else climate.oceanStorage.periodic = false;
     std::cout << "Ocean spinup years=" << periodic.years << " annual_enthalpy_drift_k="
-        << periodic.annualEnthalpyDriftK << " periodic=" << periodic.converged << '\n';
+        << periodic.annualEnthalpyDriftK << " periodic=" << periodic.converged << " drift_history_k=";
+    for (std::size_t year = 0; year < periodic.annualEnthalpyDriftHistoryK.size(); ++year)
+        std::cout << (year ? "," : "") << periodic.annualEnthalpyDriftHistoryK[year];
+    std::cout << '\n';
     std::cout << "Ocean profile columns=" << columns << " rows=" << rows
         << " circulation_seconds=" << periodic.circulationSeconds << " heat_seconds=" << periodic.heatSeconds
         << " zonal_seconds=" << periodic.zonalHeatSeconds
