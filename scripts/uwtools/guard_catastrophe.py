@@ -73,8 +73,8 @@ DISK_TOOLS = re.compile(
 DELETE_WORDS = re.compile(
     r'(?<![\w.-])(rm|rmdir|rd|del|erase|unlink|shred|rimraf|remove-item|ri|clear-recyclebin|forfiles)(?![\w-])|'
     r'rmtree|rmsync|rmdirsync|unlinksync|remove_directory|removedirs|os\.remove|\.unlink\(|\.rmdir\(|'
-    r'deletedirectory|deletefile|::delete|\.delete\(\)|send2trash|(?<![\w-])(clear-content|clc)(?![\w-])|'
-    r'--remove-files|(?<![\w-])-sdel\b', re.IGNORECASE)
+    r'deletedirectory|deletefile|deletefolder|::delete|\.delete\s*\(|\brm\s*\(|send2trash|'
+    r'(?<![\w-])(clear-content|clc)(?![\w-])|--remove-files|(?<![\w-])-sdel\b|-e\s+remove\b', re.IGNORECASE)
 ENCODED = re.compile(r'(?<![\w-])-(encodedcommand|enc|ec|e)(?![\w-])', re.IGNORECASE)
 PIPED_SHELL = re.compile(r'\|\s*(bash|sh|zsh|pwsh|powershell|cmd|iex|invoke-expression)(\.exe)?(?![\w-])', re.IGNORECASE)
 TOKEN_SPLIT = re.compile(r'''[\s;|&<>(){}\[\],="'`]+''')
@@ -196,12 +196,13 @@ def forms(path):
     if time.monotonic() > DEADLINE:
         block('the check ran out of time; name fewer paths per command.')
     candidates = {path}
-    if not path.startswith('\\\\'):  # never resolve network paths: an unreachable share could outlast the hook
+    # Resolve only on the two local drives: an unreachable share or mapped drive could outlast the hook.
+    if os.path.splitdrive(path)[0].lower() in ('c:', 'd:'):
         try:
             candidates.add(os.path.normcase(os.path.realpath(path)))
         except (OSError, ValueError):
             pass
-    return {os.path.dirname(re.split(r'[*?]', item)[0] + 'x') if re.search(r'[*?]', item) else item
+    return {os.path.dirname(re.split(r'[*?\[]', item)[0] + 'x') if re.search(r'[*?\[]', item) else item
             for item in candidates}
 
 
@@ -227,8 +228,9 @@ def protected(path):
 
 
 def mentioned(path):
-    """The backstop's rule for any path named in a command that deletes: protected() without ROOT_ONLY, and with
-    the depth rule cut to drive roots and top folders (the repository root may be named, e.g. by a cd)."""
+    """The backstop's rule for any path named in a command that deletes: drive roots and top folders, the home
+    folder, its direct children and its ancestors, and anything inside .git or a protected tree. A folder that
+    merely holds a protected tree (the repository root, named by a cd) may be named; the parser checks targets."""
     for item in forms(path):
         if item.startswith('\\\\') and depth(item) <= 3:
             return f'{item} is a network share or device root'
@@ -239,9 +241,8 @@ def mentioned(path):
         if '.git' in re.split(r'[\\/]', item):
             return f'{item} is or is inside a .git directory'
         for tree in SYSTEM_TREES + PROTECTED_TREES:
-            normal = os.path.normcase(os.path.normpath(tree))
-            if within(item, normal) or within(normal, item):
-                return f'{item} is or holds the protected tree {tree}'
+            if within(item, os.path.normcase(os.path.normpath(tree))):
+                return f'{item} lies in the protected tree {tree}'
     return None
 
 
@@ -259,6 +260,8 @@ def backstop(command, cwd):
     for raw in TOKEN_SPLIT.split(command):
         if not raw or raw.startswith('-') or re.fullmatch(r'//?[a-zA-Z]{1,3}', raw):
             continue  # options and cmd switches (/s /q /c); `rm /c` itself is refused by the parser
+        if raw.lower() in ('/dev/null', 'nul', '$null', '/dev/stdout', '/dev/stderr') or raw.startswith('/dev/'):
+            continue  # null devices, not places
         path = expand(environment(raw), cwd)
         reason = mentioned(path) if path else None
         if reason:
@@ -381,8 +384,10 @@ def check_segment(segment, cwd, piped, unbalanced=False, level=0):
         block('cipher /w wipes free space.')
     if head == 'dd' and any(w.startswith('of=') for w in lowered):
         block('dd with of= writes raw devices or files.')
-    if deleting and segment.rstrip().endswith(('\\', '`')):
+    if deleting and re.search(r'\s[\\`]$', segment.rstrip()):
         block('a delete continued on the next line; write it on one line.')
+    if deleting and '\\ ' in segment and not re.search(r'[A-Za-z]:\\ ', segment):
+        block('a delete with an escaped space (run\\ 7): quote the path instead.')
     if shell:  # after cmd /c, bash -c, pwsh -c, Start-Process ...: every quoted word is a command of its own
         inner_words = [w for w in words if re.search(r'\s', w)]
         if inner_words and level >= 3:
@@ -502,6 +507,9 @@ def main():
         payload = json.loads(sys.stdin.buffer.read().decode('utf-8', errors='replace'))
         command = (payload.get('tool_input') or {}).get('command') or ''
         start = payload.get('cwd') or os.getcwd()
+        match = re.match(r'^/([a-zA-Z])(/.*)?$', start)
+        if match:  # a Git Bash /c/... form
+            start = match.group(1).upper() + ':' + (match.group(2) or '/')
         check(command, os.path.normcase(os.path.normpath(start)))
     except SystemExit:
         raise

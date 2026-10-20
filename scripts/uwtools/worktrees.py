@@ -204,7 +204,15 @@ def retire(worktree, allow_unlanded=False):
              and not skipped(item.relative_to(root).as_posix()) and item.name != '.git']
     if newer:
         raise OSError(f'{worktree.name}: {len(newer)} files newer than the archive, e.g. {newer[0]}')
-    storage.remove_tree(worktree)
+    # The head must stay reachable after the folder goes: on a branch or in main (a detached HEAD's commits
+    # would otherwise be lost to git's garbage collection).
+    in_main = git('merge-base', '--is-ancestor', receipt['head'], 'main')[0] == 0
+    if not in_main and not git('branch', '--contains', receipt['head'])[1].strip() and not allow_unlanded:
+        raise OSError(f'{worktree.name}: its HEAD {receipt["head"][:9]} is on no branch and not in main')
+    # Rename first: it fails while a process still holds a file inside (a worker still running).
+    quarantine = worktree.with_name(worktree.name + '.retiring')
+    os.rename(storage.long_path(worktree), storage.long_path(quarantine))
+    storage.remove_tree(quarantine)
     git('worktree', 'prune')
     receipt['status'] = 'retired'
     receipt['retired_utc'] = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')

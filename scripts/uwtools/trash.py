@@ -92,8 +92,10 @@ def check(path):
             raise OSError(f'{real}: {len(links)} links or unreadable folders inside, e.g. {links[0]}')
     if inside(given, ROOT):
         relative = given.relative_to(ROOT).as_posix()
-        tracked = subprocess.run(['git', '-C', str(ROOT), 'ls-files', '--', relative],
-                                 capture_output=True, text=True).stdout.strip()
+        result = subprocess.run(['git', '-C', str(ROOT), 'ls-files', '--', relative], capture_output=True, text=True)
+        if result.returncode != 0:
+            raise OSError(f'{given}: git ls-files failed; nothing moved')
+        tracked = result.stdout.strip()
         if tracked:
             raise OSError(f'{given}: holds tracked files (e.g. {tracked.splitlines()[0]}); use git rm')
     return real, label
