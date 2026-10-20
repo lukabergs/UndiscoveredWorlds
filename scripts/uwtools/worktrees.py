@@ -186,10 +186,18 @@ def retire(worktree, allow_unlanded=False):
                       'merge them first (or the user retires it with --allow-unlanded)')
     if sha256_bytes(git('diff', '--binary', 'HEAD', cwd=worktree, binary=True)[1]) != receipt['patch_sha256']:
         raise OSError(f'{worktree.name}: the uncommitted diff changed since the archive')
-    listed = git('ls-files', '--others', '-z', cwd=worktree, binary=True)[1].decode('utf-8', 'replace').split('\0')
-    unarchived = [item for item in listed if item and not skipped(item) and item not in receipt['sha256']]
+    code, listing = git('ls-files', '--others', '-z', cwd=worktree, binary=True)
+    if code != 0:
+        raise OSError(f'{worktree.name}: git ls-files failed; nothing deleted')
+    listed = [item for item in listing.decode('utf-8', 'replace').split('\0') if item and not skipped(item)]
+    unarchived = [item for item in listed if item not in receipt['sha256']]
     if unarchived:
         raise OSError(f'{worktree.name}: {len(unarchived)} untracked files not in the archive, e.g. {unarchived[0]}; '
+                      'run preserve again')
+    root_path = storage.long_path(worktree)
+    changed = [item for item in listed if sha256(root_path / item) != receipt['sha256'][item]]
+    if changed:
+        raise OSError(f'{worktree.name}: {len(changed)} untracked files changed since the archive, e.g. {changed[0]}; '
                       'run preserve again')
     root = storage.long_path(worktree)
     newer = [item for item in root.rglob('*') if item.is_file() and item.stat().st_mtime > stamp

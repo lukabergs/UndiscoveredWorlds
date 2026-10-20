@@ -71,7 +71,10 @@ The plan is organised by **lanes** (file ownership), so that independent steps r
 4. **Timing steps (3.1, 3.2, 3.3, any step whose acceptance is a time) run alone on an idle machine**, at the end of the wave. Their profiling can run in parallel.
 5. A step's sequence: brief, work, the step's checks, the orchestrator reads the diff, then a `reviewer` for behaviour, contract or kernel changes. Then fixes by the same worker (SendMessage), the merge into `main`, the ledger entry, and one commit (`docs/reference-guides/agent-workflow.md`).
 6. Parity references: `step_check.py <label> --reference t8-cube4` (cube) and `--grid latlon --reference t8-ll4`. Each label is used once, and a new label becomes the next reference.
-7. Merged worktrees are preserved at the wave's end (`worktrees.py preserve`). Their branches are bundled (`git bundle create D:/dev/undiscovered-worlds/worktree-archive/branches-<date>.bundle ...`, then `verify`, then heads checked). Retiring them is the user's step (§5).
+7. Merged worktrees are cleaned up at the wave's end by the orchestrator:
+   - `worktrees.py preserve NAME`, then `retire NAME --yes`, which refuses unless all the work is in main;
+   - `worktrees.py drop-branches --retired`, which bundles, verifies and checks heads before deleting;
+   - scratch no step needs goes to `trash.py move` (AGENTS.md "Autonomy").
 8. The wave closes with:
    - the status rows below (with durations);
    - one list of looks for the user, with page paths;
@@ -101,7 +104,7 @@ Goal: T8's loose ends closed, its one regression fixed, and the documents descri
 | 1.3 | **Hydrology of the lat-lon export.** The export reroutes on an averaged surface and raises narrow outlets 0.5 to 16 m above the cube's open lakes. Effects: endorheic land 0.277 on the export against 0.080 native; internal-drainage IoU 0.277 against lat-lon 0.315; river mouths matched 6 of 20 against 8. Carry the native outlets into the export's routing, re-score `uw.py hydrology evaluate`, and refresh the acceptance page's hydrology rows, which still show the values from before the fix. | worker, reviewer | world | | W3.3b, W3.3c |
 | 1.4 | Documentation drift (recipe edits). List: the README (torus → cube; `src/world` names that no longer exist; `wip/`; `definitions/`; the `climate-benchmark` command); `simulation-modules.md` (`wip/planet_bundle`; target `uw_tectonics`); `world-model.md` (whole metres, "plumes planned"); `mineral-systems.md` (planar cell areas); `consolidation-plan.md` (`src/app/regional` → `src/simulations/regional`); `tectonic-output-contract.md` (byte 0xB2 at line 93 is not UTF-8; the pre-cube strain figure); `ENGINE_FINDINGS.md` (`tectonic_pipeline.exe`, `check-layout.py`); `FUTURE_WORK.md` (save version 19, archived paths). | mechanic | docs | | surveys of 2026-10-20 |
 | 1.5 | Small code faults found and left. `planet::wrapx` adds W - 1, so x = W maps to 1. `planet::latitude` is node-centred (only `src/app` calls it). The sandbox's `make_domains` gives a negative width across the date line. Dead code: `planet::smoothnom`, `prepare`/`finishcustomworldgeneration`. Fix the first one with `step_check.py`; it may change worlds, so compare totals. | worker | world, sandbox | | RM:356, CP-14, CP-16 |
-| 1.6 | The files the delete guard refused (RM "For the user") go to §5 for the user. **Done in this plan's commit.** | orch | docs | | RM:346-350 |
+| 1.6 | The scratch files the delete guard refused (RM "For the user": `out/scratch/sphere/W1b/{head,mid,tail}.txt`, `W2-W2f/probe*`, `logs/W3.6-run.txt`, `step-check/ts-base-*` except `ts-base2`) go to the trash (`trash.py move`). | orch | tools | | RM:346-350 |
 
 Done when: the registry names a cube baseline; the export's endorheic share is within 0.02 of native; the documents name only existing paths.
 
@@ -115,7 +118,7 @@ Goal: the user's requirements of 2026-10-18: "SCRIPTED, AUTOMATED. No decision u
 | 2.2 | **One naming scheme for experiments.** A design first: the registry's numeric ids plus a readable tag, in one place. Today's `vN`, `tNN`, `base-vN`, `UV`, `W` live in three places (`runs/`, `out/evaluation`, `out/scratch`). Then the tools that create run directories use it. Old labels are not renamed. | design, worker | tools | | same |
 | 2.3 | **Archive without regenerable files.** A `scripts/uwtools` command with a dry run and a receipt. It keeps `.npy`, manifests and metrics JSON, and drops PNGs and pages the scripts re-render. | worker | tools | 2.2 | same |
 | 2.4 | **Automatic moves.** A new run of a topic sends the previous one to D or the archive by script. Images no check reads are written to D directly. | worker | tools | 2.2 | same |
-| 2.5 | `storage.py` marks a migration receipt complete once its backup folder is gone (`out/scratch.storage-migration-backup`, 26 GB, verified identical; the user deletes it). | worker | tools | | same |
+| 2.5 | `out/scratch.storage-migration-backup` (26 GB on C, verified identical to D): `storage.py finish out/scratch`, which re-verifies every file and marks the receipt complete. Agents may run it since 2026-10-20. | orch | tools | | same |
 | 2.6 | Script inventory. Scripts used only by tests: `climate_convergence.py`, `terrain_wind*.py`, `climate_reference_experiment_prepare.py`. The alias modules `map_rendering` and `cell_grid` in `scripts/benchmarks` and `scripts/refs`. Paths never exercised: `storage.route` into a non-empty directory, reference preparation end to end, an audited run with a violation. Each script is kept with a test or deleted. | surveyor, then mechanic | tools | | CP-4, CP-9, CP-10, PLAN.md P2 |
 
 Done when: a misplaced file fails a hook; run directories get ids from one registry; an archive command has removed a real run's PNGs with a receipt.
@@ -306,25 +309,15 @@ One row per step as it closes. Duration is measured from the previous step's com
 | Step | Status | Commit | Duration |
 |---|---|---|---|
 | 1.1 | done: base-v10 adopted by the user (2026-10-20) | this plan's commit | |
-| 1.6 | done: moved to §5 | this plan's commit | |
+| safeguards (new) | `guard_catastrophe.py` (global), `delete_guard.py` fails closed, `trash.py`, `worktrees.py drop-branches`; agents retire landed worktrees (the user, 2026-10-20) | 2288474 | |
 
 ## 5. For the user
 
 What an agent cannot or may not do alone. The delete guard's refusals land here with path and reason.
 
-- **Retire the 30 T8 worktrees** (57 GB on C). Every one has been preserved to `D:/dev/undiscovered-worlds/worktree-archive/<name>/`, and the branches are bundled and verified in `branches-20261020.bundle`. From the repository root, in a terminal outside the agent:
-  1. `uv run python scripts/uwtools/worktrees.py retire --all --yes`
-  2. `git worktree list` should show only `main`.
-  3. `git branch -D` for each retired branch (the bundle holds them): `git for-each-ref --format="%(refname:short)" refs/heads | grep -v "^main$" | xargs git branch -D` in Git Bash.
-
-  This also removes `t8-w3-4`'s 982 MB `.venv` and `t8-io`'s empty `loading_world_screen.cpp.new`.
-  - Open question: may agents retire a preserved, fully landed worktree on their own from now on? That needs a narrow exception in `delete_guard.py`.
-- Untracked scratch the guard refused to delete (safe to delete):
-  - `out/scratch/sphere/W1b/{head,mid,tail}.txt`;
-  - `out/scratch/sphere/W2-W2f/probe*`;
-  - `out/scratch/sphere/logs/W3.6-run.txt`;
-  - `out/scratch/sphere/step-check/ts-base-*` (not `ts-base2`);
-  - `out/scratch.storage-migration-backup` (26 GB, verified identical to D).
+- Done 2026-10-20: the user retired the 30 T8 worktrees. Since then agents retire landed worktrees, drop bundled branches and trash scratch themselves (AGENTS.md "Autonomy"; the two guards, `guard_catastrophe.py` and `delete_guard.py`).
+- **Emptying the trash** (`D:/dev/undiscovered-worlds/trash`; `trash.py list` shows the entries): the user's only, by hand.
+- `C:/Users/Luka/.claude/hooks/guard_catastrophe.py` is a two-line stub left by the move into the repository; the user may delete it.
 - Decisions carried from the old plans (each has a recommendation; nothing blocks on them):
   - the verdict on climate baseline 388 (CP §10);
   - rewriting the draft review checklists (climate, tectonics, world, erosion, hydrology, regional);

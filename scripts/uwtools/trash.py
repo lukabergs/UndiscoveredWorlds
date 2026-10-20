@@ -39,19 +39,19 @@ def trash_root():
 
 
 # Places nothing may be moved out of (their whole subtree), by name.
-SEALED = ('.git', 'refs', 'registry', 'ledger', 'archive', 'worktree-archive', 'receipts', 'trash')
+SEALED = ('.git', 'refs', 'meta', 'registry', 'ledger', 'archive', 'worktree-archive', 'receipts', 'trash')
 
 
 def protected_places():
     """Places that may not be moved, nor anything holding them; the SEALED ones not even partly."""
     storage_root = storage.storage_root()
-    places = [ROOT, ROOT / '.git', ROOT / 'refs', ROOT / 'runs' / 'registry', ROOT / 'runs' / 'ledger',
+    places = [ROOT, ROOT / '.git', ROOT / 'refs', ROOT / 'meta', ROOT / 'runs' / 'registry', ROOT / 'runs' / 'ledger',
               ROOT / 'runs' / 'archive', ROOT / 'out', ROOT / 'runs', storage_root, storage_root / 'worktree-archive',
               storage_root / 'receipts', storage_root / 'trash', storage_root / 'out', storage_root / 'out' / 'scratch',
               storage_root / 'out' / 'evaluation', storage_root / 'runs']
     # The storage side of every junction (runs/<module>, runs/reports/<name>, out/scratch, out/evaluation): moving
     # it would leave the junction on C pointing at nothing.
-    for parent in (ROOT / 'runs', ROOT / 'runs' / 'reports', ROOT / 'out'):
+    for parent in (ROOT / 'runs', ROOT / 'runs' / 'reports', ROOT / 'runs' / 'work', ROOT / 'out'):
         for item in parent.iterdir() if parent.is_dir() else []:
             target = storage.junction_target(item)
             if target is not None:
@@ -106,12 +106,17 @@ def files_of(real):
 
 
 def remove_verified(real, verified):
-    """Remove only the files whose copies were verified, then the folders bottom-up; fail if anything is left."""
+    """Remove only the files whose copies were verified and that still match them (re-hashed just before), then
+    the folders bottom-up; fail if anything is left."""
     base = storage.long_path(real)
     if not real.is_dir():
+        if sha256(base) != next(iter(verified.values())):
+            raise OSError(f'{real} changed after its copy was verified; the source is kept')
         os.unlink(base)
         return
-    for key in verified:
+    for key, digest in verified.items():
+        if sha256(base / key) != digest:
+            raise OSError(f'{base / key} changed after its copy was verified; it and the rest are kept')
         os.unlink(base / key)
     for folder in sorted((item for item in base.rglob('*') if item.is_dir()), key=lambda item: -len(item.parts)):
         os.rmdir(folder)  # fails on a folder that still holds a file nobody verified

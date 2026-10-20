@@ -18,9 +18,12 @@ The rule is that a delete must be simple enough to check:
    path within two levels of one, the home folder, its direct children and its ancestors, Windows, Program Files,
    ProgramData, any .git, PROTECTED_TREES (whole subtrees) and ROOT_ONLY folders (the folder itself; its children
    may go). Literal destinations of copies, moves, writers and redirections may not lie in DESTINATION_TREES.
-Commands are split on ; && || | outside quotes and on every newline (inside quotes too: more segments is the safe
-side). Read-only commands (rg, grep, cat, ls, echo, git log, ...) are not checked for delete words unless they
-hold command substitution or an unbalanced quote; a git commit message given with -m "..." is text.
+4. Backstop, independent of the parser: a command holding a delete word anywhere may not name a protected place
+   anywhere (rule `mentioned`), nor pipe into a shell; encoded PowerShell is refused.
+Commands are split on ; && || | & outside quotes and on every newline (inside quotes too: more segments is the
+safe side). Read-only commands (rg, grep, cat, ls, echo, git log, ...) are not checked for delete words unless they
+hold command substitution or an unbalanced quote. A commit message that mentions deletes is read like any other
+text: write it to a file and use `git commit -F FILE`.
 """
 import json
 import os
@@ -28,6 +31,9 @@ import re
 import shlex
 import sys
 import tempfile
+import time
+
+DEADLINE = time.monotonic() + 15  # the hook's timeout is 30 s; past it Claude Code would run the command
 
 HOME = os.path.normcase(os.path.normpath(os.path.expanduser('~')))
 # Whole subtrees no agent command may delete, move or overwrite (the user's data, backups and the guards).
@@ -42,6 +48,10 @@ PROTECTED_TREES = [
     os.path.join(HOME, '.claude', 'hooks'),
     os.path.join(HOME, '.claude', 'settings.json'),
     os.path.join(HOME, '.codex'),
+    r'C:\dev\undiscovered-worlds\scripts\uwtools\hook_runner.py',
+    r'C:\dev\undiscovered-worlds\scripts\uwtools\guard_catastrophe.py',
+    r'C:\dev\undiscovered-worlds\scripts\uwtools\delete_guard.py',
+    r'C:\dev\undiscovered-worlds\meta',
 ]
 # Folders that may not be deleted or moved whole (nor any folder above them); their children may be.
 ROOT_ONLY = [
@@ -63,7 +73,11 @@ DISK_TOOLS = re.compile(
 DELETE_WORDS = re.compile(
     r'(?<![\w.-])(rm|rmdir|rd|del|erase|unlink|shred|rimraf|remove-item|ri|clear-recyclebin|forfiles)(?![\w-])|'
     r'rmtree|rmsync|rmdirsync|unlinksync|remove_directory|removedirs|os\.remove|\.unlink\(|\.rmdir\(|'
-    r'deletedirectory|deletefile|::delete|\.delete\(\)|send2trash', re.IGNORECASE)
+    r'deletedirectory|deletefile|::delete|\.delete\(\)|send2trash|(?<![\w-])(clear-content|clc)(?![\w-])|'
+    r'--remove-files|(?<![\w-])-sdel\b', re.IGNORECASE)
+ENCODED = re.compile(r'(?<![\w-])-(encodedcommand|enc|ec|e)(?![\w-])', re.IGNORECASE)
+PIPED_SHELL = re.compile(r'\|\s*(bash|sh|zsh|pwsh|powershell|cmd|iex|invoke-expression)(\.exe)?(?![\w-])', re.IGNORECASE)
+TOKEN_SPLIT = re.compile(r'''[\s;|&<>(){}\[\],="'`]+''')
 SUBSTITUTION = re.compile(r'\$\(|`|<\(|>\(')
 DELETERS = {'rm', 'rmdir', 'rd', 'del', 'erase', 'unlink', 'shred', 'rimraf', 'remove-item', 'ri'}
 CMD_STYLE = {'rd', 'del', 'erase', 'rmdir'}  # their /s /q /f are switches; rm's /c is a path
@@ -82,7 +96,6 @@ VALUE_PARAMETERS = {'-erroraction', '-ea', '-warningaction', '-wa', '-informatio
                     '-executionpolicy', '-encoding', '-value'}
 PATH_PARAMETERS = {'-path', '-literalpath', '-lp', '-pspath', '-filepath'}
 DESTINATION_PARAMETERS = {'-destination', '-t', '--target-directory'}
-MESSAGE = re.compile(r'''(\s(?:-[a-z]*m|--message)[ =]?\s*)("[^"]*"|'[^']*')''', re.DOTALL)
 REDIRECT = re.compile(r'''(?<![<>&\d=-])\d?>>?\s*("[^"]+"|'[^']+'|[^\s;|&<>()]+)''')
 
 
@@ -126,6 +139,8 @@ def split_command(command):
             index += 1
         elif char in ';|':
             close(char)
+        elif char == '&' and command[index - 1:index] not in ('>', '<') and command[index + 1:index + 2] != '>':
+            close('&')  # cmd's and bash's lone & runs the next command too (2>&1, &> and >& are redirections)
         else:
             current.append(char)
         index += 1
@@ -178,11 +193,14 @@ def within(path, tree):
 
 def forms(path):
     """The path, its resolved form (junctions, 8.3 names), each cut back to the folder above any wildcard."""
+    if time.monotonic() > DEADLINE:
+        block('the check ran out of time; name fewer paths per command.')
     candidates = {path}
-    try:
-        candidates.add(os.path.normcase(os.path.realpath(path)))
-    except (OSError, ValueError):
-        pass
+    if not path.startswith('\\\\'):  # never resolve network paths: an unreachable share could outlast the hook
+        try:
+            candidates.add(os.path.normcase(os.path.realpath(path)))
+        except (OSError, ValueError):
+            pass
     return {os.path.dirname(re.split(r'[*?]', item)[0] + 'x') if re.search(r'[*?]', item) else item
             for item in candidates}
 
@@ -206,6 +224,45 @@ def protected(path):
             if within(os.path.normcase(os.path.normpath(folder)), item):
                 return f'{item} is or holds the protected folder {folder} (its children may be deleted)'
     return None
+
+
+def mentioned(path):
+    """The backstop's rule for any path named in a command that deletes: protected() without ROOT_ONLY, and with
+    the depth rule cut to drive roots and top folders (the repository root may be named, e.g. by a cd)."""
+    for item in forms(path):
+        if item.startswith('\\\\') and depth(item) <= 3:
+            return f'{item} is a network share or device root'
+        if depth(item) <= 1:
+            return f'{item} is a drive root or a top folder'
+        if item == HOME or os.path.dirname(item) == HOME or within(HOME, item):
+            return f'{item} is the home folder, one of its direct children or above it'
+        if '.git' in re.split(r'[\\/]', item):
+            return f'{item} is or is inside a .git directory'
+        for tree in SYSTEM_TREES + PROTECTED_TREES:
+            normal = os.path.normcase(os.path.normpath(tree))
+            if within(item, normal) or within(normal, item):
+                return f'{item} is or holds the protected tree {tree}'
+    return None
+
+
+def environment(token):
+    """$HOME, ${X}, $env:X and %X% replaced from the environment where they exist."""
+    token = re.sub(r'\$env:(\w+)', lambda m: os.environ.get(m.group(1), m.group(0)), token, flags=re.IGNORECASE)
+    token = re.sub(r'\$\{(\w+)\}|\$(\w+)', lambda m: os.environ.get(m.group(1) or m.group(2), m.group(0))
+                   if (m.group(1) or m.group(2)) != 'HOME' else os.path.expanduser('~'), token)
+    return re.sub(r'%(\w+)%', lambda m: os.environ.get(m.group(1), m.group(0)), token)
+
+
+def backstop(command, cwd):
+    """Independent of the parser: a command that holds a delete word anywhere may not name a protected place
+    anywhere (literally, through a known environment variable, or as ., .., ~, / relative to the start folder)."""
+    for raw in TOKEN_SPLIT.split(command):
+        if not raw or raw.startswith('-') or re.fullmatch(r'//?[a-zA-Z]{1,3}', raw):
+            continue  # options and cmd switches (/s /q /c); `rm /c` itself is refused by the parser
+        path = expand(environment(raw), cwd)
+        reason = mentioned(path) if path else None
+        if reason:
+            block(f'this command deletes something and names a protected place: {reason}.')
 
 
 def protected_destination(path):
@@ -312,6 +369,8 @@ def check_segment(segment, cwd, piped, unbalanced=False, level=0):
     deleting = bool(DELETE_WORDS.search(segment))
     if deleting and SUBSTITUTION.search(segment):
         block('a delete together with command substitution or backticks: the guard cannot see what runs.')
+    if deleting and unbalanced:
+        block('a delete in a command whose quotes the guard cannot pair (escaped quotes): write it more simply.')
     if head in READ_ONLY and not unbalanced:
         return cwd
     if DISK_TOOLS.search(segment):
@@ -340,10 +399,10 @@ def check_segment(segment, cwd, piped, unbalanced=False, level=0):
         if deleting:  # quoted text that is not a program path (heredoc lines, JSON): readable only without deletes
             block(f'a delete in a line the guard cannot read as a command ({words[0][:60]!r}).')
         return cwd
-    if head in ('cd', 'set-location', 'sl', 'pushd', 'chdir'):
+    if head in ('cd', 'set-location', 'sl', 'pushd', 'chdir', 'push-location'):
         positional, paths, _ = arguments([w for w in words if w.lower() != '/d'], head)
         return expand((paths or positional or ['~'])[0], cwd)
-    if head == 'popd':
+    if head in ('popd', 'pop-location'):
         return None
     positional, paths, destinations = arguments(words, head)
     if head in DELETERS:
@@ -428,7 +487,12 @@ def check_segment(segment, cwd, piped, unbalanced=False, level=0):
 
 
 def check(command, cwd):
-    command = MESSAGE.sub(r'\1"(message)"', command)  # a commit message is text, not a command
+    if re.search(r'(?<![\w-])(pwsh|powershell)(\.exe)?(?![\w-])', command, re.IGNORECASE) and ENCODED.search(command):
+        block('an encoded PowerShell command cannot be read.')
+    if DELETE_WORDS.search(command):
+        if PIPED_SHELL.search(command):
+            block('a delete piped into a shell (| bash, | iex): the guard cannot see what runs.')
+        backstop(command, cwd)
     for segment, separator, open_quote in split_command(command):
         cwd = check_segment(segment, cwd, separator == '|', open_quote)
 

@@ -42,7 +42,15 @@ CODE_DELETE = re.compile(r'rmtree|os\.remove\b|os\.unlink|\.unlink\(|os\.rmdir|\
 SCRIPT_SUFFIXES = ('.py', '.ps1', '.sh', '.cmd', '.bat')
 INTERPRETERS = {'python', 'python.exe', 'python3', 'py', 'uv', 'uv.exe', 'pwsh', 'powershell', 'bash', 'sh', 'source', '.'}
 TEMP = os.path.normcase(os.path.realpath(tempfile.gettempdir()))
-SEPARATORS = re.compile(r'(&&|\|\||[;\n]|\|)')  # captured: a deleter after a single | is fed by a pipeline
+# Captured: a deleter after a single | is fed by a pipeline. A lone & runs the next command too (cmd, bash); 2>&1,
+# &> and >& are redirections.
+SEPARATORS = re.compile(r'(&&|\|\||[;\n]|\||(?<![<>])&(?!>))')
+DELETE_TEXT = re.compile(
+    r'(?<![\w.-])(rm|rmdir|rd|del|erase|unlink|shred|rimraf|remove-item|ri|clear-recyclebin|forfiles|clear-content|'
+    r'clc)(?![\w-])|rmtree|rmsync|rmdirsync|unlinksync|remove_directory|removedirs|os\.remove|\.unlink\(|\.rmdir\(|'
+    r'deletedirectory|deletefile|::delete|\.delete\(\)|send2trash|--remove-files|--delete|(?<![\w-])-delete\b|'
+    r'(?<![\w-])[/-](mir|purge|mov|move)(?![\w-])', re.IGNORECASE)
+TOKEN_SPLIT = re.compile(r'''[\s;|&<>(){}\[\],="'`]+''')
 DEADLINE = time.monotonic() + 40  # the hook's timeout is 60 s; past it Claude Code would run the command
 
 
@@ -122,10 +130,12 @@ def check_target(path):
 def expand(token, cwd):
     if re.search(r'[$`%{}]', token) or token.startswith('@('):
         block(f'cannot resolve the delete target {token!r} to a path (variables or expansion): name paths literally.')
-    native = to_native(token, cwd)
+    if cwd is None and not os.path.isabs(to_native(token, '.')) and not re.match(r'^/[a-zA-Z](/|$)', token):
+        block(f'cannot resolve the delete target {token!r}: an earlier cd could not be followed; use full paths.')
+    native = to_native(token, cwd or '.')
     if any(ch in token for ch in '*?['):
         found = []
-        for path in glob.iglob(native, recursive=True):
+        for path in glob.iglob(native, recursive=True, include_hidden=True):
             if time.monotonic() > DEADLINE:
                 block('the check ran out of time (a wildcard over too many files); name fewer paths per command.')
             found.append(path)
@@ -210,9 +220,13 @@ def check_segment(segment, cwd, piped=False):
     if not words:
         return cwd
     head = os.path.basename(words[0]).lower()
-    if head in ('cd', 'set-location', 'sl', 'pushd', 'chdir') and len(words) > 1:
-        target = words[1] if not words[1].startswith('-') else (words[2] if len(words) > 2 else '')
-        return to_native(target, cwd) if target and not re.search(r'[$`%]', target) else cwd
+    if head in ('cd', 'set-location', 'sl', 'pushd', 'chdir', 'push-location') and len(words) > 1:
+        rest = [w for w in words[1:] if not w.startswith('-') and w.lower() != '/d']
+        target = rest[0] if rest else ''
+        # A folder the guard cannot follow makes every later relative target unknown (None): deleters block.
+        return to_native(target, cwd) if target and cwd and not re.search(r'[$`%(]', target) else None
+    if head in ('popd', 'pop-location'):
+        return None
     lowered = segment.lower()
     # Both parsers refuse abbreviated options (allow_abbrev=False); the prefixes catch them anyway.
     if 'storage' in lowered and re.search(r'\bfinish\b', lowered) and '--acc' in lowered:
@@ -239,6 +253,9 @@ def check_segment(segment, cwd, piped=False):
     if head in DELETERS:
         if piped:
             block(f'{head} fed by a pipeline: its targets cannot be checked; name paths literally.')
+        if head in ('del', 'erase') and {'/s', '//s'} & {w.lower() for w in words} and any(
+                ch in w for w in words[1:] for ch in '*?'):
+            block('del /s with a wildcard deletes in every subfolder; the guard checks only the first.')
         if not [w for w in words[1:] if not w.startswith('-') and not (w.startswith('/') and len(w) <= 3)]:
             block(f'{head} has no target on its command line (fed by a pipeline): name paths literally.')
         for token in words[1:]:
@@ -263,11 +280,24 @@ def main():
     sys.exit(0)  # hook_runner.py treats a run without a decision as a block
 
 
+def backstop(command, cwd):
+    """Independent of the parser: a command holding a delete word anywhere may not name, anywhere, an existing path
+    git cannot restore (quoted inner commands, comma lists, cd and Push-Location targets, cmake -E, rsync, ...)."""
+    for raw in TOKEN_SPLIT.split(command):
+        if not raw or raw.startswith('-') or re.fullmatch(r'//?[a-zA-Z]{1,3}', raw) or re.search(r'[$%]', raw):
+            continue  # options, cmd switches and variables (the parser refuses deleters with variable targets)
+        for path in expand(raw, cwd):
+            check_target(path)
+
+
 def check(payload):
     command = (payload.get('tool_input') or {}).get('command') or ''
     cwd = payload.get('cwd') or os.getcwd()
+    if DELETE_TEXT.search(command):
+        backstop(command, cwd)
     lowered = ' ' + command.lower() + ' '
-    if re.search(r'\s-c\s|\s-command\s|\s-e\s|<<', lowered) and CODE_DELETE.search(command):
+    if (re.search(r'\s-c\s|\s-e\s', ' ' + command + ' ') or re.search(r'\s-command\s|<<', lowered)) and \
+            CODE_DELETE.search(command):  # -c and -e case-sensitive: git -C and ctest -C are not inline code
         block('inline code or a heredoc deletes files; its targets cannot be checked.')
     if re.search(r'\[(system\.)?io\.(file|directory)\]::delete|\.delete\(\)', lowered):
         block('.NET Delete targets cannot be checked.')
