@@ -1,5 +1,7 @@
 # Terrain roadmap: what remains of the multiscale and erosion plans, and the sandbox's work
 
+> **Record since 2026-10-20.** Its open items moved to `docs/architecture/master-plan.md` (the only running plan; §7 maps the old ids to the new steps). Kept for what was decided and learned.
+
 Written 2026-10-13 (Opus 5.5; Fable 5.1 off, see `AGENTS.md`). It collects every task not yet done from `multiscale-plan.md` (§4 rows, §6 open items, §7 questions) and `erosion-hydrology-plan.md` (§4, §6), and the tasks that came out of the terrain sandbox sessions of 2026-10-12 and 2026-10-13, and orders them. The two plans stay as records of what was decided and learned; their open items now live here, each with its origin. Where the sandbox has overtaken an item, the item says so.
 
 ## 1. Where things stand

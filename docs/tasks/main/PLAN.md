@@ -1,5 +1,7 @@
 # Goal
 
+> **Record since 2026-10-20.** Its open items moved to `docs/architecture/master-plan.md` (the only running plan; §7 maps the old ids to the new steps). Kept for what was decided and learned.
+
 Organize the repository and local artifacts for a modular world engine.
 
 # Status

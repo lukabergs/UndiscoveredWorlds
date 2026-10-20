@@ -1,5 +1,7 @@
 # Climate roadmap: implemented features and validation queue
 
+> **Record since 2026-10-20.** Its open items moved to `docs/architecture/master-plan.md` (the only running plan; §7 maps the old ids to the new steps). Kept for what was decided and learned.
+
 Implementation branch: `climate-physics_7_core_feat_260902/future-work`.
 Climate-engine mechanisms and their production integrations are implemented;
 this is not a claim that every reduced closure is physically complete or that

@@ -1,5 +1,7 @@
 # Climate simulation handoff — GPT-6 Astra, Ultra
 
+> **Record since 2026-10-20.** Its open items moved to `docs/architecture/master-plan.md` (the only running plan; §7 maps the old ids to the new steps). Kept for what was decided and learned.
+
 Prepared 2026-09-07. This is a self-contained task prompt for an instance with access to the repository. Verify the current checkout before relying on this snapshot.
 
 **Latest continuation completed 2026-09-07:** [historical comparison and ocean corrections](../../../runs/reports/climate-history-ocean-corrections.md). Runs 179/180 isolate wet-only ocean inputs and spherical ocean stress curl at 128×64; [181 versus 178, reference and historical 145](../../../runs/reports/181.html) is the final 512×256 gallery (78.186 s). Both correctness fixes are retained, but rainfall/moisture/SST regress and the Thai current hotspot worsens; land annual-temperature RMSE improves slightly. Ten strict reference targets fail, and the coupled climate remains unconverged. Checkpoint `10b4aba` contains matching records and source for 142–145, without exact executable provenance. Next isolate shallow South China Sea transport and full-depth mixed-layer heat closure; do not interpret stronger currents or inner-solver convergence as better climate. Historical dry-land percentages mean annual rainfall below **12 mm**, not 1 mm.

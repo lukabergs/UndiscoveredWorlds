@@ -23,6 +23,8 @@ A human-facing decision (what a world should look like, a data deletion under `r
 
 ## A phase, step by step
 
+Since 2026-10-20 a session runs a **wave**, not one phase: up to four C++ worktree workers from different lanes (file ownership), each taking the lowest-numbered open step of its lane in `docs/architecture/master-plan.md`, plus any number of Python-only steps and surveyors; timing steps run alone at the wave's end (master plan §2). The steps below apply to each step of the wave.
+
 1. The planner's session ends with the plan section updated and the prompt for the orchestrating session printed in the chat (never saved in the plan; consolidation plan §8). The prompt points to documents; it repeats nothing an agent can read.
 2. The orchestrator reads the plan section, the ledger entries it names and the files of the first steps, then builds the step order: steps with disjoint file sets run in parallel in background workers; steps that share files run in sequence.
 3. For each step: brief → work → the step's deterministic checks → the orchestrator reads the diff → `reviewer` when the step changes behaviour, a contract or a kernel (not for a one-line fix or a documentation edit) → fixes by the same worker (its context is intact: continue it with SendMessage) → ledger entry → one commit. Duration is measured commit to commit (`AGENTS.md`).

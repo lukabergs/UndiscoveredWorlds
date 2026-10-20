@@ -1,5 +1,7 @@
 # Multi-scale consistency plan
 
+> **Record since 2026-10-20.** Its open items moved to `docs/architecture/master-plan.md` (the only running plan; §7 maps the old ids to the new steps). Kept for what was decided and learned.
+
 Written 2026-10-10 by the lead session (Fable 5.1) from the user's brief and the research conversation of 2026-10-09 and 2026-10-10. It is the plan for making every zoomed-in map of a world (the regional maps, at any scale down to one metre per pixel) consistent with the global map it comes from, exactly, and for the features the user wants to recognise at those scales: visible erosion, Earth reference windows beside every map, folded and curved mountain ranges. It stands beside `erosion-hydrology-plan.md` (whose Phases E, R, R2 and E5 built the regional pass this plan restructures) and follows `world-model.md`, `consolidation-plan.md` and `docs/reference-guides/agent-workflow.md`. Section 2 records the research so no agent re-runs it. Decisions marked **user** need the user's answer before the step that depends on them; everything else is decided here and undone by a commit.
 
 This plan is run end to end by one orchestrating session that dispatches subagents (§7). The user's only action is to point a session at §7 "Next". That is a deliberate exception, asked by the user on 2026-10-10, to the rule that a session's handoff prompt is printed in the chat and never saved in a plan: this plan carries its own handoff in §7, and only this plan does.

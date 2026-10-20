@@ -1,5 +1,7 @@
 # World model migration log
 
+> **Record since 2026-10-20.** Its open items moved to `docs/architecture/master-plan.md` (the only running plan; §7 maps the old ids to the new steps). Kept for what was decided and learned.
+
 Evidence for each step of the migration in
 [world model](../../architecture/world-model.md). Equivalence runs use seed 1,
 unregistered `world_pipeline generate` runs with every output path redirected to

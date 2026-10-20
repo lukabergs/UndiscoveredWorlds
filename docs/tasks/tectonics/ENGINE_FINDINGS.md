@@ -1,5 +1,7 @@
 # Tectonics engine findings from the gold-deposit work
 
+> **Record since 2026-10-20.** Its open items moved to `docs/architecture/master-plan.md` (the only running plan; §7 maps the old ids to the new steps). Kept for what was decided and learned.
+
 Found while coupling `geology/mineral_systems` to the integrated engine
 (force balance, isostatic columns, `configs/tectonics-baseline.json`, seed 1,
 256 x 128, 600 Myr, snapshots every 25 Myr). No engine code was changed. The

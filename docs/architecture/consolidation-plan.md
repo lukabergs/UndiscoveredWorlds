@@ -1,5 +1,7 @@
 # Consolidation plan
 
+> **Record since 2026-10-20.** Its open items moved to `docs/architecture/master-plan.md` (the only running plan; §7 maps the old ids to the new steps). Kept for what was decided and learned.
+
 Written 2026-10-03 as the brief for the sessions that carry out the restructuring. It extends `world-model.md` (components, process kinds, recipes, evaluation) with the target structure of executables, tests, tooling, data layout and the working agreement. Decisions marked **open** need the user's answer before the phase that depends on them.
 
 ## 1. Decisions taken on 2026-10-03
