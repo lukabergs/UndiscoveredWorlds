@@ -302,13 +302,13 @@ def status():
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description='Bulk data on the storage drive (runs/storage.json).')
+    parser = argparse.ArgumentParser(description='Bulk data on the storage drive (runs/storage.json).', allow_abbrev=False)
     commands = parser.add_subparsers(dest='command', required=True)
     commands.add_parser('status', help='free space and pending storage work')
     for name, text in (('route', 'make a directory a junction into storage, moving its contents'),
                        ('check', 'compare a leftover backup with its receipt and the storage copy (read-only)'),
                        ('finish', 'delete a leftover backup once every file in it is verified on storage')):
-        command = commands.add_parser(name, help=text)
+        command = commands.add_parser(name, help=text, allow_abbrev=False)
         command.add_argument('path')
         if name == 'finish':
             command.add_argument('--accept-newer', action='store_true',

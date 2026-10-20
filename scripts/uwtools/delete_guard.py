@@ -42,7 +42,7 @@ CODE_DELETE = re.compile(r'rmtree|os\.remove\b|os\.unlink|\.unlink\(|os\.rmdir|\
 SCRIPT_SUFFIXES = ('.py', '.ps1', '.sh', '.cmd', '.bat')
 INTERPRETERS = {'python', 'python.exe', 'python3', 'py', 'uv', 'uv.exe', 'pwsh', 'powershell', 'bash', 'sh', 'source', '.'}
 TEMP = os.path.normcase(os.path.realpath(tempfile.gettempdir()))
-SEPARATORS = re.compile(r'&&|\|\||[;|\n]')
+SEPARATORS = re.compile(r'(&&|\|\||[;\n]|\|)')  # captured: a deleter after a single | is fed by a pipeline
 DEADLINE = time.monotonic() + 40  # the hook's timeout is 60 s; past it Claude Code would run the command
 
 
@@ -59,14 +59,15 @@ def git(top, *args):
     if time.monotonic() > DEADLINE:
         block('the check ran out of time (too many targets); name fewer paths per command.')
     try:
-        result = subprocess.run(['git', '-C', top, *args], capture_output=True, text=True, timeout=20)
+        result = subprocess.run(['git', '-C', top, *args], capture_output=True, text=True, encoding='utf-8',
+                                errors='replace', timeout=max(0.5, min(20.0, DEADLINE + 10 - time.monotonic())))
     except (OSError, subprocess.SubprocessError) as error:
         block(f'git could not check the target ({error}).')
     return result.returncode, result.stdout
 
 
 def to_native(token, cwd):
-    token = token.strip('"\'')
+    token = re.sub(r'["\']', '', token)  # quotes anywhere: "/c/dev/meta"/ref is /c/dev/meta/ref
     if token.startswith('~'):
         token = os.path.expanduser(token)
     match = re.match(r'^/([a-zA-Z])(/.*)?$', token)
@@ -123,7 +124,12 @@ def expand(token, cwd):
         block(f'cannot resolve the delete target {token!r} to a path (variables or expansion): name paths literally.')
     native = to_native(token, cwd)
     if any(ch in token for ch in '*?['):
-        return glob.glob(native, recursive=True)
+        found = []
+        for path in glob.iglob(native, recursive=True):
+            if time.monotonic() > DEADLINE:
+                block('the check ran out of time (a wildcard over too many files); name fewer paths per command.')
+            found.append(path)
+        return found
     return [native]
 
 
@@ -183,14 +189,24 @@ def check_script(path):
         block(f'{path} is untracked or modified and its new code deletes files; deletes in scripts cannot be checked.')
 
 
-def check_segment(segment, cwd):
+WRAPPERS = {'sudo', 'command', 'builtin', 'exec', 'cmd', 'cmd.exe', '/c', '//c', '/k', '//k', '&', 'call', 'time',
+            'nohup', 'env', 'do', 'then', 'else', 'elif', '!', '(', '{', 'npx', 'nice', 'timeout'}
+
+
+def check_segment(segment, cwd, piped=False):
     try:
         words = shlex.split(segment, posix=False)
     except ValueError:
         words = segment.split()
     words = [w.strip('"\'') for w in words if w.strip('"\'')]
-    while words and words[0].lower() in ('sudo', 'command', 'cmd', 'cmd.exe', '/c', '&', 'call', 'time', 'nohup'):
-        words = words[1:]
+    while words:
+        first = words[0].lower()
+        if first in WRAPPERS or re.fullmatch(r'\w+=\S*', words[0]) or re.fullmatch(r'-?\d+[smh]?|-n', first):
+            words = words[1:]
+        elif first[:1] in ('(', '{'):
+            words[0] = words[0][1:]
+        else:
+            break
     if not words:
         return cwd
     head = os.path.basename(words[0]).lower()
@@ -198,10 +214,19 @@ def check_segment(segment, cwd):
         target = words[1] if not words[1].startswith('-') else (words[2] if len(words) > 2 else '')
         return to_native(target, cwd) if target and not re.search(r'[$`%]', target) else cwd
     lowered = segment.lower()
-    if 'storage.py' in lowered and re.search(r'\bfinish\b', lowered) and '--accept-newer' in lowered:
+    # Both parsers refuse abbreviated options (allow_abbrev=False); the prefixes catch them anyway.
+    if 'storage' in lowered and re.search(r'\bfinish\b', lowered) and '--acc' in lowered:
         block('storage.py finish --accept-newer deletes old versions the storage copy no longer has; the user runs it.')
-    if 'worktrees.py' in lowered and re.search(r'\bretire\b', lowered) and '--allow-unlanded' in lowered:
+    if 'worktrees' in lowered and re.search(r'\bretire\b', lowered) and '--allow' in lowered:
         block('worktrees.py retire --allow-unlanded deletes a worktree whose work is not in main; the user runs it.')
+    if os.path.basename(words[0]).lower().removesuffix('.exe') == 'robocopy':
+        switches = {w.lower().lstrip('/-') for w in words[1:] if w.startswith(('/', '-'))}
+        places = [w for w in words[1:] if not w.startswith(('/', '-'))][:2]
+        if switches & {'mir', 'purge', 'move', 'mov'}:
+            if len(places) < 2:
+                block('robocopy /MIR, /PURGE or /MOVE without a literal source and destination.')
+            for path in expand(places[1], cwd) + (expand(places[0], cwd) if switches & {'move', 'mov'} else []):
+                check_target(path)
     if head in ('git', 'git.exe'):
         check_git(words, cwd)
         return cwd
@@ -212,6 +237,8 @@ def check_segment(segment, cwd):
     if head in ('mv', 'move-item', 'mi', 'move') and words[-1].lower() in ('/dev/null', '$null', 'nul'):
         block('moving to the null device deletes.')
     if head in DELETERS:
+        if piped:
+            block(f'{head} fed by a pipeline: its targets cannot be checked; name paths literally.')
         if not [w for w in words[1:] if not w.startswith('-') and not (w.startswith('/') and len(w) <= 3)]:
             block(f'{head} has no target on its command line (fed by a pipeline): name paths literally.')
         for token in words[1:]:
@@ -228,11 +255,12 @@ def check_segment(segment, cwd):
 
 def main():
     try:
-        check(json.load(sys.stdin))
+        check(json.loads(sys.stdin.buffer.read().decode('utf-8', errors='replace')))
     except SystemExit:
         raise
     except BaseException as error:  # fail closed: a guard that cannot decide blocks
         block(f'the guard could not check this command ({type(error).__name__}: {error}).')
+    sys.exit(0)  # hook_runner.py treats a run without a decision as a block
 
 
 def check(payload):
@@ -243,9 +271,10 @@ def check(payload):
         block('inline code or a heredoc deletes files; its targets cannot be checked.')
     if re.search(r'\[(system\.)?io\.(file|directory)\]::delete|\.delete\(\)', lowered):
         block('.NET Delete targets cannot be checked.')
-    for segment in SEPARATORS.split(command):
-        if segment.strip():
-            cwd = check_segment(segment.strip(), cwd)
+    parts = SEPARATORS.split(command)
+    for position in range(0, len(parts), 2):
+        if parts[position].strip():
+            cwd = check_segment(parts[position].strip(), cwd, position > 0 and parts[position - 1] == '|')
 
 
 if __name__ == '__main__':

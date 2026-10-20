@@ -186,6 +186,11 @@ def retire(worktree, allow_unlanded=False):
                       'merge them first (or the user retires it with --allow-unlanded)')
     if sha256_bytes(git('diff', '--binary', 'HEAD', cwd=worktree, binary=True)[1]) != receipt['patch_sha256']:
         raise OSError(f'{worktree.name}: the uncommitted diff changed since the archive')
+    listed = git('ls-files', '--others', '-z', cwd=worktree, binary=True)[1].decode('utf-8', 'replace').split('\0')
+    unarchived = [item for item in listed if item and not skipped(item) and item not in receipt['sha256']]
+    if unarchived:
+        raise OSError(f'{worktree.name}: {len(unarchived)} untracked files not in the archive, e.g. {unarchived[0]}; '
+                      'run preserve again')
     root = storage.long_path(worktree)
     newer = [item for item in root.rglob('*') if item.is_file() and item.stat().st_mtime > stamp
              and not skipped(item.relative_to(root).as_posix()) and item.name != '.git']
@@ -218,7 +223,10 @@ def drop_branches(names):
             raise OSError(f'{name}: no such local branch')
         heads[name] = sha
     stamp = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
-    bundle = archive_root() / f'branches-{stamp}.bundle'
+    number = 0
+    while (archive_root() / f'branches-{stamp}-{number}.bundle').exists():
+        number += 1
+    bundle = archive_root() / f'branches-{stamp}-{number}.bundle'  # never overwrites an earlier bundle
     bundle.parent.mkdir(parents=True, exist_ok=True)
     code, out = git('bundle', 'create', str(bundle), *(f'refs/heads/{name}' for name in heads))
     if code != 0 or not bundle.is_file():
@@ -252,19 +260,19 @@ def sha256_bytes(data):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     commands = parser.add_subparsers(dest='command', required=True)
     audit = commands.add_parser('audit', help='read-only report of every worktree')
     audit.add_argument('--json', help='also write the full report here')
     for name in ('preserve', 'retire'):
-        command = commands.add_parser(name)
+        command = commands.add_parser(name, allow_abbrev=False)
         command.add_argument('names', nargs='*')
         command.add_argument('--all', action='store_true')
         if name == 'retire':
             command.add_argument('--yes', action='store_true', required=True, help='confirm the delete')
             command.add_argument('--allow-unlanded', action='store_true',
                                  help='the user only: retire although some added lines are not in main')
-    drop = commands.add_parser('drop-branches', help='bundle, verify, then delete local branches')
+    drop = commands.add_parser('drop-branches', help='bundle, verify, then delete local branches', allow_abbrev=False)
     drop.add_argument('names', nargs='*')
     drop.add_argument('--retired', action='store_true', help='every branch of a retired archive that still exists')
     args = parser.parse_args()

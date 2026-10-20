@@ -38,11 +38,25 @@ def trash_root():
     return root / 'trash'
 
 
+# Places nothing may be moved out of (their whole subtree), by name.
+SEALED = ('.git', 'refs', 'registry', 'ledger', 'archive', 'worktree-archive', 'receipts', 'trash')
+
+
 def protected_places():
+    """Places that may not be moved, nor anything holding them; the SEALED ones not even partly."""
     storage_root = storage.storage_root()
-    return [ROOT, ROOT / '.git', ROOT / 'refs', ROOT / 'runs' / 'registry', ROOT / 'runs' / 'ledger',
-            ROOT / 'runs' / 'archive', storage_root, storage_root / 'worktree-archive', storage_root / 'receipts',
-            storage_root / 'trash']
+    places = [ROOT, ROOT / '.git', ROOT / 'refs', ROOT / 'runs' / 'registry', ROOT / 'runs' / 'ledger',
+              ROOT / 'runs' / 'archive', ROOT / 'out', ROOT / 'runs', storage_root, storage_root / 'worktree-archive',
+              storage_root / 'receipts', storage_root / 'trash', storage_root / 'out', storage_root / 'out' / 'scratch',
+              storage_root / 'out' / 'evaluation', storage_root / 'runs']
+    # The storage side of every junction (runs/<module>, runs/reports/<name>, out/scratch, out/evaluation): moving
+    # it would leave the junction on C pointing at nothing.
+    for parent in (ROOT / 'runs', ROOT / 'runs' / 'reports', ROOT / 'out'):
+        for item in parent.iterdir() if parent.is_dir() else []:
+            target = storage.junction_target(item)
+            if target is not None:
+                places.append(target)
+    return places
 
 
 def inside(path, parent):
@@ -70,9 +84,7 @@ def check(path):
         raise OSError(f'{real}: outside the repository and the storage root')
     for place in protected_places():
         place = Path(os.path.realpath(place))
-        if inside(place, real) or inside(real, place) and place.name in ('.git', 'refs', 'registry', 'ledger',
-                                                                          'archive', 'worktree-archive', 'receipts',
-                                                                          'trash'):
+        if inside(place, real) or (inside(real, place) and place.name in SEALED):
             raise OSError(f'{real}: is, holds or lies in the protected place {place}')
     if real.is_dir():
         links = storage.find_links(real)
@@ -93,8 +105,25 @@ def files_of(real):
     return sorted(item for item in storage.long_path(real).rglob('*') if item.is_file())
 
 
+def remove_verified(real, verified):
+    """Remove only the files whose copies were verified, then the folders bottom-up; fail if anything is left."""
+    base = storage.long_path(real)
+    if not real.is_dir():
+        os.unlink(base)
+        return
+    for key in verified:
+        os.unlink(base / key)
+    for folder in sorted((item for item in base.rglob('*') if item.is_dir()), key=lambda item: -len(item.parts)):
+        os.rmdir(folder)  # fails on a folder that still holds a file nobody verified
+    os.rmdir(base)
+
+
 def move(paths, reason):
     checked = [check(path) for path in paths]  # every path is checked before anything moves
+    for first, _ in checked:
+        for second, _ in checked:
+            if first != second and inside(second, first):
+                raise OSError(f'{second} lies inside {first}: name each place once')
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
     root = trash_root()
     number = 0
@@ -102,6 +131,7 @@ def move(paths, reason):
         number += 1
     entry = root / f'{stamp}-{number}'
     entry.mkdir(parents=True)
+    receipt_path = entry / 'receipt.json'
     receipt = {'entry': entry.name, 'reason': reason, 'utc': stamp, 'items': []}
     for real, label in checked:
         target = entry / label
@@ -111,24 +141,25 @@ def move(paths, reason):
         digests = {(item.relative_to(base).as_posix() if real.is_dir() else real.name): sha256(item) for item in files}
         size = sum(item.stat().st_size for item in files)
         same_drive = os.path.splitdrive(str(real))[0].lower() == os.path.splitdrive(str(entry))[0].lower()
+        item = {'original': str(real), 'label': label.as_posix(), 'files': len(files), 'bytes': size,
+                'method': 'rename' if same_drive else 'copy, verify, remove', 'status': 'moving', 'sha256': digests}
+        receipt['items'].append(item)
+        # The receipt is written before each move, so an entry interrupted half-way still says what it holds.
+        receipt_path.write_text(json.dumps(receipt, indent=1) + '\n', encoding='utf-8')
         if same_drive:
-            os.rename(storage.long_path(real), storage.long_path(target))
+            os.rename(base, storage.long_path(target))
         else:
             if real.is_dir():
-                shutil.copytree(storage.long_path(real), storage.long_path(target), symlinks=True)
+                shutil.copytree(base, storage.long_path(target), symlinks=True)
             else:
-                shutil.copy2(storage.long_path(real), storage.long_path(target))
+                shutil.copy2(base, storage.long_path(target))
             copied = storage.long_path(target)
             for key, digest in digests.items():
                 if sha256(copied / key if real.is_dir() else copied) != digest:
                     raise OSError(f'Copy verification failed for {key}; the source {real} is untouched')
-            if real.is_dir():
-                storage.remove_tree(real)
-            else:
-                os.unlink(storage.long_path(real))
-        receipt['items'].append({'original': str(real), 'label': label.as_posix(), 'files': len(files), 'bytes': size,
-                                 'method': 'rename' if same_drive else 'copy, verify, remove', 'sha256': digests})
-    (entry / 'receipt.json').write_text(json.dumps(receipt, indent=1) + '\n', encoding='utf-8')
+            remove_verified(real, digests)
+        item['status'] = 'moved'
+        receipt_path.write_text(json.dumps(receipt, indent=1) + '\n', encoding='utf-8')
     return entry, receipt
 
 
@@ -143,21 +174,20 @@ def restore(name):
     for item in receipt['items']:
         if os.path.lexists(item['original']):
             raise OSError(f'{item["original"]} exists again; nothing restored')
+        if os.path.splitdrive(item['original'])[0].lower() != os.path.splitdrive(str(entry))[0].lower():
+            raise OSError(f'{item["original"]}: on another drive; copy it back by hand from {entry / item["label"]}')
     for item in receipt['items']:
         original = Path(item['original'])
         original.parent.mkdir(parents=True, exist_ok=True)
-        source = entry / item['label']
-        if os.path.splitdrive(str(original))[0].lower() != os.path.splitdrive(str(entry))[0].lower():
-            raise OSError(f'{original}: on another drive; copy it back by hand from {source}')
-        os.rename(storage.long_path(source), storage.long_path(original))
+        os.rename(storage.long_path(entry / item['label']), storage.long_path(original))
     (entry / 'receipt.json').rename(entry / 'restored.json')
     return len(receipt['items'])
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     commands = parser.add_subparsers(dest='command', required=True)
-    moving = commands.add_parser('move', help='move untracked files or folders into the trash')
+    moving = commands.add_parser('move', help='move untracked files or folders into the trash', allow_abbrev=False)
     moving.add_argument('paths', nargs='+')
     moving.add_argument('--reason', default='')
     commands.add_parser('list', help='entries with their sizes')
