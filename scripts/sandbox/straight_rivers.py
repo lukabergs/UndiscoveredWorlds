@@ -25,6 +25,18 @@ crosses, the discharge the order along it, drawn by the same rule (runs()), the 
 line's first cell (the crossed cells it skips dropped); reported: A8 / A4, the histogram,
 the straight-run shares and A8 / A4 of the ideal chords (the continuous lines' own headings: the sampling floor).
 
+A cube domain (its <domain>-*-native.npy arrays; master plan step 5.1) is measured on its own cells through its cell
+table (<label>/cells-<N> for the global, <label>/window-<domain> for a window, whose kept cells alone are counted):
+the same river rule over the eight slots; a straight run continues where the next slot is the step's straight
+continuation (the opposite of its reverse slot, as CubeGrid.walks); the chord heading in the start cell's grid frame,
+'a8'/'a4' from the true chord (the great-circle bearing to the end cell minus the start cell's slot-1 bearing, as
+d8_axis.py), '_grid' from the lattice steps carried into the start cell's frame across face edges, '_compass' the
+true chord's compass heading; routing classes with Priority-Flood on the slots (a window's outer ring, the cells
+missing a cardinal slot, drains as in the exe), facets between consecutive slots on the table's tangent offsets;
+'d8_axis' the mean cos 4 phi of the river steps (phi from the cell's slot-1 bearing; d8_axis.py's measure) with the
+uniform-slot expectation, by |latitude| band; 'land d8_axis' the same on every land cell with a higher-discharge
+neighbour (the receiver inferred from the discharge: approximate off the rivers).
+
   uv run python scripts/sandbox/straight_rivers.py OUT.json LABEL1,LABEL2 DOMAIN1,DOMAIN2
   uv run python scripts/sandbox/straight_rivers.py --calibrate OUT.json [LINES] [LENGTH]
 """
@@ -216,6 +228,233 @@ def routing_summary(mask, classes):
             if defined else None}
 
 
+def cube_grid(d, domain, config):
+    """(CubeGrid, kept mask) of a cube domain's saved arrays in label directory d."""
+    import cube_domain
+    sys.path.insert(0, str(ROOT / 'scripts'))
+    from uwtools.bundle import Bundle
+    path = Path(config['base_bundle'])
+    base = Bundle.open(path if path.is_absolute() else ROOT / path)
+    radius = float(base.radius_km or 6371.0)
+    if domain == 'global':
+        n = np.load(d / 'global-elevation-physics-native.npy', mmap_mode='r').shape[-1]
+        grid = cube_domain.CubeGrid.from_directory(d / f'cells-{n}', n, radius)
+        return grid, np.ones(grid.n, dtype=bool)
+    target = d / f'window-{domain}'
+    keys = np.load(target / 'keys.npy')
+    grid = cube_domain.CubeGrid.from_directory(target, base.face_cells * config['domains'][domain]['scale'], radius, keys)
+    return grid, np.load(target / 'kept.npy').astype(bool)
+
+
+def cube_sea(grid, physics, procedural, edge):
+    """terrain_metrics.sea_from on the slots: cells <= 0 m connected to the procedural sea (its components of at
+    least SEA_MIN_CELLS or touching the domain's edge)."""
+    labels, count = grid.label(procedural <= 0.0)
+    sizes = np.bincount(labels, minlength=count + 1)
+    keep = (sizes >= tm.SEA_MIN_CELLS) | np.isin(np.arange(count + 1), labels[edge])
+    keep[0] = False
+    seed = keep[labels]
+    labels, count = grid.label(physics <= 0.0)
+    hit = np.zeros(count + 1, dtype=bool)
+    hit[labels[seed]] = True
+    hit[0] = False
+    return hit[labels]
+
+
+def cube_continuation(grid, direction):
+    """The slot (0-based) at the receiver that continues each step straight (the opposite of its reverse slot)."""
+    s = np.maximum(direction, 0)
+    reverse = grid.reverse[np.arange(grid.n), s]
+    return (reverse - 1 + 4) % 8
+
+
+def cube_runs(grid, discharge, water, threshold):
+    """runs() on the slots: (river mask, run length); sets cube_runs.direction (0-based slot, -1 none),
+    .receiver and runs.straightness (chord / path over 8 steps, km)."""
+    n = grid.n
+    ids = np.arange(n)
+    q = np.where(water, 0.0, discharge)
+    river = q >= threshold
+    around = np.where(grid.valid, discharge[grid.safe], -np.inf)
+    best = np.argmax(around, axis=1)
+    has = around[ids, best] > discharge
+    direction = np.where(river & has, best, -1)
+    receiver = np.where(direction >= 0, grid.safe[ids, np.maximum(direction, 0)], ids)
+    cont = cube_continuation(grid, direction)
+    same_next = (direction >= 0) & (direction[receiver] == cont)
+    ahead = np.ones(n, dtype=np.int32)
+    for _ in range(400):
+        new = np.where(same_next, 1 + ahead[receiver], 1)
+        if np.array_equal(new, ahead):
+            break
+        ahead = new
+    predecessor = np.full(n, -1)
+    predecessor[receiver[same_next]] = ids[same_next]
+    behind = np.ones(n, dtype=np.int32)
+    for _ in range(400):
+        new = np.where(predecessor >= 0, 1 + behind[np.maximum(predecessor, 0)], 1)
+        if np.array_equal(new, behind):
+            break
+        behind = new
+    length = ahead + behind - 1
+    cur = ids.copy()
+    path = np.zeros(n)
+    full = river & (direction >= 0)
+    for _ in range(8):
+        dd = direction[cur]
+        ok = dd >= 0
+        full &= ok
+        path += np.where(ok, grid.slot_km[cur, np.maximum(dd, 0)], 0.0)
+        cur = np.where(ok, receiver[cur], cur)
+    chord = grid.radius_km * np.arccos(np.clip(np.einsum('nd,nd->n', grid.centre[cur], grid.centre), -1.0, 1.0))
+    runs.straightness = np.where(full, chord / np.maximum(path, 1e-9), np.nan)
+    cube_runs.direction, cube_runs.receiver = direction, receiver
+    return river & (direction >= 0), length
+
+
+def cube_bearings(grid):
+    """(n, 8) compass bearings of the slots (d8_axis.cube_bearings on the domain's table)."""
+    sys.path.insert(0, str(ROOT / 'scripts' / 'evaluation'))
+    import d8_axis
+    bearings, _ = d8_axis.cube_bearings({'centre': grid.centre, 'neighbours': grid.neighbours,
+                                         'latitude_deg': np.degrees(grid.latitude)})
+    return bearings
+
+
+def cube_chord_headings(grid, direction, receiver, bearings, steps=CHORD_STEPS):
+    """Headings (radians, counter-clockwise from the start cell's slot 3 axis, so slot 1 is pi / 2) of the chord to
+    the cell `steps` river steps downstream: (true chord, lattice steps, compass: counter-clockwise from east)."""
+    n = grid.n
+    ids = np.arange(n)
+    cur = ids.copy()
+    rotation = np.zeros(n, dtype=np.int64)
+    east, north = np.zeros(n), np.zeros(n)
+    full = direction >= 0
+    step_east = np.array([0, 1, 1, 1, 0, -1, -1, -1], dtype=float)
+    step_north = np.array([1, 1, 0, -1, -1, -1, 0, 1], dtype=float)
+    for _ in range(steps):
+        dd = direction[cur]
+        ok = dd >= 0
+        full &= ok
+        local = np.maximum(dd, 0)
+        start_slot = (local - rotation) % 8
+        east += np.where(ok, step_east[start_slot], 0.0)
+        north += np.where(ok, step_north[start_slot], 0.0)
+        reverse = grid.reverse[cur, local]
+        cont = (reverse - 1 + 4) % 8
+        rotation = np.where(ok, (rotation + cont - local) % 8, rotation)
+        cur = np.where(ok, receiver[cur], cur)
+    c, e = grid.centre, grid.centre[cur]
+    t = e - np.einsum('nd,nd->n', e, c)[:, None] * c
+    bearing = np.arctan2(np.einsum('nd,dn->n', t, grid.east), np.einsum('nd,dn->n', t, grid.north))
+    true = 0.5 * np.pi - (bearing - bearings[:, 0])
+    compass = 0.5 * np.pi - bearing
+    lattice = np.arctan2(north, east)
+    return (np.where(full, true, np.nan), np.where(full, lattice, np.nan), np.where(full, compass, np.nan))
+
+
+def cube_routing_classes(grid, physics, sea, outlet):
+    """routing_classes on the slots: the filled surface from the outlets (sea and a window's edge), facets between
+    consecutive slots (slot order N, NE, E, ... is the ring) on the table's tangent offsets (km)."""
+    filled = np.asarray(grid.priority_flood(physics, outlet), dtype=float)
+    raise_m = np.where(outlet, 0.0, filled - physics)
+    height = np.where(outlet, 0.0, filled)
+    h = np.where(grid.valid, height[grid.safe], np.inf)
+    o = grid.valid & outlet[grid.safe]
+    lower = (o | (h < filled[:, None])).any(1)
+    best = np.zeros(grid.n)
+    fraction = np.full(grid.n, np.nan)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        for k in range(8):
+            k2 = (k + 1) % 8
+            drop1, drop2 = filled - h[:, k], filled - h[:, k2]
+            p1e, p1n = grid.offset_east[:, k], grid.offset_north[:, k]
+            p2e, p2n = grid.offset_east[:, k2], grid.offset_north[:, k2]
+            det = p1e * p2n - p1n * p2e
+            ve = (drop1 * p2n - drop2 * p1n) / det
+            vn = (p1e * drop2 - p2e * drop1) / det
+            cross1 = p1e * vn - p1n * ve
+            cross2 = ve * p2n - vn * p2e
+            inside = ((ve != 0) | (vn != 0)) & (cross1 * det >= 0) & (cross2 * det >= 0)
+            slope1, slope2 = drop1 / grid.slot_km[:, k], drop2 / grid.slot_km[:, k2]
+            slope = np.where(inside, np.hypot(ve, vn), np.maximum(slope1, slope2))
+            share = np.where(inside, np.clip(np.abs(cross1) / (np.abs(cross1) + np.abs(cross2)), 0.0, 1.0),
+                             np.where(slope2 > slope1, 1.0, 0.0))
+            better = grid.valid[:, k] & grid.valid[:, k2] & (slope > best)
+            best = np.where(better, slope, best)
+            fraction = np.where(better, share, fraction)
+    depression = ~outlet & (raise_m > 0.0)
+    flat = ~outlet & ~depression & ~lower
+    descent = ~outlet & ~depression & ~flat
+    return {'depression': depression, 'depression_1m': ~outlet & (raise_m > 1.0), 'flat': flat, 'descent': descent,
+            'fraction': np.where(descent, fraction, np.nan)}
+
+
+def cube_axis(mask, direction, bearings, latitude_deg):
+    """d8_axis.py's mean cos 4 phi of the steps in `mask`, with the uniform-slot expectation, by |latitude| band."""
+    ids = np.flatnonzero(mask & (direction >= 0))
+    relative = bearings[ids] - bearings[ids, :1]
+    cos4 = np.cos(4.0 * relative)
+    value = cos4[np.arange(ids.size), direction[ids]]
+    present = np.isfinite(cos4)
+    exact = np.where(present, cos4, 0.0).sum(1) / present.sum(1)
+    axis = (direction[ids] % 2) == 0
+    absolute = np.abs(latitude_deg[ids])
+    out = {}
+    for name, sub in (('all', np.ones(ids.size, dtype=bool)), ('|lat| 0-30', absolute < 30),
+                      ('|lat| 30-60', (absolute >= 30) & (absolute < 60)), ('|lat| 60-90', absolute >= 60)):
+        if sub.any():
+            out[name] = {'cells': int(sub.sum()), 'mean_cos4': round(float(value[sub].mean()), 4),
+                         'axis_fraction': round(float(axis[sub].mean()), 4),
+                         'random_mean': round(float(exact[sub].mean()), 4)}
+        else:
+            out[name] = {'cells': 0}
+    return out
+
+
+def measure_cube(d, label, domain, config):
+    """The record of a cube domain (module docstring)."""
+    grid, kept = cube_grid(d, domain, config)
+
+    def load(name):
+        return np.load(d / f'{domain}-{name}-native.npy').astype(float).reshape(-1)
+    phys, pre = load('elevation-physics'), load('elevation-procedural')
+    lake = np.isfinite(load('lake-surface'))
+    edge = ~grid.valid[:, list((0, 2, 4, 6))].all(1)
+    sea = cube_sea(grid, phys, pre, edge)
+    classes = cube_routing_classes(grid, phys, sea, sea | edge)
+    land = ~sea & ~lake & kept
+    record = {'grid': {'kind': 'cube' if grid.whole else 'cube-window', 'face_cells': grid.N, 'cells': grid.n,
+                       'kept_cells': int(kept.sum())}}
+    if not (d / f'{domain}-discharge-native.npy').is_file():
+        record.update({'note': 'no -discharge-native.npy (render.save_extra off): land cells only',
+                       'land routing': routing_summary(land, classes)})
+        return record
+    q = load('discharge')
+    fill = load('fill_m')
+    spec = config['rivers']['min_discharge_m3_s']
+    threshold = spec['global' if domain == 'global' else 'window'] if isinstance(spec, dict) else spec
+    river, length = cube_runs(grid, q, sea | lake, threshold)
+    river &= kept
+    direction, receiver = cube_runs.direction, cube_runs.receiver
+    bearings = cube_bearings(grid)
+    theta_km, theta_grid, theta_compass = cube_chord_headings(grid, direction, receiver, bearings)
+    fields = {'theta_km': theta_km, 'theta_grid': theta_grid, 'classes': classes}
+    filled = fill > 1.0
+    record.update({'all': summary(river, length, fields), 'on fill': summary(river & filled, length, fields),
+                   'off fill': summary(river & ~filled, length, fields),
+                   'fill_land_pct': round(100 * float(filled[~sea & kept].mean()), 1),
+                   'land routing': routing_summary(land, classes),
+                   'heading16_compass': harmonics(theta_compass[river]),
+                   'd8_axis': cube_axis(river, direction, bearings, np.degrees(grid.latitude))})
+    # Every land cell's step to its highest-discharge neighbour (when higher): the routing tree, inferred.
+    around = np.where(grid.valid, q[grid.safe], -np.inf)
+    best = np.argmax(around, axis=1)
+    higher = around[np.arange(grid.n), best] > q
+    record['land d8_axis'] = cube_axis(land & higher, np.where(higher, best, -1), bearings, np.degrees(grid.latitude))
+    return record
+
+
 def summary(mask, length, fields=None):
     n = int(mask.sum())
     if n == 0:
@@ -312,6 +551,10 @@ def main():
         d = tm.SANDBOX / label
         config = json.loads((d / 'config.json').read_text())
         for domain in domains:
+            if (d / f'{domain}-elevation-physics-native.npy').is_file():  # a cube domain: on its own cells
+                result[f'{label}/{domain}'] = measure_cube(d, label, domain, config)
+                print(label, domain, result[f'{label}/{domain}'], flush=True)
+                continue
             if not (d / f'{domain}-elevation-physics.npy').is_file():
                 continue
             phys = np.load(d / f'{domain}-elevation-physics.npy').astype(float)
