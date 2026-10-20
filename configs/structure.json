@@ -1,0 +1,56 @@
+{
+  "description": "The places the repository layout names (AGENTS.md, 'Where things go'), read by scripts/check_structure.py. A file is allowed when its folder matches a place's path and its suffix is one of the place's kinds or its name one of the place's names. Path segments: a literal name; '*' one folder named by folder_name; '#' one numeric folder (a run id); another pattern with * or ? one folder by fnmatch; '**' any depth of folders named by folder_name ('free' places take any names). Restrictions apply before the places; 'sealed' folders are never written; a path inside a 'checkouts' folder (an agent worktree) is judged from that checkout's root.",
+  "folder_name": "^[a-z0-9]+([_-][a-z0-9]+)*$",
+  "checkouts": [".claude/worktrees/*"],
+  "sealed": [
+    {"path": "runs/archive/**", "reason": "runs/archive/ is the sealed earlier layout and is never written"}
+  ],
+  "restrictions": [
+    {
+      "kinds": [".html", ".htm"],
+      "only_in": ["scripts/evaluation/templates", "out/evaluation/**", "runs/reports/**", "runs/*/#/evaluation*/**"],
+      "files": ["scripts/refs/physical_map_index.html"],
+      "reason": "pages are rendered from JSON by scripts/evaluation/ into out/evaluation, runs/reports or a run's evaluation folder; never write per-run HTML"
+    },
+    {
+      "kinds": [".py", ".ps1", ".sh", ".cmd", ".bat"],
+      "not_in": ["runs/**"],
+      "reason": "runs/ holds data, never per-run scripts; scripts live in scripts/"
+    }
+  ],
+  "places": [
+    {"path": "", "names": [".git", ".gitignore", ".gitattributes", "AGENTS.md", "AGENTS.override.md", "README.md", "CMakeLists.txt", "CMakePresets.json", "vcpkg.json", "LICENSE", "version.txt", "pyproject.toml", "uv.lock"]},
+    {"path": [".git/**", ".venv/**", ".vscode/**", ".codex/**", ".agents/**"], "kinds": ["*"], "free": true},
+    {"path": ".githooks", "names": ["pre-commit", "pre-push"]},
+    {"path": ".claude", "names": ["settings.json", "settings.local.json"]},
+    {"path": ".claude/agents", "kinds": [".md"]},
+    {"path": "assets/appearance", "kinds": [".uws"]},
+    {"path": "assets/palettes", "kinds": [".png"]},
+    {"path": "assets/palettes/physical", "kinds": [".cpt", ".json"]},
+    {"path": "assets/terrain", "kinds": [".txt"]},
+    {"path": "configs", "kinds": [".json", ".env", ".ini"]},
+    {"path": ["configs/evaluation", "configs/parameters", "configs/sandbox"], "kinds": [".json"]},
+    {"path": "docs/architecture/**", "kinds": [".md"]},
+    {"path": "docs/reference-guides", "kinds": [".md", ".txt"]},
+    {"path": "docs/tasks/*", "kinds": [".md"]},
+    {"path": "meta/**", "kinds": ["*"], "free": true},
+    {"path": ["out/build/**", "out/scratch/**", "out/evaluation/**"], "kinds": ["*"], "free": true},
+    {"path": "refs", "names": ["README.md"]},
+    {"path": ["refs/source/**", "refs/processed/**"], "kinds": ["*"], "free": true},
+    {"path": "runs", "names": ["storage.json"]},
+    {"path": "runs/registry", "kinds": [".json"]},
+    {"path": "runs/ledger", "kinds": [".jsonl", ".md"]},
+    {"path": ["runs/reports/**", "runs/work/**", "runs/*/#/**"], "kinds": ["*"], "free": true},
+    {"path": ["scripts", "scripts/benchmarks", "scripts/evaluation", "scripts/refs", "scripts/sandbox", "scripts/uwtools"], "kinds": [".py"]},
+    {"path": "scripts/evaluation/templates", "kinds": [".html"]},
+    {"path": "scripts/refs", "names": ["physical_map_index.html"]},
+    {"path": "src", "names": ["CMakeLists.txt"]},
+    {"path": ["src/app/**", "src/cli/**", "src/core/**", "src/io/**", "src/pipeline/**", "src/simulations/**", "src/validation/**", "src/world/**"],
+     "kinds": [".cpp", ".hpp", ".h", ".inc", ".cu", ".cmake"], "names": ["CMakeLists.txt", "README.md", "LICENSE"]},
+    {"path": "tests", "kinds": [".hpp"], "names": ["CMakeLists.txt"]},
+    {"path": ["tests/core/**", "tests/io/**", "tests/pipeline/**", "tests/simulations/**", "tests/world/**"], "kinds": [".cpp", ".hpp"], "names": ["CMakeLists.txt"]},
+    {"path": "tests/scripts", "kinds": [".py"]},
+    {"path": "tests/**/fixtures/**", "kinds": ["*"], "free": true},
+    {"path": "vcpkg-ports/*", "kinds": [".cmake", ".json"]}
+  ]
+}

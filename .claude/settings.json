@@ -15,6 +15,24 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Luka/AppData/Local/Programs/Python/Python313/python.exe",
+            "args": [
+              "C:/dev/undiscovered-worlds/scripts/uwtools/hook_runner.py",
+              "C:/dev/undiscovered-worlds/scripts/check_structure.py",
+              "--hook"
+            ],
+            "timeout": 30,
+            "statusMessage": "Checking the file's place in the layout"
+          }
+        ]
+      }
     ]
   }
 }
