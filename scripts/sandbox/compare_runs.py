@@ -13,11 +13,16 @@ Writes out/scratch/sandbox/compare-<name>/index.html; the images are referenced,
 import argparse
 import json
 import shutil
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SANDBOX = ROOT / 'out' / 'scratch' / 'sandbox'
-ATLAS = ROOT / 'refs' / 'processed' / 'earth-atlas'
+sys.path.insert(0, str(ROOT / 'scripts'))
+from uwtools.paths import main_root  # noqa: E402
+
+# The main tree's runs and atlas (also from a git worktree, which holds neither).
+SANDBOX = main_root() / 'out' / 'scratch' / 'sandbox'
+ATLAS = main_root() / 'refs' / 'processed' / 'earth-atlas'
 
 PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>Sandbox comparison {name}</title>
 <style>body{{background:#15181d;color:#ddd;font:14px system-ui;margin:16px}}h2{{margin:24px 0 8px}}
