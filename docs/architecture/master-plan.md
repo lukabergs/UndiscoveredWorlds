@@ -34,6 +34,22 @@ Every step names its origin, so its detail is one lookup away. Items found stale
 | 16 | Later phenomena (catalogue) | any | later | | |
 | 17 | Reviews and the adversarial review | | at the end | | |
 
+### Tracks (the user, 2026-10-21)
+
+The phases are worked in **tracks, one at a time**, each streamlined like T8: parallel workers within the track, the next track when its phases close. An issue seen during a step is triaged (`AGENTS.md`, "Tracks and triage"): fixed in the step if it belongs to it, else one row in the phase that owns it, without interrupting the track.
+
+| Order | Track | Phases and steps |
+|---|---|---|
+| A (now) | Repository, rules and protocols | 1.5; Phase 2 (2.2 to 2.8); the open items of §5 that tools can close |
+| B | Terrain refining (above and below sea) | 3.3; Phases 4 to 9, 11, 13; 6.1b, 6.1c; Phase 12 when the user's research arrives |
+| C | Climate rework | 3.2 (the fix); Phase 10 except the ocean steps |
+| D | Ocean currents | 10.3 and the ocean items of 10.6 (wet mask, sea ice) |
+| E | Mineralogy | 15.3 |
+| F | Life, society, world model, desktop | 15.1, 15.2, 15.4; Phase 14 |
+| last | Reviews | Phase 17 |
+
+The *Attention* column above predates the tracks; the track order decides.
+
 **Why this order.**
 - Phase 1 closes what T8 left open, including the one real cube regression: the hydrology of the lat-lon export.
 - Phase 2 is the user's request of 2026-10-18, never started.
@@ -120,6 +136,7 @@ Goal: the user's requirements of 2026-10-18: "SCRIPTED, AUTOMATED. No decision u
 | 2.4 | **Automatic moves.** A new run of a topic sends the previous one to D or the archive by script. Images no check reads are written to D directly. | worker | tools | 2.2 | same |
 | 2.5 | `out/scratch.storage-migration-backup` (26 GB on C, verified identical to D): `storage.py finish out/scratch`, which re-verifies every file and marks the receipt complete. Agents may run it since 2026-10-20. | orch | tools | | same |
 | 2.7 | **Deletion tools on read-only files.** `worktrees.py retire` and `trash.py move` stop with "access denied" on read-only files (a `.venv` `.pyd`, git pack `.idx` under `out/build/headless/_deps`), and neither resumes a half-done job: `retire` had already removed the worktree's `.git`, so it then refuses ("HEAD moved since the archive"). Clear the read-only attribute before unlinking, and let both resume a partial operation. A reviewer reads the change (AGENTS.md: guards and deleters are changed by reading, never tested with deletes). Then finish the two leftovers of wave 1: `.claude/worktrees/agent-af9bab603c2d9335e` (390 MB left; a full copy is trash entry `20261020T215954Z-0`) and `agent-a8aabce0917bb085c` (1.3 GB); both were preserved to `worktree-archive` and their work is in main (efbeb7f, 1c34a01). | worker, reviewer | tools | | wave 1 |
+| 2.8 | **Communication protocols** (the user's "communication protocols", taken as the agents' and the user's exchanges): the brief, the worker's report, the reviewer's verdict, the questions to the user (all in one message; no prompt until answered) and the wave handoff, each as a fixed field list in `docs/reference-guides/agent-workflow.md` and the agent definitions (`.claude/agents/*.md`); a script checks what is machine-readable (report and ledger fields, plan status rows with commit and duration). | design, worker | tools, docs | | the user, 2026-10-21 |
 | 2.6 | Script inventory. Scripts used only by tests: `climate_convergence.py`, `terrain_wind*.py`, `climate_reference_experiment_prepare.py`. The alias modules `map_rendering` and `cell_grid` in `scripts/benchmarks` and `scripts/refs`. Paths never exercised: `storage.route` into a non-empty directory, reference preparation end to end, an audited run with a violation. Each script is kept with a test or deleted. | surveyor, then mechanic | tools | | CP-4, CP-9, CP-10, PLAN.md P2 |
 
 Decided in 2.1: `scripts/refs/physical_map_index.html` (a renderer's template) stays allowlisted; the sandbox's compare pages (HTML written by `terrain_sandbox.py` under `out/scratch/sandbox/`) move to `out/evaluation` in 2.4; the pipeline's default `out/climate-diagnostics`, `out/images` and `out/inputs` (derived inputs, `scripts/evaluation/inputs.py`) are named places.
@@ -168,7 +185,7 @@ Goal: the target look, frozen as the reference for Phase 8.
 |---|---|---|---|---|---|
 | 6.1 | The details the user saw on t24 / base-v10. Ask for them with the next look list; each becomes a row here. | orch, user | sandbox | | the user, 2026-10-20 |
 | 6.1a | The user (2026-10-21): "even though the new baseline looks better, the global render shows square grid-artifacts" in the box (450, 300)-(600, 450) of `t24-base-v10/global-relief.png` (2048 x 1024), and in other areas. First look: rounded-square pockets and stair-stepped shelf edges in the shallow sea west of the peninsula, at about 1 to 5 base cells; land clean at full size. **Diagnosed** (`out/scratch/wave1/6.1a/summary.txt`): the squares are the sandbox's sea floor, not the renderer, land or face edges. M1: base-v10 has one-cell sea-floor steps (-10 to -100 m beside -2 to -5 km); the Catmull-Rom sampling (`cube_domain.py:472-484`) keeps them one base cell wide and `shelf_profile` (`terrain_sandbox.py:1729-1747`) puts a scarp on that contour, so pockets become rounded squares and shelf edges staircases; nothing later breaks it up off oceanic crust. M2: the oceanic blend weight is the per-base-cell `crust_class == 1` flag (line 1671), so the switch between the crust-age floor and the shelf follows the N 64 staircase. M3: the straight N-S cliff is four stratovolcano cells in one column added as whole-cell heights (`world_fields`, lines 908-912). Extent: 148 of 1300 sea tiles (11 %), mostly off oceanic crust, not tied to face edges. | worker | sandbox | | the user, 2026-10-21 |
-| 6.1b | **Fix the grid imprint at sea, without redesigning the sea floor** (Phase 12 waits for the user's research): the oceanic blend weight from a smoothed, distance-based field instead of the per-cell flag; the depth fed to `shelf_profile` sampled with a sub-cell warp so its contour leaves the cell boundaries; volcanoes drawn as cones on the fine grid. Each behind a key, compared on a page (global and the worst boxes of 6.1a) for the user's look; the default follows the look. | worker | sandbox | 6.1a | 6.1a |
+| 6.1b | **Fix the grid imprint at sea, without redesigning the sea floor** (Phase 12 waits for the user's research; the user agreed on 2026-10-21, since the source is the sea floor): the oceanic blend weight from a smoothed, distance-based field instead of the per-cell flag; the depth fed to `shelf_profile` sampled with a sub-cell warp so its contour leaves the cell boundaries; volcanoes drawn as cones on the fine grid. Each behind a key, compared on a page (global and the worst boxes of 6.1a) for the user's look; the default follows the look. | worker | sandbox | 6.1a | 6.1a |
 | 6.1c | Upstream of 6.1b: where base-v10's flat -2.1 km sea cells and its 4-5 km deep cells of crust class 3 come from (pipeline terrain stages or the engine). Survey only. | surveyor | terrain, engine | 6.1a | 6.1a |
 | 6.2 | Artefacts left from T1.6, each re-checked on base-v10 first: jagged hard/soft band scarps in the fold-belt foreland; G-coast's micro-texture blotches; the date-line seam (likely gone with the cube); tropical highland glaciation on B; oversized shields (thin engine sediment); crust under 20 km beneath G's land. | worker | sandbox | | RM T1.6, T1 notes |
 | 6.3 | Glacial isostasy (optional): the ice load depresses the crust and it rebounds, giving flooded lowlands and raised beaches. | worker | sandbox | 6.2 | RM T1.4 |
@@ -193,7 +210,7 @@ Goal: the pipeline draws what the sandbox draws, inside its contract: the global
 
 | Step | What | Agent | Lane | Depends | Origin |
 |---|---|---|---|---|---|
-| 8.1 | **Design.** Each sandbox layer's home:<br>- **global:** erodibility from the tectonic fields, the uplands lift, the province and stability fields;<br>- **regional:** the warp, the strike-oriented relief bank, rock bands, the coast term, the micro-texture, glaciers at fine levels, the filter with its strength field, the projection.<br>It also settles what the pipeline already has instead of a sandbox proxy (climate, the regional solve); the fold fabric's fate (a switch, default off: T0.4); and belt zonation (S5.5's share). The sea-floor part waits for Phase 12. Written into this phase. | design, surveyor | docs | 6.5 | RM T2.0, T0.4, MSP M10, M11 |
+| 8.1 | **Design.** Each sandbox layer's home:<br>- **global:** erodibility from the tectonic fields, the uplands lift, the province and stability fields;<br>- **regional:** the warp, the strike-oriented relief bank, rock bands, the coast term, the micro-texture, glaciers at fine levels, the filter with its strength field, the projection.<br>It also settles what the pipeline already has instead of a sandbox proxy (climate, the regional solve); the fold fabric's fate (a switch, default off: T0.4); and belt zonation (S5.5's share). The sea-floor part waits for Phase 12. It includes the noise calibration of 12.0 (granularity per scale, directionality from the tectonic fields), designed once for above and below sea. Written into this phase. | design, surveyor | docs | 6.5 | RM T2.0, T0.4, MSP M10, M11 |
 | 8.2 | Global erodibility from the tectonic fields. World-changing. | worker, reviewer | terrain | 8.1 | RM T2.1 |
 | 8.3 | **Hypsometry** (the land's height distribution). First a diagnosis: land hypsometry after each stage of a 256 run. Then the uplands lift and the global erosion's levers, together with the denudation band against the diffusion-dominated rate. Sediment: about 400 times too little reaches the sea. `placerResidenceMyr` becomes a parameter. The user looks at the result. | worker, reviewer, user | terrain, hydrology | 8.2 | RM T2.2, EHP E3, E4, E5 |
 | 8.4 | Regional: the warp, the oriented relief bank with the belt zones, the rock bands; the fold fabric behind its switch. | worker, reviewer | windows | 8.1, 7.4 | RM T2.4 |
@@ -254,6 +271,7 @@ The user, 2026-10-13: work stops "until I come back with specific proposals". Th
 
 | Step | What | Origin |
 |---|---|---|
+| 12.0 | The user (2026-10-21): trenches look like paint smudges and are not realistic, being far from continental shelves (seen at (189, 231)-(255, 265) of `t24-base-v10/global-relief.png`, a straight trench along a row of plate-boundary cells). The user suspects much of what is wrong above and below sea is noise calibration: the granularity of each noise at each scale, and directionality from the tectonic fields (noise warped along the geographic features), plus some added noise. That calibration is shared with 8.1 (the warp, the strike-oriented bank) and is designed once for both. | | |
 | 12.1 | The sandbox's sea floor follow-up: transform steps, narrow ridges, seamount chains (with 9.4). | RM T1.1 |
 | 12.2 | Submarine processes: canyons, gullies, fans, drapes. | RM T1.8 |
 | 12.3 | Sea floor and trenches as a global stage from crust age, replacing the calibrated C4 ocean hypsometry and its depth bands. | RM T2.3, EHP E7, E10, E11 |

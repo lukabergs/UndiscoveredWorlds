@@ -4,6 +4,8 @@ Procedural planetary simulation (terrain, tectonics, climate, hydrology, early s
 
 ## Working conventions
 
+- **Tracks and triage (the user, 2026-10-21).** Broad goals run one track at a time, streamlined like T8 (the cube): parallel workers within the track, not across tracks; the order is in the running plan's §1 "Tracks". An issue seen during a task is first triaged: if it belongs to the task in progress, it is fixed in that task; if it belongs to later work, it goes as one row into the phase that owns it and the current work continues. No chain of new steps spun off from steps.
+- **No prompt while questions are open (the user, 2026-10-21).** The next session's prompt is printed only when every question to the user is answered; until then the session asks all of them in one message.
 - The prompt for the next session is printed in the chat, never saved in the plan or another document (user, 2026-10-08). The exception of 2026-10-10 (`multiscale-plan.md` keeping its own handoff in §7 "Next") ended on 2026-10-13. **The running plan is `docs/architecture/master-plan.md`** (since 2026-10-20: numbered phases 1 to 17, steps `phase.step`, lanes for parallel waves); every other plan (`terrain-roadmap.md`, the multiscale, erosion and consolidation plans, `docs/tasks/`) is a record.
 - Before ending a phase or printing the prompt for the next one, write what the session learned where the next agent will read it (this file, the plan, the ledger, the guides, memory): nothing stays only in the conversation.
 - Work directly on `main`; uncommitted changes in the working tree are current work, so build on them and never reset, stash or revert them.
