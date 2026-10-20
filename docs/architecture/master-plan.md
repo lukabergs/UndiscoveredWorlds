@@ -167,6 +167,7 @@ Goal: the target look, frozen as the reference for Phase 8.
 | Step | What | Agent | Lane | Depends | Origin |
 |---|---|---|---|---|---|
 | 6.1 | The details the user saw on t24 / base-v10. Ask for them with the next look list; each becomes a row here. | orch, user | sandbox | | the user, 2026-10-20 |
+| 6.1a | The user (2026-10-21): "even though the new baseline looks better, the global render shows square grid-artifacts" in the box (450, 300)-(600, 450) of `t24-base-v10/global-relief.png` (2048 x 1024), and in other areas. First look: rounded-square pockets and stair-stepped shelf edges in the shallow sea west of the peninsula, at about 1 to 5 base cells; land clean at full size. Diagnosis first (which layer, how widespread), then a fix step. | worker | sandbox | | the user, 2026-10-21 |
 | 6.2 | Artefacts left from T1.6, each re-checked on base-v10 first: jagged hard/soft band scarps in the fold-belt foreland; G-coast's micro-texture blotches; the date-line seam (likely gone with the cube); tropical highland glaciation on B; oversized shields (thin engine sediment); crust under 20 km beneath G's land. | worker | sandbox | | RM T1.6, T1 notes |
 | 6.3 | Glacial isostasy (optional): the ice load depresses the crust and it rebounds, giving flooded lowlands and raised beaches. | worker | sandbox | 6.2 | RM T1.4 |
 | 6.4 | Lakes on base-v10: check the share and sizes against the v17 complaint ("too many and too large") and Earth. | worker | sandbox | 5.4 | RM T1.3, v17 notes |
