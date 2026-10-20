@@ -8,8 +8,9 @@ The user's rule (2026-10-20): agents may get rid of files as long as code makes 
 A delete of untracked data is refused by delete_guard.py; this moves it instead to
 <storage root>/trash/<entry>/ (the entry is a UTC time stamp and a number) with a receipt (original path, reason,
 files, bytes, SHA-256 of every file). On the same drive the move is a rename, so nothing is copied or deleted; from
-another drive every file is copied, verified by digest, and only then removed from its source. Only the user
-empties the trash (guard_catastrophe.py protects the folder from agent commands).
+another drive every file is copied, verified by digest, and only then removed from its source. The trash carries
+protect.py's deny-delete permission (each moved item's permissions are reset to inherit it), so nothing in it can
+be deleted until the user unlocks it to empty it; `restore` copies an entry back and leaves it in place.
 
 Refuses: links (the path itself or anything inside it: a recursive move must never follow a junction,
 2026-10-07), tracked files (use git rm), anything outside the repository and the storage root, and the protected
@@ -165,7 +166,11 @@ def move(paths, reason):
                 if sha256(copied / key if real.is_dir() else copied) != digest:
                     raise OSError(f'Copy verification failed for {key}; the source {real} is untouched')
             remove_verified(real, digests)
-        item['status'] = 'moved'
+        # A rename keeps the item's old permissions; reset them to the trash's inherited ones, so the trash's
+        # deny-delete permission (scripts/uwtools/protect.py) covers the item too.
+        reset = subprocess.run(['icacls', str(target), '/reset', '/T', '/C', '/Q'], capture_output=True, text=True,
+                               encoding='mbcs', errors='replace')
+        item['status'] = 'moved' if reset.returncode == 0 else 'moved; permissions not reset: ' + reset.stdout[-200:]
         receipt_path.write_text(json.dumps(receipt, indent=1) + '\n', encoding='utf-8')
     return entry, receipt
 
@@ -181,13 +186,24 @@ def restore(name):
     for item in receipt['items']:
         if os.path.lexists(item['original']):
             raise OSError(f'{item["original"]} exists again; nothing restored')
-        if os.path.splitdrive(item['original'])[0].lower() != os.path.splitdrive(str(entry))[0].lower():
-            raise OSError(f'{item["original"]}: on another drive; copy it back by hand from {entry / item["label"]}')
+        if not item.get('status', '').startswith('moved'):
+            raise OSError(f'{item["original"]}: its move did not finish (status {item.get("status")}); '
+                          f'copy it back by hand from {entry / item["label"]}')
     for item in receipt['items']:
+        # A copy back: the trash is delete-protected (protect.py), so the entry stays until the user empties it.
         original = Path(item['original'])
         original.parent.mkdir(parents=True, exist_ok=True)
-        os.rename(storage.long_path(entry / item['label']), storage.long_path(original))
-    (entry / 'receipt.json').rename(entry / 'restored.json')
+        source = storage.long_path(entry / item['label'])
+        if source.is_dir():
+            shutil.copytree(source, storage.long_path(original), symlinks=True)
+        else:
+            shutil.copy2(source, storage.long_path(original))
+        copied = storage.long_path(original)
+        for key, digest in item['sha256'].items():
+            if sha256(copied / key if source.is_dir() else copied) != digest:
+                raise OSError(f'restored copy of {key} does not match the receipt')
+    receipt['restored_utc'] = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')
+    (entry / 'receipt.json').write_text(json.dumps(receipt, indent=1) + '\n', encoding='utf-8')
     return len(receipt['items'])
 
 
@@ -198,7 +214,7 @@ def main():
     moving.add_argument('paths', nargs='+')
     moving.add_argument('--reason', default='')
     commands.add_parser('list', help='entries with their sizes')
-    back = commands.add_parser('restore', help='move an entry back where it was')
+    back = commands.add_parser('restore', help='copy an entry back where it was (the entry stays)')
     back.add_argument('entry')
     args = parser.parse_args()
     if args.command == 'move':

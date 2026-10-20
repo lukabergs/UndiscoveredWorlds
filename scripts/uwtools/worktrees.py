@@ -22,6 +22,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -254,9 +255,16 @@ def drop_branches(names):
         number += 1
     bundle = archive_root() / f'branches-{stamp}-{number}.bundle'  # never overwrites an earlier bundle
     bundle.parent.mkdir(parents=True, exist_ok=True)
-    code, out = git('bundle', 'create', str(bundle), *(f'refs/heads/{name}' for name in heads))
-    if code != 0 or not bundle.is_file():
-        raise OSError(f'git bundle create failed: {out}')
+    # git writes a bundle through a lock file it then renames; the archive is delete-protected (protect.py), so
+    # the bundle is made in the temp folder and copied in.
+    with tempfile.TemporaryDirectory() as scratch:
+        made = Path(scratch) / bundle.name
+        code, out = git('bundle', 'create', str(made), *(f'refs/heads/{name}' for name in heads))
+        if code != 0 or not made.is_file():
+            raise OSError(f'git bundle create failed: {out}')
+        shutil.copy2(made, bundle)
+        if sha256(bundle) != sha256(made):
+            raise OSError(f'{bundle}: copy verification failed; no branch deleted')
     if git('bundle', 'verify', str(bundle))[0] != 0:
         raise OSError(f'{bundle}: git bundle verify failed; no branch deleted')
     listed = {}

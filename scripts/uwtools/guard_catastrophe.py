@@ -69,7 +69,10 @@ DISK_TOOLS = re.compile(
     r'(?<![\w-])(diskpart|clear-disk|format-volume|remove-partition|initialize-disk|clear-volume|remove-physicaldisk|'
     r'reset-physicaldisk|set-partition|resize-partition|mkfs(\.\w+)?|wipefs|sfdisk|cfdisk|sgdisk|sdelete(64)?|bcdedit|'
     r'manage-bde|remove-itemproperty)(?![\w-])|\b(vssadmin|wbadmin)\b.*\bdelete\b|\bwmic\b.*\bshadowcopy\b.*\bdelete\b|'
-    r'\breg(\.exe)?\s+delete\b', re.IGNORECASE)
+    r'\breg(\.exe)?\s+delete\b|'
+    # Permissions: the deny-delete protection (protect.py) must not be removable by an agent.
+    r'(?<![\w-])(icacls|cacls|xcacls|takeown|set-acl|set-ntfsaccess|remove-ntfsaccess)(?![\w-])|'
+    r'protect(\.py)?\b.*\b(unlock|harden)\b|\bsetsecuritydescriptor|\bsetaccesscontrol', re.IGNORECASE)
 DELETE_WORDS = re.compile(
     r'(?<![\w.-])(rm|rmdir|rd|del|erase|unlink|shred|rimraf|remove-item|ri|clear-recyclebin|forfiles)(?![\w-])|'
     r'rmtree|rmsync|rmdirsync|unlinksync|remove_directory|removedirs|os\.remove|\.unlink\(|\.rmdir\(|'

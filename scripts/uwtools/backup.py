@@ -5,7 +5,7 @@
 Additive by design (erosion plan Phase D, 2026-10-07, after most of refs/processed
 was deleted through a worktree junction): a file is copied when the backup lacks it
 or its size or modification time differs; nothing is deleted in the destination;
-a backup file that would be overwritten is first moved to
+a backup file that would be overwritten is first copied to
 <destination>/.versions/<timestamp>/<source>/<path>. Junctions inside a source
 (runs/<module>, refs/processed/physical) are read through, with a guard against
 cycles. Each run writes <destination>/receipts/<timestamp>.json.
@@ -57,6 +57,9 @@ def back_up(name, source, destination, stamp, dry_run, counts):
     for path, relative in walk(source):
         target = target_root / relative
         counts['files'] += 1
+        # The destination is delete-protected (scripts/uwtools/protect.py: nothing inside may be deleted, renamed
+        # or replaced by rename), so the earlier copy is copied aside and the file is overwritten in place. An
+        # interrupted overwrite leaves a file whose size or time differs, so the next run copies it again.
         if target.exists():
             if same(path, target):
                 continue
@@ -64,14 +67,12 @@ def back_up(name, source, destination, stamp, dry_run, counts):
             counts['versioned'] += 1
             if not dry_run:
                 kept.parent.mkdir(parents=True, exist_ok=True)
-                os.replace(target, kept)
+                shutil.copy2(target, kept)
         counts['copied'] += 1
         counts['bytes'] += os.path.getsize(path)
         if not dry_run:
             target.parent.mkdir(parents=True, exist_ok=True)
-            temporary = target.with_name(target.name + '.partial')
-            shutil.copy2(path, temporary)
-            os.replace(temporary, target)
+            shutil.copy2(path, target)
 
 
 def main():

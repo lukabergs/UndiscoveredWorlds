@@ -39,7 +39,8 @@ DELETERS = {'rm', 'rmdir', 'unlink', 'shred', 'del', 'erase', 'rd', 'ri', 'remov
 CODE_DELETE = re.compile(r'rmtree|os\.remove\b|os\.unlink|\.unlink\(|os\.rmdir|\.rmdir\(|removedirs|send2trash|'
                          r'\[(system\.)?io\.(file|directory)\]::delete|remove-item|\brm\s+-|\bdel\s+/|\brd\s+/s|'
                          r'remove_tree|accept_newer\s*=\s*true|allow_unlanded\s*=\s*true|[\'"]rm[\'"]|deletefolder|'
-                         r'\brm\s*\(|rmsync|unlinksync', re.IGNORECASE)
+                         r'\brm\s*\(|rmsync|unlinksync|icacls|cacls|takeown|set-acl|setaccesscontrol|'
+                         r'setsecuritydescriptor', re.IGNORECASE)
 INLINE = re.compile(r'(?<![\w.-])(python3?|py|node|perl|ruby|bash|sh|zsh|pwsh|powershell)(\.exe)?\b[^|;&\n]*?'
                     r'\s-(c|e|command)\b|<<', re.IGNORECASE)
 SCRIPT_SUFFIXES = ('.py', '.ps1', '.sh', '.cmd', '.bat', '.js', '.mjs', '.cjs')
