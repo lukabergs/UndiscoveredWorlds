@@ -80,7 +80,8 @@ def settings(spec, register, resolution):
     if registered.get('recipe'):
         recipe_path = ROOT / registered['recipe']
         recipe = json.loads(recipe_path.read_text(encoding='utf-8'))
-        if recipe['height'] * 2 != recipe['width']:
+        # A lat-lon recipe names width and height; a cube recipe names sphere_face_cells (W = 4 N).
+        if 'width' in recipe and recipe.get('height', 0) * 2 != recipe['width']:
             raise SystemExit('The world grid is W x W/2')
         scenario = recipe_options(recipe)
         interval = recipe['checkpoint_every_updates'] * float(recipe['scenario'].get('delta_time_myr', 1.0))
@@ -90,7 +91,8 @@ def settings(spec, register, resolution):
         if resolution is not None:
             raise SystemExit('This module takes its grid from its inputs; --resolution is not accepted')
         return arguments, scenario, list(registered.get('arguments', [])), None, values, recipe, recipe_path
-    width = resolution or (recipe['width'] if recipe else None) or registered.get('resolution') or spec['resolution']
+    recipe_width = (recipe.get('width') or 4 * recipe['sphere_face_cells']) if recipe else None
+    width = resolution or recipe_width or registered.get('resolution') or spec['resolution']
     if width < 2 or width % 2:
         raise SystemExit('--resolution must be an even width')
     return arguments, scenario, list(registered.get('arguments', [])), width, values, recipe, recipe_path

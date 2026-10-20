@@ -1,7 +1,7 @@
 {
   "schema": "tectonics-run-registry/v1",
   "seed": 1,
-  "baseline": 78,
+  "baseline": 79,
   "runs": [
     {
       "id": 1,
@@ -397,6 +397,13 @@
       "run": "runs/tectonics/78",
       "date": "2026-10-07T14:40:55+00:00",
       "label": "erosion plan D close: implicit engine rivers (river_implicit on), against run 75"
+    },
+    {
+      "id": 79,
+      "status": "complete",
+      "run": "runs/tectonics/79",
+      "date": "2026-10-20T21:04:53+00:00",
+      "label": "phase 1.2: cube baseline (baseline v6, N 64, 400 Myr)"
     }
   ]
 }
