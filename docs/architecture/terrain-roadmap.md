@@ -354,7 +354,7 @@ Questions 2 and 3 are answered by (c): the interfaces change, and no torus is ke
 
 ## 4. Order
 
-T0 (one short session with the user) → T1 (sandbox; the user's order: T1.1 look, T1.2, T1.3, T1.5; T1.4 and T1.6 when they fit) → T3.1 to T3.3 (the pipeline's regional base must be clean before the port) → T2 → T3.4 to T3.7 → T4 (T4.1 survey can run any time; T4.2 and T4.4 need the user) → T5 alongside where it pairs (sediment with T2.2, river mouths any time) → T6 as the user picks → T7's adversarial review at the end. **Since 2026-10-18 (the user): T8, the spherical world model, comes first** (design in §3, awaiting the user's yes); then item 3's routing on base-v10, the sea floor (the user's research), coastal forms.
+T0 (one short session with the user) → T1 (sandbox; the user's order: T1.1 look, T1.2, T1.3, T1.5; T1.4 and T1.6 when they fit) → T3.1 to T3.3 (the pipeline's regional base must be clean before the port) → T2 → T3.4 to T3.7 → T4 (T4.1 survey can run any time; T4.2 and T4.4 need the user) → T5 alongside where it pairs (sediment with T2.2, river mouths any time) → T6 as the user picks → T7's adversarial review at the end. **Since 2026-10-18 (the user): T8, the spherical world model, comes first** (the user chose option (c); done through W3 on 2026-10-20: the cube is the default world grid, base-v10 the sandbox base; the user's look at base-v10 and its windows is the open item); then item 3's routing on base-v10, the sea floor (the user's research), coastal forms.
 
 ### T1 notes (2026-10-13)
 
@@ -496,5 +496,6 @@ The user's requirements, in their words where it matters: keep only the ESSENTIA
 | T1 step 1 (2026-10-17) | confirming renders of the new defaults, glacial-ratio pair, global K pair, straight-river crops, fill_pits page; verdicts pending (`erosion-0105`) | the commit after b202e3e | about 40 min from the session start (14:30), in parallel with the storage work and the T4.12 fourth round |
 | T1 verdicts (2026-10-18) | fill gradient 2e-5 and fill_pits adopted; glacial 20 and K 3000 kept; presets; order from here (`erosion-0106`) | the commit after e394d61 | the user's review overnight |
 | T8 steps 1-2 (new) | the spherical world model: four surveys, the base-v9 striping baseline, the design (§3 T8); no code, awaiting the user's yes (`tectonics-0018`) | 817f5bd | 23 min from b0ce83b (22:07:29 to 22:30:55) |
+| T8 option (c), W0-W3 | the spherical mesh through the whole pipeline: W0 design (`sphere-mesh.md`), W1 foundation (frozen 4bdf592), W2 ports of every module, the cube engine (baseline v6), cube windows, W3 the cube default, Earth scores equal to lat-lon, the sandbox on base-v10 within the striping acceptance; the user's look open (`tectonics-0019`, `tectonics-0020`; the T8 status table in §3) | 5edc651 .. the T8 commits of 2026-10-20 | about 27 h wall clock from 255db4e (2026-10-18 23:06), of which about 13 h of usage-limit pauses |
 | Tools | `scripts/sandbox/terrain_metrics.py` | 3d3afda | |
 | Ledger | `erosion-0100` covers the sandbox work 2f201aa..ba63d91 | 2994869 | |
