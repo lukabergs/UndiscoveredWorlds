@@ -84,6 +84,21 @@ class CollectorTests(unittest.TestCase):
         self.assertIn("engine: t412.band_3000", document["summary"]["failing"])
         self.assertNotIn("striping: engine.latlon.ratio_70-80", document["summary"]["failing"])
 
+    def test_later_scores_are_recorded_after_w33c(self):
+        later = Path(self.directory.name) / "later/scores.json"
+        later.parent.mkdir()
+        later.write_text(json.dumps({"modules": {"hydrology": {
+            "verdict": {"latlon": {"checks": "fail"}, "cube": {"checks": "fail"}},
+            "table": [{"validation": "internal_drainage", "metric": "intersection_over_union", "cube": 0.277,
+                       "latlon": 0.315, "earth": 1.0}]}}}), encoding="utf-8")
+        earth = self.section(acceptance.collect(self.scratch, self.output, render=False, scores=[("1.3", later)]),
+                             "earth")
+        rows = {row["id"]: row for row in earth["gates"]}
+        self.assertEqual(rows["1.3.hydrology.intersection_over_union"]["value"], 0.277)
+        self.assertEqual(rows["1.3.hydrology.intersection_over_union"]["result"], "recorded")
+        self.assertIn("1.3.hydrology.checks", rows)
+        self.assertIn(str(later), earth["sources"])
+
     def test_window_log_pairs(self):
         text = "\n".join([
             "interior shared cells 256 fields 14 identical 14",

@@ -1,13 +1,14 @@
 """The T8 acceptance page (terrain roadmap section 3, T8 "Acceptance"; step W3.6), rendered from JSON.
 
     uv run --offline python scripts/evaluation/acceptance.py [--scratch DIR] [--json OUT] [--output DIR]
-        [--base-v10 FILE] [--no-maps]
+        [--base-v10 FILE] [--scores STEP=FILE ...] [--no-maps]
 
 The collector reads the evidence the T8 steps left under the main tree's out/scratch/sphere (DIR) and
 writes one document (OUT, default DIR/acceptance/t8-acceptance.json) with a section per topic: the engine
 (E6/acceptance.json, the gates as amended after E6), striping by band and A4 on the lat-lon view and
 natively (E6, W2-FE), cube seam ranks (E6, W3-seam, W2-FE; cube_seams.py's rule: a seam only above the
-null's 95th percentile), Earth scores lat-lon against cube (W3.3a, W3.3b, W3.3c), timings and the D8
+null's 95th percentile), Earth scores lat-lon against cube (W3.3a, W3.3b, W3.3c, then each --scores
+file of a later step in the same layout, recorded and never gated), timings and the D8
 face-axis measure (W3.4), the cube windows' bit-identical overlap pairs (parsed from logs/W2-W3a..c.txt),
 the sandbox global (W2-SB1) with a placeholder for base-v10 (W2-SB2), and the cube procedural world
 (W2-FE) with two maps: the relief of its lat-lon export and its native fields on the cube's cross net,
@@ -304,10 +305,10 @@ def seams(section, scratch):
 # --- Earth scores -----------------------------------------------------------------------------------------
 
 @guarded
-def earth_scores(section, scratch):
+def earth_scores(section, scratch, later=()):
     latest = 'W3.3c'
-    for step in ('W3.3a', 'W3.3b', 'W3.3c'):
-        path = scratch / step / 'scores.json'
+    steps = [(step, scratch / step / 'scores.json') for step in ('W3.3a', 'W3.3b', 'W3.3c')] + list(later)
+    for step, path in steps:
         document = section.read(path)
         if document is None:
             continue
@@ -640,8 +641,8 @@ SECTIONS = (
      'the true ratio_median lies above the null\'s 95th percentile (W3-seam decision).'),
     ('earth', 'Earth scores, lat-lon against cube (256, seed 1)',
      'global-balanced-v1 is gated on the latest climate scores (cube at most lat-lon); the rest is recorded beside '
-     'its lat-lon value and Earth. W3.3c\'s hydrology scores predate the export lake rule (7769a80, f0c5209: '
-     'export endorheic share 0.065, roadmap W3.3c).'),
+     'its lat-lon value and Earth. W3.3b\'s and W3.3c\'s hydrology scores predate the export lake rule (7769a80, '
+     'f0c5209, roadmap W3.3c); a later step\'s rows (--scores) re-measure them after it.'),
     ('timings', 'Timings (W3.4, full procedural recipe, default duration)', ''),
     ('d8', 'D8 face-axis measure (W3.4)',
      'Mean cos 4 phi of river directions against the grid axes; random draws give the null.'),
@@ -657,11 +658,13 @@ SECTIONS = (
 )
 
 
-def collect(scratch, output, base_v10_path=None, render=True):
+def collect(scratch, output, base_v10_path=None, render=True, scores=()):
+    """`scores`: (step, path) of later Earth-score files in the W3.3c layout, after W3.3c's."""
     scratch, output = Path(scratch), Path(output)
     base_v10_path = Path(base_v10_path) if base_v10_path else scratch / 'W2-SB2/totals.json'
+    later = [(step, Path(path)) for step, path in scores]
     builders = {'engine': lambda s: engine(s, scratch), 'striping': lambda s: striping(s, scratch),
-                'seams': lambda s: seams(s, scratch), 'earth': lambda s: earth_scores(s, scratch),
+                'seams': lambda s: seams(s, scratch), 'earth': lambda s: earth_scores(s, scratch, later),
                 'timings': lambda s: timings(s, scratch), 'd8': lambda s: d8(s, scratch),
                 'windows': lambda s: windows(s, scratch), 'sandbox': lambda s: sandbox(s, scratch),
                 'base-v10': lambda s: base_v10(s, base_v10_path),
@@ -704,11 +707,17 @@ def main(argv=None):
     parser.add_argument('--output', type=Path, default=scratch.parents[1] / 'evaluation/t8-acceptance',
                         help='the page directory (default out/evaluation/t8-acceptance of the main tree)')
     parser.add_argument('--base-v10', type=Path, help='base-v10 totals (default SCRATCH/W2-SB2/totals.json)')
+    parser.add_argument('--scores', action='append', default=[], metavar='STEP=FILE',
+                        help='a later step\'s Earth scores (the W3.3c scores.json layout), shown after W3.3c\'s and '
+                             'recorded, never gated; repeatable')
     parser.add_argument('--no-maps', action='store_true', help='skip the two map renders')
     args = parser.parse_args(argv)
+    if any('=' not in item for item in args.scores):
+        parser.error('--scores takes STEP=FILE')
     json_path = args.json or args.scratch / 'acceptance/t8-acceptance.json'
     args.output.mkdir(parents=True, exist_ok=True)
-    document = collect(args.scratch, args.output, args.base_v10, not args.no_maps)
+    document = collect(args.scratch, args.output, args.base_v10, not args.no_maps,
+                       [tuple(item.split('=', 1)) for item in args.scores])
     page = write(document, json_path, args.output)
     summary = document['summary']
     print(f"{json_path}\n{page}\ngated: {summary['pass']} pass, {summary['fail']} fail, {summary['accepted']} accepted; "
