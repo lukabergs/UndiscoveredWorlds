@@ -39,6 +39,7 @@ HOME = os.path.normcase(os.path.normpath(os.path.expanduser('~')))
 # Whole subtrees no agent command may delete, move or overwrite (the user's data, backups and the guards).
 PROTECTED_TREES = [
     r'C:\dev\undiscovered-worlds\refs',
+    r'D:\dev\undiscovered-worlds\refs',
     r'C:\dev\undiscovered-worlds\.git',
     r'C:\dev\meta',
     r'D:\dev\bak',

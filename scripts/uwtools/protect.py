@@ -25,7 +25,7 @@ from pathlib import Path
 
 PLACES = [
     Path(r'C:\dev\undiscovered-worlds\refs'),
-    Path(r'D:\dev\undiscovered-worlds\refs\processed\physical'),  # the target of refs/processed/physical (junction)
+    Path(r'D:\dev\undiscovered-worlds\refs'),  # the storage side of refs/processed/physical and refs/source/physical
     Path(r'D:\dev\bak'),
     Path(r'D:\dev\undiscovered-worlds\worktree-archive'),
     Path(r'D:\dev\undiscovered-worlds\trash'),
@@ -57,7 +57,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     commands = parser.add_subparsers(dest='command', required=True)
     commands.add_parser('status', allow_abbrev=False)
-    commands.add_parser('lock', allow_abbrev=False)
+    lock = commands.add_parser('lock', allow_abbrev=False)
+    lock.add_argument('places', nargs='*', help='some of PLACES (default: all)')
     commands.add_parser('harden', allow_abbrev=False)
     unlock = commands.add_parser('unlock', allow_abbrev=False)
     unlock.add_argument('place')
@@ -68,7 +69,11 @@ def main():
             print(f'{state:10}  owner {owner(place) if place.exists() else "-":36}  {place}')
         return
     if args.command == 'lock':
-        for place in PLACES:
+        chosen = [Path(item).resolve() for item in args.places] or PLACES
+        unknown = [str(item) for item in chosen if item not in PLACES]
+        if unknown:
+            sys.exit(f'not protected places: {unknown}')
+        for place in chosen:
             if not place.exists():
                 print(f'missing     {place}')
                 continue

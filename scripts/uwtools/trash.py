@@ -48,7 +48,7 @@ def protected_places():
     storage_root = storage.storage_root()
     places = [ROOT, ROOT / '.git', ROOT / 'refs', ROOT / 'meta', ROOT / 'runs' / 'registry', ROOT / 'runs' / 'ledger',
               ROOT / 'runs' / 'archive', ROOT / 'out', ROOT / 'runs', storage_root, storage_root / 'worktree-archive',
-              storage_root / 'receipts', storage_root / 'trash', storage_root / 'out', storage_root / 'out' / 'scratch',
+              storage_root / 'receipts', storage_root / 'trash', storage_root / 'refs', storage_root / 'out', storage_root / 'out' / 'scratch',
               storage_root / 'out' / 'evaluation', storage_root / 'runs']
     # The storage side of every junction (runs/<module>, runs/reports/<name>, out/scratch, out/evaluation): moving
     # it would leave the junction on C pointing at nothing.
