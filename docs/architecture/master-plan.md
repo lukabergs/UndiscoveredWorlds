@@ -311,6 +311,7 @@ One row per step as it closes. Duration is measured from the previous step's com
 | 1.1 | done: base-v10 adopted by the user (2026-10-20) | this plan's commit | |
 | 1.6 | done: 14 items to the trash (`D:/dev/undiscovered-worlds/trash/20261020T190214Z-0`); the 30 T8 branches dropped after a verified bundle (`worktree-archive/branches-20261020-210153-0.bundle`) | (docs only) | |
 | 2.5 (part) | the backup folder is already gone (deleted by the user); what is left: `storage.py` marking its receipt complete | | |
+| protection (new) | `protect.py lock` applied 2026-10-20 to refs/ (C and D sides), D:/dev/bak, worktree-archive and the trash; every place locked and the permission reaches the existing files (`protect.py status`). The refs writers were converted to copy-based writes (`72a6dd8`, `protected_io.staged`, staging on D) and only compiled: the first reference-data step that runs them (10.2, 11.1) checks them | d333d3d, 72a6dd8, 43debdf | |
 | safeguards (new) | `guard_catastrophe.py` (global), `delete_guard.py` fails closed, `trash.py`, `worktrees.py drop-branches`; agents retire landed worktrees (the user, 2026-10-20) | 2288474 | |
 
 ## 5. For the user
