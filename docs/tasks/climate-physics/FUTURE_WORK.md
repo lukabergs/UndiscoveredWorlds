@@ -36,7 +36,7 @@ changing winds, positivity and mass; uniform flow, vortex and polar trails.
   lowers land rainfall correlation from run 167's 0.437 to 0.047. The default
   remains `legacy`. Numerical balance is not climate validation. Next work must
   address the independently diagnosed 500 hPa return flow and incorrect tropical
-  SST gradients before promotion; see the [trial results and commands](../../../runs/maps/climate/README.md#experimental-tropical-boundary-layer).
+  SST gradients before promotion; see the [trial results and commands](../../../runs/archive/maps/climate/README.md#experimental-tropical-boundary-layer).
 - `src/simulations/climate/climate_atmosphere.*`: conservative two-layer grey shortwave/longwave
   exchange, bulk sensible heat, actual layer condensation and falling-rain
   re-evaporation diagnose atmospheric heating in W/m2. Surface evaporation
@@ -75,7 +75,7 @@ changing winds, positivity and mass; uniform flow, vortex and polar trails.
   conditional optimization choices, not required dependencies: deterministic
   fixtures converge with the existing preconditioner.
 
-Production: `src/simulations/climate/climate_coupling.cpp`,
+Production: `src/simulations/climate/climate_rainfall_and_coupling.cpp`,
 `src/simulations/climate/climate_fields.cpp`, `src/app/generation_workbench.cpp`.
 Bounded atmosphere/ocean/hydrology iterations feed diagnosed layer heating back
 into circulation without repeating coastal temperature postprocessing. They
@@ -107,7 +107,7 @@ An existing experimental gameplay backend follows interpolated seasonal jets.
 `planet::advanceweather(seconds, optionalHorizontalCells)` advances only the
 anomaly state. It preserves climate maps, supports conservative LOD changes,
 and serializes time, all layer fields and RNG state for replay. World save
-version is **17**; version-16 files are not migrated. Climate generation no longer
+version is **19**; versions 17 and 18 are converted on load. Climate generation no longer
 initializes the runtime gameplay state. Runtime storms, fronts and gameplay
 integration are outside the current work, even where reusable backend code exists.
 
@@ -212,7 +212,7 @@ deterministic coupling and rejected incomplete basin solves.
   subsequently completed at 64x33, seed 1, selected physics/24-pass cap;
   coupling passed at iteration 13 with 1.49% aggregate heating change.
   Higher-resolution validation remains open.
-- Fresh validation workbook: `runs/metrics/metrics.xlsx`.
+- Fresh validation workbook: `runs/archive/metrics/metrics.xlsx`.
   Only run 159 is included. Numeric cell exports and
   `scripts/benchmarks/summarize-climate-validation.py` provide paired spatial inputs;
   Excel calculates derived scores. Global Koppen uses spherical areas and
@@ -248,4 +248,4 @@ deterministic coupling and rejected incomplete basin solves.
 - Full application save/load/runtime-weather round trip across supported hosts;
   binary weather-state replay is covered by deterministic unit tests.
 
-The cleanup Debug build and all 13 C++ module tests passed. Current verification commands are in README.md and tests/README.txt. Historical metrics and run metadata are retained in runs/metrics/run_history.xlsx; old phase plans were removed.
+The cleanup Debug build and all 13 C++ module tests passed. Current verification commands are in README.md and docs/reference-guides/verification.md. Historical metrics and run metadata are retained in runs/archive/metrics/run_history.xlsx; old phase plans were removed.

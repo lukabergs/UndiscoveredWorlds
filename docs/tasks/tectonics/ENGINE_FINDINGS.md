@@ -9,8 +9,8 @@ mineral model now works around items 1 and 2; the others affect it indirectly.
 Reproduce with:
 
 ```powershell
-out/build/headless-modules/bin/tectonic_pipeline.exe batch-export --seed 1 `
-  --output <dir> --no-initial --checkpoint-every-updates 25 --mineral-history on
+out/build/headless/bin/Release/world_pipeline.exe run --recipe tectonics --seed 1 `
+  --resolution 256 --duration 600 --checkpoint-every 25 --mineral-history on --bundle <dir>
 ```
 
 ## 1. `crust_class` labels deep ocean floor continental
@@ -75,9 +75,9 @@ the solver exactly.
 
 The API now provides `tectonics_get_column_cells`, `tectonics_capture_snapshot`
 and `tectonics_get_map_width/height`. The mineral frame reader and
-`tectonic_pipeline` use only the API; `scripts/check-layout.py` rejects internal
-engine headers outside the engine, its tests and `tectonic_column_probe`.
-Heightmap TIFF I/O moved to `src/io/topography_tiff` (`uw_topography_io`).
+`world_tectonics.cpp` use only the API; `scripts/check_layout.py` rejects internal
+engine headers outside the engine (its list of public headers).
+Heightmap TIFF I/O moved to `src/io/topography_tiff` (`uw_io`).
 
 ## 7. Always-zero cycle counter (resolved 2026-10-01)
 
@@ -87,7 +87,7 @@ planet state and saves (version 18; version 17 saves still load).
 ## 8. Mantle plumes (engine change, opt-in, 2026-10-01)
 
 New module `tectonic_plumes.cpp/.hpp` (`tectonics::plumes`), scenario
-`plume_processes` (recipe keys `plume-*`, `tectonic_pipeline --plume-*`). The
+`plume_processes` (recipe keys `plume-*`, `world_pipeline --plume-*`). The
 default `count` 0 changes nothing: the seed-1 procedural world from
 `world_pipeline` is bit-identical with the plume-capable engine, and the CLI check
 passes.
@@ -130,9 +130,9 @@ heads do not start rifts by themselves; plume-related deposits; the app's
 engine plume positions.
 
 ```powershell
-out/build/headless-modules/bin/tectonic_pipeline.exe inspect --final --seed 1 `
+out/build/headless/bin/Release/world_pipeline.exe run --recipe tectonics --seed 1 `
   --plume-count 6 --plume-tail-flux-km3-yr 0.25 --plume-tail-radius-km 120 `
-  --plume-swell-age-myr 10 --plume-swell-radius-km 300 --bundle-output <dir> --output <dir>/summary.json
+  --plume-swell-age-myr 10 --plume-swell-radius-km 300 --bundle <dir>
 ```
 
 ## Mineral-side changes made

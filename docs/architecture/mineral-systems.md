@@ -76,7 +76,7 @@ must stand above -1000 m: continents, arcs and accreted terranes. Deep ocean
 floor hosts no deposits.
 
 Expected deposits per update are `rate * area * dt * intensity`, with
-equal native planar cell areas (`cellKm * cellKm`). Counts are
+the true area of each engine cell (`TectonicFrame::cellAreaKm2`, from the cube grid). Counts are
 Poisson and locations are area-weighted, so refining the grid preserves the
 expected endowment. Streams are seeded from the world seed.
 

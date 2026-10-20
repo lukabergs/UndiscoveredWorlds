@@ -36,7 +36,7 @@ World                  one planet at one point in its history
 │                      or cell-centred W × W/2; models may run on their own grids
 ├─ Geosphere           elevation, crust type/age/thickness, sediment, landforms;
 │  │                   plates, boundaries, deforming regions, mineral deposits
-│  └─ Mantle           prescribed flow field, plumes (planned), heat flow
+│  └─ Mantle           prescribed flow field, plumes (opt-in), heat flow
 ├─ Hydrosphere         ocean state (SST, currents); rivers, lakes, wetlands,
 │                      deltas, tides, soil water
 ├─ Cryosphere          sea ice, land ice, snow
@@ -88,13 +88,13 @@ validation read and write the floats, and the former `int16` encodings (whole
 of `climateworld` (`climatelegacyscale`), which the terrain, hydrology,
 resource and society code, the `.uww` save format and the renderers still read.
 The base elevation is float32 metres above the datum (with a separate sea
-level): tectonics stores unrounded heights and the climate module reads them
-exactly, while the terrain and hydrology passes still read and write whole metres
-(`wholemetres`), and the land/sea mask is taken from the whole-metre value so that
+level): tectonics stores unrounded heights and the code under `src/simulations`
+and `src/pipeline` reads and writes them as float (`nomfloat`), while the land/sea
+test (`basebelowsea`, `surfacebelowsea`) takes the whole-metre value so that
 every consumer sees the same coast. The elevation added on top of the base
-(mountains, canyon uplift, craters, volcanoes, ocean ridges), lake surfaces and
-river flow keep their integer types until the code that produces them is
-reworked; category codes and masks are discrete and stay integer or boolean. A
+(mountains, canyon uplift, craters, volcanoes, ocean ridges) and lake surfaces
+are float too; river flow keeps its integer type until the code that produces
+it is reworked; category codes and masks are discrete and stay integer or boolean. A
 process that moves from an integer accessor to the float one changes its results
 and needs a new baseline for its module.
 

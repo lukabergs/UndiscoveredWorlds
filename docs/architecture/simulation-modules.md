@@ -21,7 +21,7 @@ own headers. Module-local helpers are private rather than declared globally.
 | Generation stage execution (formerly in the workbench) | `pipeline/world_stages` |
 | Process kinds and declared field access; recipes, scheduler, write audit | `pipeline/world_processes`, `pipeline/world_recipes` |
 | World field catalogue and read tracking | `core/world/` |
-| Run bundles (fields and tables as NumPy files with a manifest) | `io/run_bundle`, `wip/planet_bundle`, `wip/planet_fields` |
+| Run bundles (fields and tables as NumPy files with a manifest) | `io/run_bundle`, `world/planet_bundle`, `world/planet_fields` |
 | Headless PNG I/O for imports and validation | `io/raster_image` |
 | Climate module world: climate state plus bound terrain and planet inputs | `simulations/climate/climate_world` |
 | Climate stages on a climate world (shared by both pipelines) | `pipeline/climate_stages` |
@@ -65,9 +65,10 @@ imported terrain is prepared.
 
 Each source directory is one static library named after it (`uw_core`, `uw_io`,
 `uw_world`, `uw_pipeline`, `uw_validation`, `uw_cli`, `uw_app`, and `uw_climate`,
-`uw_geology`, `uw_terrain`, `uw_hydrology`, `uw_resources`, `uw_society` under
-`simulations/`), defined in the `CMakeLists.txt` of its directory; the engine is
-`uw_tectonics`. The libraries do not link each other, because world, pipeline and the
+`uw_geology`, `uw_terrain`, `uw_hydrology`, `uw_landscape`, `uw_regional`,
+`uw_resources`, `uw_society` under `simulations/`, with `uw_mineral_systems` and
+`uw_mineral_tectonics` in `geology/mineral_systems/`), defined in the
+`CMakeLists.txt` of its directory; the engine is `uw_tectonics`. The libraries do not link each other, because world, pipeline and the
 modules refer to each other; the root `CMakeLists.txt` names two sets. `uw_headless`
 is everything but the desktop and is what `world_pipeline` links. `uw_climate_world`
 (core, I/O, climate, pipeline, validation) leaves out `uw_world` and the planet-level
@@ -75,7 +76,7 @@ modules: `world_tests` links only it, so a climate source that needs planet fail
 that link. Planet-level modules still rely on world storage and legacy utilities in
 `src/world/`, but none depends on SFML or ImGui; `world_pipeline` builds with
 `UW_BUILD_APP=OFF`, and the desktop adds `uw_app` (rendering, panels, workbench).
-Planet persistence, regional generation and the utility umbrella remain coupled;
+Planet persistence and the utility umbrella remain coupled;
 see [world model](world-model.md).
 
 ## Retention decisions

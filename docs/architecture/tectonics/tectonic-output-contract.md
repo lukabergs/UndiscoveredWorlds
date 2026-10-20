@@ -88,9 +88,9 @@ the uplift rate's mean continues the stayed rock's, the strain of new ocean floo
   edges. The ocean floor created in an opening starts at
   0, so a divergent cell keeps the stayed rock's tensor on the rest of its area
   only. Cumulative over the run, no decay; a sum of small strains (the strain
-  reaches about 1.4 at 256 columns, seed 1, 600 Myr of the legacy recipe v3), so a small-strain measure.
+  reached about 1.4 at 256 columns, seed 1, 600 Myr of the legacy recipe v3, measured on the torus before the cube), so a small-strain measure.
   `shortening` is minus the least principal component times the engine's cell
-  spacing (the mean cell side sqrt(4 pi R² / 6 N²), N = `sphere_face_cells`; 156 km
+  spacing (the mean cell side sqrt(4 pi RÂ² / 6 NÂ²), N = `sphere_face_cells`; 156 km
   at N 64 on Earth's radius), 0 where no axis shortens: strain x the spacing,
   metres that depend on the engine's resolution, so a consumer that needs the
   strain divides by the spacing (the world's `geosphere.shortening` is the same
