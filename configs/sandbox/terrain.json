@@ -1,5 +1,5 @@
 {
- "base_bundle": "out/scratch/sandbox/base-v9",
+ "base_bundle": "out/scratch/sandbox/base-v10",
  "seed": 1,
  "default_domains": ["global", "B", "F", "G"],
  "domains": {
@@ -99,6 +99,6 @@
              "inflow": {"enabled": true, "min_m3_s": 1.0}},
  "render": {"before_physics": false, "stages": true, "diagnostics": true, "warp_grid_km": 400,
             "earth_hardness": "refs/processed/lithology/glim_erodibility_2048.png"},
- "cube": {"enabled": false, "note": "the global domain and the windows on the cube of a cube base bundle (the global at k N cells per face edge, k = domains.global.columns / 4 N; a window at its scale k: its pixel box's level-0 cells and margin rings, sphere-mesh.md section 8); world fields by G; export_columns null: 4 k N (a window: its box at k pixels per pixel)",
+ "cube": {"enabled": true, "note": "the global domain and the windows on the cube of a cube base bundle (the global at k N cells per face edge, k = domains.global.columns / 4 N; a window at its scale k: its pixel box's level-0 cells and margin rings, sphere-mesh.md section 8); world fields by G; export_columns null: 4 k N (a window: its box at k pixels per pixel)",
           "export_columns": null}
 }

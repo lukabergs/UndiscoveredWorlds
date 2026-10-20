@@ -52,6 +52,22 @@
         "domains.G-coast.pixels=[45, 25, 48, 28]",
         "domains.F-troughs.pixels=[189, 96, 192, 99]"
       ]
+    },
+    "base-v9": {
+      "description": "The lat-lon base-v9 (procedural-world, seed 1, 256 columns, the W3 tectonics baseline at 400 Myr; the sandbox default until W3.5, 2026-10-20) with its windows (choose_windows.py on t22-base-v9) and the lat-lon sandbox (cube off): the t22-base-v9 / t23-v9-defaults look.",
+      "set": [
+        "base_bundle=\"out/scratch/sandbox/base-v9\"",
+        "cube.enabled=false",
+        "domains.A.pixels=[153, 61, 172, 76]",
+        "domains.B.pixels=[169, 61, 188, 76]",
+        "domains.F.pixels=[162, 101, 181, 116]",
+        "domains.G.pixels=[57, 12, 76, 27]",
+        "domains.O.pixels=[89, 7, 108, 22]",
+        "domains.B-core.pixels=[174, 67, 177, 70]",
+        "domains.B-foreland.pixels=[175, 72, 178, 75]",
+        "domains.F-troughs.pixels=[171, 108, 174, 111]",
+        "domains.G-coast.pixels=[62, 13, 65, 16]"
+      ]
     }
   }
 }

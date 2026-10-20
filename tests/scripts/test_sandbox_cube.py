@@ -99,6 +99,7 @@ class OverlapTest(unittest.TestCase):
 
     def check_overlap(self, config, world, bundle_columns, bundle_rows, first, second, scale):
         config = json.loads(json.dumps(config))
+        config["cube"]["enabled"] = False   # lat-lon worlds (the default base is the cube base-v10)
         config["domains"] = {"A": {"pixels": first, "scale": scale, "margin": 1},
                              "B": {"pixels": second, "scale": scale, "margin": 1}}
         config["physics"]["use_levels"] = False

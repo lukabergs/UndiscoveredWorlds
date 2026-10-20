@@ -2,8 +2,9 @@
 (terrain_sandbox.exe, src/cli/terrain_sandbox_main.cpp), rendered on the whole world and on windows.
 It is for iterating on the look in seconds, not a pipeline stage: nothing is registered and the multiscale
 contract (exact block means, pinned rivers, seamless windows) is not enforced. The base is a world bundle
-stopped before the climate (config base_bundle, out/scratch/sandbox/base-v9: procedural-world, seed 1,
-256 columns, the W3 tectonics baseline at 400 Myr, --steps ..terrain.roughness).
+stopped before the climate (config base_bundle, out/scratch/sandbox/base-v10 since W3.5: procedural-world, seed 1,
+--resolution 256 on the cube (N 64), the engine's baseline v6 at 400 Myr, --steps ..terrain.roughness; cube.enabled;
+the lat-lon base-v9 with its windows is the preset base-v9).
 
 Order per domain (the whole world at a preview resolution, each window at a scale k with a margin):
 the base surface (cubic B-spline of the world's surface elevation), a slow position warp, the relief noise
