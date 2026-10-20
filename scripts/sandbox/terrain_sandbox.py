@@ -2968,8 +2968,10 @@ def export_for_render(domain, fields, result, config, directory):
         vresult.update(elevation=out['elevation'], discharge=out['discharge'], ice=out.get('ice'),
                        lake_surface=out.get('lake-surface'), elevation_physics=out['elevation-physics'],
                        totals={name: out[f'total-{name}'] for name in result['totals']})
-        for key, values in (('elevation', out['elevation']), ('elevation-physics', out['elevation-physics']),
-                            ('lake-surface', out.get('lake-surface'))):
+        exported = [('elevation', out['elevation']), ('elevation-physics', out['elevation-physics']),
+                    ('lake-surface', out.get('lake-surface'))]
+        exported += [(name, out[f'total-{name}']) for name in result['totals']]  # as a lat-lon run saves them
+        for key, values in exported:
             if values is not None:
                 np.save(directory / f'{domain.name}-{key}.npy', values.astype(np.float32))
     np.save(directory / f'{domain.name}-elevation-procedural.npy', out['stage-fill'].astype(np.float32))
