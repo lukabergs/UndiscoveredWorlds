@@ -34,7 +34,7 @@
     {"path": "docs/reference-guides", "kinds": [".md", ".txt"]},
     {"path": "docs/tasks/*", "kinds": [".md"]},
     {"path": "meta/**", "kinds": ["*"], "free": true},
-    {"path": ["out/build/**", "out/scratch/**", "out/evaluation/**"], "kinds": ["*"], "free": true},
+    {"path": ["out/build/**", "out/scratch/**", "out/evaluation/**", "out/climate-diagnostics/**", "out/images/**", "out/inputs/**"], "kinds": ["*"], "free": true},
     {"path": "refs", "names": ["README.md"]},
     {"path": ["refs/source/**", "refs/processed/**"], "kinds": ["*"], "free": true},
     {"path": "runs", "names": ["storage.json"]},
