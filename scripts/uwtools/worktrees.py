@@ -2,7 +2,8 @@
 
     uv run python scripts/uwtools/worktrees.py audit [--json FILE]
     uv run python scripts/uwtools/worktrees.py preserve NAME... | --all
-    uv run python scripts/uwtools/worktrees.py retire NAME... --yes
+    uv run python scripts/uwtools/worktrees.py retire NAME... | --all --yes
+    uv run python scripts/uwtools/worktrees.py drop-branches NAME... | --retired
 
 audit (read-only): per worktree its links (never followed), whether its commits or uncommitted diff reached
 main (the share of added lines found in some version of the file in main's history since the worktree's
@@ -167,7 +168,7 @@ def preserve(worktree):
     return len(digests), added, sum((source_root / item).stat().st_size for item in digests) / 1e9
 
 
-def retire(worktree):
+def retire(worktree, allow_unlanded=False):
     receipt_path = archive_root() / worktree.name / 'receipt.json'
     if not receipt_path.is_file():
         raise OSError(f'{worktree.name}: not preserved; run preserve first')
@@ -177,6 +178,12 @@ def retire(worktree):
     stamp = receipt_path.stat().st_mtime
     if git('rev-parse', 'HEAD', cwd=worktree)[1] != receipt['head']:
         raise OSError(f'{worktree.name}: HEAD moved since the archive')
+    # Agents may retire on their own since 2026-10-20 (the user), but only a worktree whose work is all in main:
+    # every added line of its commits and uncommitted diff found in main's history. The user can override.
+    total, found, missing, _ = landed(worktree, receipt['head'])
+    if found < total and not allow_unlanded:
+        raise OSError(f'{worktree.name}: {total - found} of {total} added lines are not in main, e.g. {missing[:2]}; '
+                      'merge them first (or the user retires it with --allow-unlanded)')
     if sha256_bytes(git('diff', '--binary', 'HEAD', cwd=worktree, binary=True)[1]) != receipt['patch_sha256']:
         raise OSError(f'{worktree.name}: the uncommitted diff changed since the archive')
     root = storage.long_path(worktree)
@@ -189,6 +196,54 @@ def retire(worktree):
     receipt['status'] = 'retired'
     receipt['retired_utc'] = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')
     receipt_path.write_text(json.dumps(receipt, indent=1) + '\n', encoding='utf-8')
+
+
+def drop_branches(names):
+    """Bundle the named local branches to storage, verify the bundle and its heads, then delete the branches.
+
+    Refuses main, the current branch and any branch checked out in a worktree. Deletes nothing unless the bundle
+    verifies and lists every branch at its current commit; the bundle and a receipt stay in worktree-archive.
+    """
+    if not names:
+        raise OSError('No branches named')
+    current = git('rev-parse', '--abbrev-ref', 'HEAD')[1]
+    checked_out = {line.removeprefix('branch refs/heads/') for line in git('worktree', 'list', '--porcelain')[1].splitlines()
+                   if line.startswith('branch refs/heads/')}
+    heads = {}
+    for name in names:
+        if name in ('main', current) or name in checked_out:
+            raise OSError(f'{name}: main, the current branch or checked out in a worktree')
+        code, sha = git('rev-parse', '--verify', '--quiet', f'refs/heads/{name}')
+        if code != 0 or not sha:
+            raise OSError(f'{name}: no such local branch')
+        heads[name] = sha
+    stamp = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+    bundle = archive_root() / f'branches-{stamp}.bundle'
+    bundle.parent.mkdir(parents=True, exist_ok=True)
+    code, out = git('bundle', 'create', str(bundle), *(f'refs/heads/{name}' for name in heads))
+    if code != 0 or not bundle.is_file():
+        raise OSError(f'git bundle create failed: {out}')
+    if git('bundle', 'verify', str(bundle))[0] != 0:
+        raise OSError(f'{bundle}: git bundle verify failed; no branch deleted')
+    listed = {}
+    for line in git('bundle', 'list-heads', str(bundle))[1].splitlines():
+        sha, _, ref = line.partition(' ')
+        listed[ref.removeprefix('refs/heads/')] = sha
+    wrong = [name for name, sha in heads.items() if listed.get(name) != sha]
+    if wrong:
+        raise OSError(f'{bundle}: heads missing or different for {wrong}; no branch deleted')
+    receipt = {'bundle': str(bundle), 'bundle_sha256': sha256(bundle), 'heads': heads, 'status': 'verified'}
+    receipt_path = bundle.with_suffix('.json')
+    receipt_path.write_text(json.dumps(receipt, indent=1) + '\n', encoding='utf-8')
+    for name, sha in heads.items():
+        if git('rev-parse', f'refs/heads/{name}')[1] != sha:
+            raise OSError(f'{name}: moved since the bundle; stopped (branches before it were deleted)')
+        code, out = git('branch', '-D', name)
+        if code != 0:
+            raise OSError(f'{name}: git branch -D failed: {out}')
+    receipt['status'] = 'deleted'
+    receipt_path.write_text(json.dumps(receipt, indent=1) + '\n', encoding='utf-8')
+    return bundle, len(heads)
 
 
 def sha256_bytes(data):
@@ -207,7 +262,23 @@ def main():
         command.add_argument('--all', action='store_true')
         if name == 'retire':
             command.add_argument('--yes', action='store_true', required=True, help='confirm the delete')
+            command.add_argument('--allow-unlanded', action='store_true',
+                                 help='the user only: retire although some added lines are not in main')
+    drop = commands.add_parser('drop-branches', help='bundle, verify, then delete local branches')
+    drop.add_argument('names', nargs='*')
+    drop.add_argument('--retired', action='store_true', help='every branch of a retired archive that still exists')
     args = parser.parse_args()
+    if args.command == 'drop-branches':
+        names = list(args.names)
+        if args.retired:
+            for receipt_path in sorted(archive_root().glob('*/receipt.json')):
+                receipt = json.loads(receipt_path.read_text(encoding='utf-8'))
+                if receipt.get('status') == 'retired' and git('rev-parse', '--verify', '--quiet',
+                                                               f'refs/heads/{receipt["branch"]}')[0] == 0:
+                    names.append(receipt['branch'])
+        bundle, count = drop_branches(sorted(set(names)))
+        print(f'{count} branches bundled to {bundle} (verified, heads matched) and deleted')
+        return
     every = sorted(item for item in WORKTREES.iterdir() if item.is_dir()) if WORKTREES.is_dir() else []
     if args.command == 'audit':
         report = []
@@ -227,8 +298,8 @@ def main():
             files, added, gb = preserve(worktree)
             print(f'{worktree.name}: {files} files in the archive ({gb:.2f} GB), {added} added now, and the uncommitted patch')
         else:
-            retire(worktree)
-            print(f'{worktree.name}: retired (branch kept)')
+            retire(worktree, args.allow_unlanded)
+            print(f'{worktree.name}: retired (branch kept; drop-branches --retired bundles and deletes it)')
 
 
 if __name__ == '__main__':

@@ -6,13 +6,22 @@ guard refuses, before the command runs:
   repository), or a tracked file with uncommitted changes;
 - git commands that discard untracked files or uncommitted work: `clean` (unless a dry run), `reset --hard`,
   `checkout --`/`restore` on a dirty tree, `stash drop`/`clear`, `worktree remove`, `branch -D`;
-- the repository's own deleting commands: `storage.py finish`, `worktrees.py retire` (they wait for the user);
+- the repository's own deleting commands only in their user-only forms: `storage.py finish --accept-newer`,
+  `worktrees.py retire --allow-unlanded` (since 2026-10-20 the user lets agents run `worktrees.py retire`,
+  `worktrees.py drop-branches` and `storage.py finish`: each verifies its own preconditions in code first);
+- a deleter with no target on its command line (fed by a pipeline);
 - deletes it cannot resolve to paths (variables, command substitution, xargs, find -delete, inline code with
   rmtree/remove/unlink, .NET Delete), and untracked or modified scripts whose new code deletes files.
 Allowed without a check: the system temp directory (the session scratchpads), `out/build` trees and
 `__pycache__` (all regenerable). Tracked, unmodified files and folders may be deleted: git restores them.
 
-Reads the hook JSON on stdin; exit 2 blocks the call and the message tells the agent what to do instead.
+Untracked data an agent no longer needs goes to the trash instead (`scripts/uwtools/trash.py move PATH`: a move,
+never a delete; only the user empties the trash).
+
+Reads the hook JSON on stdin; exit 2 blocks the call and the message tells the agent what to do instead. Fails
+closed: an error inside the guard, or a check running past DEADLINE, blocks (only exit 2 blocks in Claude Code,
+so an uncaught exception or the hook's own timeout would let the command pass). guard_catastrophe.py runs before
+it in every project and refuses drive-level and protected-tree deletes whatever git says.
 The guard sees the command line only: a tracked, unmodified program that deletes internally passes (the
 repository's are listed above).
 """
@@ -24,6 +33,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import time
 
 DELETERS = {'rm', 'rmdir', 'unlink', 'shred', 'del', 'erase', 'rd', 'ri', 'remove-item', 'rmdir.exe', 'rm.exe'}
 CODE_DELETE = re.compile(r'rmtree|os\.remove\b|os\.unlink|\.unlink\(|os\.rmdir|\.rmdir\(|removedirs|send2trash|'
@@ -33,17 +43,21 @@ SCRIPT_SUFFIXES = ('.py', '.ps1', '.sh', '.cmd', '.bat')
 INTERPRETERS = {'python', 'python.exe', 'python3', 'py', 'uv', 'uv.exe', 'pwsh', 'powershell', 'bash', 'sh', 'source', '.'}
 TEMP = os.path.normcase(os.path.realpath(tempfile.gettempdir()))
 SEPARATORS = re.compile(r'&&|\|\||[;|\n]')
+DEADLINE = time.monotonic() + 40  # the hook's timeout is 60 s; past it Claude Code would run the command
 
 
 def block(reason):
     sys.stderr.write(
         'BLOCKED by scripts/uwtools/delete_guard.py: ' + reason + '\n'
         'Deleting untracked or ignored data, or uncommitted changes, is for the user. Do not retry or work around '
-        'it: note the path and why it should go in the roadmap\'s "for the user" list, and continue without it.\n')
+        'it: move untracked data you no longer need with scripts/uwtools/trash.py move PATH, or note the path and '
+        'why in the master plan\'s "For the user" list, and continue without it.\n')
     sys.exit(2)
 
 
 def git(top, *args):
+    if time.monotonic() > DEADLINE:
+        block('the check ran out of time (too many targets); name fewer paths per command.')
     try:
         result = subprocess.run(['git', '-C', top, *args], capture_output=True, text=True, timeout=20)
     except (OSError, subprocess.SubprocessError) as error:
@@ -147,7 +161,8 @@ def check_git(words, cwd):
         block('git worktree remove deletes the worktree\'s untracked files (scripts/uwtools/worktrees.py preserve, '
               'then the user retires it).')
     if sub == 'branch' and ('-D' in args[1:] or ('--delete' in rest and ('--force' in rest or '-f' in rest))):
-        block('git branch -D can drop unmerged commits (AGENTS.md: bundle first, then the user).')
+        block('git branch -D can drop unmerged commits: use scripts/uwtools/worktrees.py drop-branches, which '
+              'bundles and verifies them first.')
 
 
 def check_script(path):
@@ -183,10 +198,10 @@ def check_segment(segment, cwd):
         target = words[1] if not words[1].startswith('-') else (words[2] if len(words) > 2 else '')
         return to_native(target, cwd) if target and not re.search(r'[$`%]', target) else cwd
     lowered = segment.lower()
-    if 'storage.py' in lowered and re.search(r'\bfinish\b', lowered):
-        block('storage.py finish deletes an old tree (untracked data); the user runs it.')
-    if 'worktrees.py' in lowered and re.search(r'\bretire\b', lowered):
-        block('worktrees.py retire deletes a worktree; the user runs it after preserve.')
+    if 'storage.py' in lowered and re.search(r'\bfinish\b', lowered) and '--accept-newer' in lowered:
+        block('storage.py finish --accept-newer deletes old versions the storage copy no longer has; the user runs it.')
+    if 'worktrees.py' in lowered and re.search(r'\bretire\b', lowered) and '--allow-unlanded' in lowered:
+        block('worktrees.py retire --allow-unlanded deletes a worktree whose work is not in main; the user runs it.')
     if head in ('git', 'git.exe'):
         check_git(words, cwd)
         return cwd
@@ -197,6 +212,8 @@ def check_segment(segment, cwd):
     if head in ('mv', 'move-item', 'mi', 'move') and words[-1].lower() in ('/dev/null', '$null', 'nul'):
         block('moving to the null device deletes.')
     if head in DELETERS:
+        if not [w for w in words[1:] if not w.startswith('-') and not (w.startswith('/') and len(w) <= 3)]:
+            block(f'{head} has no target on its command line (fed by a pipeline): name paths literally.')
         for token in words[1:]:
             if token.startswith('-') or (token.startswith('/') and len(token) <= 3 and head in ('del', 'erase', 'rd', 'rmdir')):
                 continue
@@ -211,9 +228,14 @@ def check_segment(segment, cwd):
 
 def main():
     try:
-        payload = json.load(sys.stdin)
-    except ValueError:
-        return
+        check(json.load(sys.stdin))
+    except SystemExit:
+        raise
+    except BaseException as error:  # fail closed: a guard that cannot decide blocks
+        block(f'the guard could not check this command ({type(error).__name__}: {error}).')
+
+
+def check(payload):
     command = (payload.get('tool_input') or {}).get('command') or ''
     cwd = payload.get('cwd') or os.getcwd()
     lowered = ' ' + command.lower() + ' '
