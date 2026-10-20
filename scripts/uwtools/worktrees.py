@@ -209,10 +209,20 @@ def retire(worktree, allow_unlanded=False):
     in_main = git('merge-base', '--is-ancestor', receipt['head'], 'main')[0] == 0
     if not in_main and not git('branch', '--contains', receipt['head'])[1].strip() and not allow_unlanded:
         raise OSError(f'{worktree.name}: its HEAD {receipt["head"][:9]} is on no branch and not in main')
+    if git('update-ref', f'refs/archive/{worktree.name}', receipt['head'])[0] != 0:  # keeps the commits reachable
+        raise OSError(f'{worktree.name}: could not write refs/archive/{worktree.name}; nothing deleted')
+    links = storage.find_links(worktree)
+    if links:
+        raise OSError(f'{worktree.name}: links inside ({links[0]}); nothing deleted')
     # Rename first: it fails while a process still holds a file inside (a worker still running).
     quarantine = worktree.with_name(worktree.name + '.retiring')
     os.rename(storage.long_path(worktree), storage.long_path(quarantine))
-    storage.remove_tree(quarantine)
+    try:
+        storage.remove_tree(quarantine)
+    except OSError:
+        if quarantine.exists() and not worktree.exists():
+            os.rename(storage.long_path(quarantine), storage.long_path(worktree))  # back, for a later attempt
+        raise
     git('worktree', 'prune')
     receipt['status'] = 'retired'
     receipt['retired_utc'] = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')
@@ -303,7 +313,8 @@ def main():
         bundle, count = drop_branches(sorted(set(names)))
         print(f'{count} branches bundled to {bundle} (verified, heads matched) and deleted')
         return
-    every = sorted(item for item in WORKTREES.iterdir() if item.is_dir()) if WORKTREES.is_dir() else []
+    every = sorted(item for item in WORKTREES.iterdir() if item.is_dir() and not item.name.endswith('.retiring')) \
+        if WORKTREES.is_dir() else []
     if args.command == 'audit':
         report = []
         for worktree in every:

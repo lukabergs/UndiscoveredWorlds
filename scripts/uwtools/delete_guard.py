@@ -38,14 +38,16 @@ import time
 DELETERS = {'rm', 'rmdir', 'unlink', 'shred', 'del', 'erase', 'rd', 'ri', 'remove-item', 'rmdir.exe', 'rm.exe'}
 CODE_DELETE = re.compile(r'rmtree|os\.remove\b|os\.unlink|\.unlink\(|os\.rmdir|\.rmdir\(|removedirs|send2trash|'
                          r'\[(system\.)?io\.(file|directory)\]::delete|remove-item|\brm\s+-|\bdel\s+/|\brd\s+/s|'
-                         r'remove_tree|\.finish\(|retire\(|[\'"]rm[\'"]|\.delete\s*\(|deletefolder|\brm\s*\(|'
-                         r'rmsync|unlinksync', re.IGNORECASE)
+                         r'remove_tree|accept_newer\s*=\s*true|allow_unlanded\s*=\s*true|[\'"]rm[\'"]|deletefolder|'
+                         r'\brm\s*\(|rmsync|unlinksync', re.IGNORECASE)
+INLINE = re.compile(r'(?<![\w.-])(python3?|py|node|perl|ruby|bash|sh|zsh|pwsh|powershell)(\.exe)?\b[^|;&\n]*?'
+                    r'\s-(c|e|command)\b|<<', re.IGNORECASE)
 SCRIPT_SUFFIXES = ('.py', '.ps1', '.sh', '.cmd', '.bat', '.js', '.mjs', '.cjs')
 INTERPRETERS = {'python', 'python.exe', 'python3', 'py', 'uv', 'uv.exe', 'pwsh', 'powershell', 'bash', 'sh', 'source', '.',
                 'node', 'node.exe'}
 READ_ONLY = {'rg', 'grep', 'egrep', 'fgrep', 'findstr', 'select-string', 'sls', 'cat', 'type', 'get-content', 'gc',
              'less', 'more', 'head', 'tail', 'ls', 'dir', 'get-childitem', 'gci', 'wc', 'echo', 'write-output',
-             'printf', 'test-path', 'git', 'git.exe', 'sed', 'awk'}
+             'printf', 'test-path', 'sed', 'awk'}  # not git: git rm -f and git -c aliases delete
 CREATORS = re.compile(r'(?<![\w.-])(mv|move|move-item|mi|ren|rename|rename-item|rni|cp|copy|copy-item|cpi|xcopy|'
                       r'robocopy|mkdir|md|new-item|ni|ln|mklink|tar|unzip|expand-archive)(?![\w-])', re.IGNORECASE)
 CREATES = False  # set per command: a missing delete target may be one the same command creates
@@ -203,16 +205,20 @@ def check_git(words, cwd):
         block('git checkout over uncommitted changes (a path argument discards its edits).')
     if sub == 'switch' and ({'-f', '--force', '--discard-changes'} & flags) and dirty_tree(cwd):
         block('git switch --force / --discard-changes over uncommitted changes.')
-    staged_only = ('--staged' in rest or '-s' in rest) and not ({'--worktree', '-w'} & set(rest))
-    if sub == 'restore' and not staged_only and (dirty_paths(cwd, args[1:]) or '.' in rest):
-        block('git restore over uncommitted changes.')
+    staged_only = ('--staged' in args or '-S' in args) and not ({'--worktree', '-W'} & set(args))  # -s is --source
+    if sub == 'restore' and not staged_only:
+        specs = [a for a in args[1:] if not a.startswith('-')]
+        unusual = any(not os.path.lexists(to_native(a, cwd)) or a.startswith(':') or re.search(r'[*?\[]', a)
+                      for a in specs)  # pathspecs, globs, sources: fall back to the whole tree
+        if (unusual and dirty_tree(cwd)) or dirty_paths(cwd, args[1:]) or '.' in rest:
+            block('git restore over uncommitted changes.')
     if sub == 'stash' and rest and rest[0] in ('drop', 'clear'):
         block('git stash drop/clear discards stashed work.')
     if sub == 'worktree' and rest and rest[0] == 'remove':
         block('git worktree remove deletes the worktree\'s untracked files (scripts/uwtools/worktrees.py preserve, '
               'then the user retires it).')
-    if sub == 'branch' and ('-D' in args[1:] or any(re.fullmatch(r'-[a-z]*d[a-z]*f[a-z]*|-[a-z]*f[a-z]*d[a-z]*', a)
-                                                   for a in args[1:])
+    if sub == 'branch' and (any(re.fullmatch(r'-[a-zA-Z]*D[a-zA-Z]*', a) for a in args[1:])
+                            or any(re.fullmatch(r'-[a-z]*d[a-z]*f[a-z]*|-[a-z]*f[a-z]*d[a-z]*', a) for a in rest)
                             or (({'--delete', '-d'} & set(rest)) and ({'--force', '-f'} & set(rest)))):
         block('git branch -D can drop unmerged commits: use scripts/uwtools/worktrees.py drop-branches, which '
               'bundles and verifies them first.')
@@ -278,7 +284,9 @@ def check_segment(segment, cwd, piped=False):
         if switches & {'mir', 'purge', 'move', 'mov'}:
             if len(places) < 2:
                 block('robocopy /MIR, /PURGE or /MOVE without a literal source and destination.')
-            for path in expand(places[1], cwd) + (expand(places[0], cwd) if switches & {'move', 'mov'} else []):
+            for path in expand(places[1], cwd):
+                check_target(path)  # the mirror's destination (it may not exist yet: robocopy creates it)
+            for path in expand(places[0], cwd) if switches & {'move', 'mov'} else []:
                 check_target(path, target=True)
     if head in ('git', 'git.exe'):
         check_git(words, cwd)
@@ -313,6 +321,8 @@ def check_segment(segment, cwd, piped=False):
     if head in INTERPRETERS or head.endswith(SCRIPT_SUFFIXES) or re.search(r'\s', words[0]):
         for token in (part for word in words for part in word.split()):  # also inside bash -c "python x.py"
             if token.lower().endswith(SCRIPT_SUFFIXES) and not re.search(r'[$`%]', token):
+                if cwd is None and not os.path.isabs(to_native(token, '.')):
+                    block(f'cannot find the script {token!r}: an earlier cd could not be followed; use a full path.')
                 check_script(to_native(token, cwd or '.'))
     return cwd
 
@@ -332,17 +342,23 @@ def backstop(command, cwd):
     git cannot restore (quoted inner commands, comma lists, cd and Push-Location targets, cmake -E, rsync, ...)."""
     if re.search(r'(^|\s)//?s(\s|$)', command, re.IGNORECASE) and re.search(r'[*?]', command):
         block('a recursive delete (/s) with a wildcard: it acts in every subfolder; name folders literally.')
-    if '\\ ' in command and not re.search(r'[A-Za-z]:\\ ', command):
+    if re.search(r'\\ (?=[^\s-])', command):
         block('a delete with an escaped space (run\\ 7): quote the path instead.')
+    if re.search(r'[\\`]\r?\n', command):
+        block('a delete in a command continued over lines (a trailing \\ or backtick joins words); one line each.')
+    previous = ''
     for raw in TOKEN_SPLIT.split(command):
+        after_cd, previous = previous in ('cd', 'set-location', 'sl', 'pushd', 'push-location', 'chdir', '-c', '/d'), \
+            raw.lower()
         if not raw or raw.startswith('-') or re.fullmatch(r'//?[a-zA-Z]{1,3}', raw) or re.search(r'[$%]', raw):
             continue  # options, cmd switches and variables (the parser refuses deleters with variable targets)
         if raw in ('/', '\\', '.') or raw.lower() in ('nul', '/dev/null') or raw.startswith('/dev/'):
             continue
         for path in expand(raw, cwd):
-            top = repository(path) if os.path.isdir(path) else None
-            if top is not None and os.path.normcase(os.path.normpath(path)) == os.path.normcase(top):
-                continue  # the repository root, named by a cd or git -C; the parser checks the targets
+            top = repository(path) if after_cd and os.path.isdir(path) else None
+            if top is not None and os.path.normcase(os.path.normpath(path)) == os.path.normcase(top) \
+                    and os.path.isdir(os.path.join(top, '.git')):
+                continue  # a main checkout's root right after cd or git -C; the parser checks the targets
             check_target(path)
 
 
@@ -363,15 +379,19 @@ def check(payload):
     command = (payload.get('tool_input') or {}).get('command') or ''
     cwd = to_native(payload.get('cwd') or os.getcwd(), os.getcwd())  # also a Git Bash /c/... form
     CREATES = bool(CREATORS.search(command))
-    # The backstop runs unless every command is a read-only tool or git (git is checked by check_git).
-    if DELETE_TEXT.search(command) and not all(head in READ_ONLY for head in heads(command)):
+    # The backstop runs unless every command is a read-only tool with no unquoted ( (PowerShell runs a grouped
+    # command inside echo (...)).
+    unquoted = re.sub(r'"[^"]*"|\'[^\']*\'', '', command)
+    if DELETE_TEXT.search(command) and not (all(head in READ_ONLY for head in heads(command)) and '(' not in unquoted):
         backstop(command, cwd)
     lowered = ' ' + command.lower() + ' '
-    if (re.search(r'\s-c\s|\s-e\s', ' ' + command + ' ') or re.search(r'\s-command\s|<<', lowered)) and \
-            CODE_DELETE.search(command):  # -c and -e case-sensitive: git -C and ctest -C are not inline code
+    searching = all(head in READ_ONLY for head in heads(command))
+    if INLINE.search(command) and CODE_DELETE.search(command) and not searching:
         block('inline code or a heredoc deletes files; its targets cannot be checked.')
-    if re.search(r'\[(system\.)?io\.(file|directory)\]::delete|\.delete\s*\(|deletefolder', lowered):
+    if re.search(r'\[(system\.)?io\.(file|directory)\]::delete|\.delete\s*\(|deletefolder', lowered) and not searching:
         block('.NET or COM Delete targets cannot be checked.')
+    if re.search(r'(?<![\w-])git(\.exe)?\s.*\s-c\s', command) and DELETE_TEXT.search(command):  # -c, not -C
+        block('git -c with a delete (an alias or a hook command can run it).')
     parts = SEPARATORS.split(command)
     for position in range(0, len(parts), 2):
         if parts[position].strip():

@@ -227,11 +227,15 @@ def protected(path):
     return None
 
 
-def mentioned(path):
+def mentioned(path, after_cd=False):
     """The backstop's rule for any path named in a command that deletes: drive roots and top folders, the home
-    folder, its direct children and its ancestors, and anything inside .git or a protected tree. A folder that
-    merely holds a protected tree (the repository root, named by a cd) may be named; the parser checks targets."""
+    folder, its direct children and its ancestors, anything inside .git or a protected tree, and (except right
+    after cd, Set-Location, pushd or git -C, where the repository root is routinely named) any folder holding one."""
     for item in forms(path):
+        if not after_cd:
+            for tree in SYSTEM_TREES + PROTECTED_TREES:
+                if within(os.path.normcase(os.path.normpath(tree)), item):
+                    return f'{item} is or holds the protected tree {tree}'
         if item.startswith('\\\\') and depth(item) <= 3:
             return f'{item} is a network share or device root'
         if depth(item) <= 1:
@@ -257,13 +261,18 @@ def environment(token):
 def backstop(command, cwd):
     """Independent of the parser: a command that holds a delete word anywhere may not name a protected place
     anywhere (literally, through a known environment variable, or as ., .., ~, / relative to the start folder)."""
+    if re.search(r'[\\`]\r?\n', command):
+        block('a delete in a command continued over lines (a trailing \\ or backtick joins words); one line each.')
+    previous = ''
     for raw in TOKEN_SPLIT.split(command):
+        after_cd, previous = previous in ('cd', 'set-location', 'sl', 'pushd', 'push-location', 'chdir', '-c', '/d'), \
+            raw.lower()
         if not raw or raw.startswith('-') or re.fullmatch(r'//?[a-zA-Z]{1,3}', raw):
             continue  # options and cmd switches (/s /q /c); `rm /c` itself is refused by the parser
         if raw.lower() in ('/dev/null', 'nul', '$null', '/dev/stdout', '/dev/stderr') or raw.startswith('/dev/'):
             continue  # null devices, not places
         path = expand(environment(raw), cwd)
-        reason = mentioned(path) if path else None
+        reason = mentioned(path, after_cd) if path else None
         if reason:
             block(f'this command deletes something and names a protected place: {reason}.')
 
@@ -374,8 +383,9 @@ def check_segment(segment, cwd, piped, unbalanced=False, level=0):
         block('a delete together with command substitution or backticks: the guard cannot see what runs.')
     if deleting and unbalanced:
         block('a delete in a command whose quotes the guard cannot pair (escaped quotes): write it more simply.')
-    if head in READ_ONLY and not unbalanced:
-        return cwd
+    unquoted = re.sub(r'"[^"]*"|\'[^\']*\'', '', segment)
+    if head in READ_ONLY and not unbalanced and not (deleting and '(' in unquoted):
+        return cwd  # (Write-Output (Remove-Item ...) runs the inner command: not read-only)
     if DISK_TOOLS.search(segment):
         block('disk, partition, volume, shadow-copy and registry-delete tools are never run by an agent.')
     if head in ('fdisk', 'parted') or (head == 'format' and any(re.fullmatch(r'[a-z]:\\?|//?fs:\S+', w) for w in lowered[1:])):
@@ -386,7 +396,7 @@ def check_segment(segment, cwd, piped, unbalanced=False, level=0):
         block('dd with of= writes raw devices or files.')
     if deleting and re.search(r'\s[\\`]$', segment.rstrip()):
         block('a delete continued on the next line; write it on one line.')
-    if deleting and '\\ ' in segment and not re.search(r'[A-Za-z]:\\ ', segment):
+    if deleting and re.search(r'\\ (?=[^\s-])', segment):
         block('a delete with an escaped space (run\\ 7): quote the path instead.')
     if shell:  # after cmd /c, bash -c, pwsh -c, Start-Process ...: every quoted word is a command of its own
         inner_words = [w for w in words if re.search(r'\s', w)]
@@ -470,6 +480,8 @@ def check_segment(segment, cwd, piped, unbalanced=False, level=0):
             literal(target, cwd, 'cmake -E rm', protected)
         return cwd
     if head == 'git':
+        if deleting and '-c' in lowered:
+            block('git -c with a delete (an alias or a hook command can run it).')
         if 'clean' in lowered and not {'-n', '--dry-run'} & set(lowered):
             if any(re.fullmatch(r'-[a-z]*x[a-z]*', w, re.IGNORECASE) for w in words[1:lowered.index('clean') + 6]):
                 block('git clean -x / -X deletes ignored files, which often hold data; the user runs it.')
