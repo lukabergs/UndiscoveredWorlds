@@ -4,6 +4,7 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 
 ## Settled / don't retry
 
+- `climate-0004`: raising maximum_coupling_iterations, or moving coupling_relative_tolerance alone: neither passes while the inner gate is required
 - `erosion-0014`: The rainfall solver's bulk-aerodynamic potential evaporation as the Budyko PET (discharge recall on Earth fell from 0.63 to 0.46).
 - `erosion-0016`: Depth from the engine's crust age by the plate-cooling law: the engine's ocean ages are mostly the run's age (median 590 Myr at 600 Myr) and two thirds of the sea lies on continental crust, so 98 percent of the ocean lands at 5 to 6 km.
 - `erosion-0021`: Loading fraction 2700/3300 with rebound 2800/3300 on rock volumes (it raised the land by 0.66 m on average in 20 Myr).
@@ -91,6 +92,8 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 - `erosion-0104`: a global-scale page for one-pixel features (crop at 1:1)
 - `erosion-0105`: comparing a sandbox label's config.json before its render has finished (written at the end)
 - `erosion-0106`: running sandbox look experiments on one base while the next base is being built (the user, 2026-10-18)
+- `erosion-0107`: resuming the pipeline with --from-bundle base-v10 --steps 19.. (geosphere.mineral_deposits is not in the bundle)
+- `erosion-0107`: measuring cube rivers on the lat-lon export
 - `tectonics-0010`: Bilinear semi-Lagrangian sampling of the elevation for the uplift rate (spurious uplift at moving summits).
 - `tectonics-0011`: carrying the strain into new crust at divergent boundaries: young ocean floor showed 8 km of shortening
 - `tectonics-0012`: measuring continental area with crust_class (plate rasters): use the columns or continental_crust thickness
@@ -109,12 +112,14 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 - `tectonics-0019`: a whole-level subgrid for windows (6.3 M cells at level 2 for N 64)
 - `tectonics-0019`: fixed 3-D axis noise banks without tangent-plane weighting (loses the warp directionality)
 - `tectonics-0020`: remapping imported elevation onto the cube by the mean across coasts (loses coastal land; use land/sea class)
+- `tectonics-0021`: registering a scratch bundle by copying it into runs/tectonics/ by hand (no checkpoints, no evaluation, not HEAD's build)
 - `world-0003`: Re-enabling terrain.fastlem_mountains as it is: it does not terminate at seed 1, 256 columns.
 - `world-0007`: Regenerating the access file from 256-column runs only: it drops writes that occur at the default size.
 - `world-0035`: rewriting `accessor(...) > sealevel` without excluding an offset after sealevel or arithmetic before the accessor
 - `world-0054`: converting the regional generator to float reads by pattern without launching the desktop application
 - `world-0086`: Creating a junction from a worktree to the main tree's refs/ (or any data directory).
 - `world-0087`: the valley-spacing law with the erosion's grid-scale D and K: spacings of hundreds to millions of km
+- `world-0088`: attributing the river-mouth gap to the export: there is none since W3.3c
 
 ## climate
 
@@ -123,6 +128,7 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 | `climate-0001` | 2026-10-04 | pending user review | keep | consolidation phase 1: the re-baseline |
 | `climate-0002` | 2026-10-05 | parity shown | keep | consolidation phase 3: parity of global-balanced-v1 between the legacy chain and the bundle evaluation; repeat of run 385 |
 | `climate-0003` | 2026-10-05 | equivalent | keep | consolidation phase 3, step 8: first registered run in runs/climate/<id>/; baseline 388 |
+| `climate-0004` | 2026-10-21 | diagnosed | keep | master plan 3.2: climate coupling convergence, diagnosis |
 
 Lessons:
 
@@ -136,6 +142,8 @@ Lessons:
 - `climate-0002`: --climate-transport mpdata takes about five times as long as ffsl at the registered settings and changes global-balanced-v1 by +0.025.
 - `climate-0002`: weighted_relative_error (registry) and global-balanced-v1 can order a pair of runs differently.
 - `climate-0003`: Registered climate runs no longer carry weighted_relative_error or the other C++ benchmark metrics; the registry record holds global-balanced-v1 only.
+- `climate-0004`: Check the inner-solve gate before tuning outer residuals.
+- `climate-0004`: The cosine between successive changes separates a slow approach (+1), a limit cycle (-1) and noise.
 
 ## erosion
 
@@ -247,6 +255,7 @@ Lessons:
 | `erosion-0104` | 2026-10-17 | the user's visual verdict (the recorded one above); no agent review | keep | terrain roadmap T1.7, T1.8b: the user's verdicts of 2026-10-17 and the decisions taken from them |
 | `erosion-0105` | 2026-10-17 | pending the user's look at the pages (asked 2026-10-17) | park | terrain roadmap T1 (step 1 of the 2026-10-17 session): confirming renders of the new defaults, the glacial-ratio pair, the global K question, straight rivers, fill_pits |
 | `erosion-0106` | 2026-10-18 | the user's look (recorded above) with the numbers deciding where the user deferred | keep | terrain roadmap T1: the user's verdicts of 2026-10-18 on the step-1 pages and the decisions taken from them by the numbers |
+| `erosion-0107` | 2026-10-21 | baseline complete | keep | master plan 5.1: river grid-bias measures on base-v10 before any routing code |
 
 Lessons:
 
@@ -423,6 +432,9 @@ Lessons:
 - `erosion-0105`: Measure a ratio's cost on the domain it hurt (B above 4 km), not on the land mean: the mean hides an 11 % local loss.
 - `erosion-0106`: Show the render exaggeration with a relief map: the user read 3x-exaggerated relief as too rugged while the slopes are below Earth's.
 - `erosion-0106`: When the user defers to the numbers, name the measure that decides and the ones against it.
+- `erosion-0107`: On the cube, the per-cell axis-locked share does not predict heading bias over 16-step chords.
+- `erosion-0107`: Pipeline base bundles stop at terrain.roughness and carry no flow directions: d8_axis needs the full recipe.
+- `erosion-0107`: Check the headless executables' build time against recent src/cli commits before a sandbox render (the main tree's terrain_sandbox.exe predated e0658f9).
 
 ## tectonics
 
@@ -448,6 +460,8 @@ Lessons:
 | `tectonics-0018` | 2026-10-18 | design only; the user decides | keep | terrain roadmap T8 steps 1-2: the spherical world model, survey and design (no code; awaiting the user's yes) |
 | `tectonics-0019` | 2026-10-19 | interim; W2 in progress | keep | terrain roadmap T8 option (c): W0 design, W1 foundation, W2 parallel wave (interim) |
 | `tectonics-0020` | 2026-10-20 | done; awaiting the user look at base-v10 | keep | terrain roadmap T8 option (c): W2 engine and windows, W3 integration and acceptance |
+| `tectonics-0021` | 2026-10-21 | done: run 79 is the tectonics baseline | keep | master plan 1.2: register the cube tectonics baseline |
+| `tectonics-0022` | 2026-10-21 | done | keep | master plan 3.1: engine transport substeps (speed) |
 
 Lessons:
 
@@ -488,6 +502,12 @@ Lessons:
 - `tectonics-0020`: Judge seams by rank against randomly rotated cubes: land medians swing widely from geography alone.
 - `tectonics-0020`: The 30 % speed gate against the torus engine was the wrong reference once true areas made plates faster; gate against Earth and the calibration instead.
 - `tectonics-0020`: Workers must never stop processes by name on a shared machine.
+- `tectonics-0021`: A change to the recipe file schema must be followed by a registered-run dry check: experiment.py reads the recipe first and fails before writing anything, so the break went unnoticed for a day.
+- `tectonics-0021`: Compare a re-registered run with its scratch original with compare_bundles.py, so "the same world" is a count.
+- `tectonics-0022`: The engine profile switch is the disabled test TectonicMeasures.DISABLED_Run (UW_TECTONICS_MEASURES, UW_TECTONICS_N, UW_TECTONICS_MYR).
+- `tectonics-0022`: Engine code including core/parallel_rows.hpp needs C4996 silenced under /WX; the fix belongs in core.
+- `tectonics-0022`: Identity evidence must come from the committed build: re-run the minimal bundle at two thread counts on the merged tree.
+- `tectonics-0022`: Left levers if more speed is needed: before-transport (12.6 %), the stencil build (10.2 %), topology_advance (5 %), all serial.
 
 ## world
 
@@ -580,6 +600,7 @@ Lessons:
 | `world-0085` | 2026-10-06 | kernel tests pass | keep | erosion plan, step A2: the stream power kernel with its tests |
 | `world-0086` | 2026-10-07 | recovered except one hand-written guide | keep | incident during erosion plan Phase D: refs/processed deleted through a worktree junction, regenerated from refs/source; backup, guard hook and reference palettes |
 | `world-0087` | 2026-10-10 | fields added | Valley spacing calibrated to Perron et al. 2009's Napa Valley D/K and scaled per cell by erodibility and runoff (orchestrator's decision; the worker had marked it the user's); U = the erosion rate (steady state); procedural-world only; the parameters in terrain.json (S3.0's rules barred landscape.json in group d). | multiscale plan, step S3.6: the global grid carries subgrid statistics (diagnoser terrain.subgrid_statistics writing geosphere.relief_amplitude and geosphere.valley_spacing; the regional adapter passes them to the refinement) |
+| `world-0088` | 2026-10-21 | done: no export change needed | keep | master plan 1.3: hydrology of the lat-lon export of a cube world |
 
 Lessons:
 
@@ -719,3 +740,5 @@ Lessons:
 - `world-0086`: A recursive delete follows a junction inside its target: never leave a link to irreplaceable data inside a directory that will be removed, check that a link removal succeeded (Test-Path) before the delete, and keep a copy of every untracked data directory.
 - `world-0086`: When data is regenerated, look for any hash a run recorded (run.json inputs): one surviving hash turns 'probably the same' into 'identical'.
 - `world-0087`: A grid-scale closure's coefficients (here the erosion's D and K) are not physical constants: a sub-grid law needs its own calibration.
+- `world-0088`: Check a plan row's quoted numbers against the latest evaluation before planning a fix.
+- `world-0088`: Projecting the native routing onto the lat-lon grid separates the export's share of a gap from the world's.

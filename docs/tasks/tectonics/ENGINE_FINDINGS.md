@@ -327,8 +327,11 @@ torus run at the same columns, its cells unweighted).
   1.01-1.45 cm/yr, mean 1.29, last 1.13); thicker orogens (creep 2500) end at 1.35.
 - The cost per update follows the transport's substep count (0.95 subcells per
   substep over each plate's dilated reference domain, about 0.24 cell at s 4):
-  at N 64 this world needs 2 substeps in 177 of 400 updates against 7 of 50 in
-  E3's, so the same code runs 22 % slower side by side with E3's executable.
+  at N 64 this world needs 2 substeps in 177 of 400 updates (223 in E6's v6
+  profile) against 7 of 50 in E3's, so the same code runs 22 % slower side by
+  side with E3's executable. Since master plan 3.1 (1c34a01) the transport moves
+  its fields in parallel, bit-identically: 455 s at N 64 for 400 Myr on an idle
+  machine.
 - The process-variation waves now leave the e1-e2 plane (`variation::multiplier`,
   third wave e1 + 2 e3): with three coplanar wave vectors the pattern was
   mirror-symmetric about the great circle normal to e3. The deformation peak's
