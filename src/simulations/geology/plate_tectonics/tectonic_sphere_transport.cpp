@@ -1,6 +1,14 @@
 #include "simulations/geology/plate_tectonics/tectonic_sphere_transport.hpp"
 
 #include "core/mesh/cube_geometry.hpp"
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)  // getenv for UW_THREADS; the engine builds with /WX
+#endif
+#include "core/parallel_rows.hpp"
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 
 #include <algorithm>
 #include <cmath>
@@ -156,6 +164,14 @@ bool ownamounts(const Lattice& l, CellId c, const Entry& e, const std::vector<do
     return true;
 }
 
+// How a source moves its fields in one substep of a plate, and at a margin the reference's
+// amounts into its four targets (per source of the region; reused between substeps).
+enum class Move : std::uint8_t { none, margin, own };
+struct Sources {
+    std::vector<Move> move;
+    std::vector<std::array<double, 4>> amount;
+};
+
 // One substep over the sources of region (ascending ids; entryof(k, region[k]) their entries).
 // current: dense fields, zero outside region; next: dense, zero on entry and on return. A
 // destination outside inside (when given) is dropped, or an error when strict. With a plate's
@@ -164,62 +180,94 @@ bool ownamounts(const Lattice& l, CellId c, const Entry& e, const std::vector<do
 // full moves every field by the reference's transfer fractions (each field's share of the
 // reference); the others move each field of its own by its profile. The result, divided by
 // the destinations' areas, replaces current on region.
+// Each independent field and its moments run as one task (parallelforrows): a field's amounts
+// are added in source order whatever the thread count, so the result is bit-identical to a
+// serial scatter.
 template <class EntryOf>
 void substep(const Lattice& l, const std::vector<CellId>& region, const EntryOf& entryof, const Layout& layout,
              const std::vector<std::uint8_t>* inside, bool strict, const std::vector<double>* reference,
              const std::vector<std::uint8_t>* full, std::vector<std::vector<double>>& current,
-             std::vector<std::vector<double>>& next) {
+             std::vector<std::vector<double>>& next, Sources& sources) {
     const bool plates = reference != nullptr;
     const auto allowed = [&](CellId target) {
         if (!inside || (*inside)[target]) return true;
         if (strict) throw std::logic_error("Sphere transport: rock beyond its plate's reach");
         return false;
     };
-    std::array<double, 4> amount{};
-    for (std::size_t k = 0; k < region.size(); ++k) {
-        const CellId c = region[k];
-        const Entry& e = entryof(k, c);
-        if (plates) {
-            const double covered = current[0][c];
-            if (covered == 0) continue;  // the plate holds nothing here
-            const auto& s = l.profile(c);
-            bool intact = (*full)[c] && (*full)[s[0]] && (*full)[s[3]] && (*full)[s[4]] && (*full)[s[7]];
-            for (int slot = 1; slot <= mesh::slotcount && intact; ++slot) {
-                const CellId n = l.neighbour(c, slot);
-                intact = n == nocell || (*full)[n];
-            }
-            const double r = (*reference)[c];
-            if (!intact && r > 0 && ownamounts(l, c, e, *reference, amount)) {
-                // At a margin every field moves by the reference's transfer fractions: coverage
-                // never exceeds the reference under rigid motion and a value is a convex
-                // combination of its donors'.
-                for (std::size_t f = 0; f < current.size(); ++f) {
-                    const double share = current[f][c] / r;
-                    if (share == 0) continue;
-                    for (int t = 0; t < 4; ++t)
-                        if (amount[t] != 0 && allowed(e.target[t])) next[f][e.target[t]] += amount[t] * share;
+    const int count = static_cast<int>(region.size());
+    if (plates) {
+        sources.move.resize(region.size());
+        sources.amount.resize(region.size());
+        parallelforrows(0, count - 1, [&](int first, int last) {
+            for (int k = first; k <= last; ++k) {
+                const CellId c = region[static_cast<std::size_t>(k)];
+                Move move = Move::own;
+                if (current[0][c] == 0) move = Move::none;  // the plate holds nothing here
+                else {
+                    const auto& s = l.profile(c);
+                    bool intact = (*full)[c] && (*full)[s[0]] && (*full)[s[3]] && (*full)[s[4]] && (*full)[s[7]];
+                    for (int slot = 1; slot <= mesh::slotcount && intact; ++slot) {
+                        const CellId n = l.neighbour(c, slot);
+                        intact = n == nocell || (*full)[n];
+                    }
+                    const auto source = static_cast<std::size_t>(k);
+                    if (!intact && (*reference)[c] > 0
+                        && ownamounts(l, c, entryof(source, c), *reference, sources.amount[source]))
+                        move = Move::margin;
                 }
-                continue;
+                sources.move[static_cast<std::size_t>(k)] = move;
+            }
+        }, 4096);
+    }
+    const int tasks = static_cast<int>(layout.independent.size());
+    parallelforrows(0, tasks - 1, [&](int firsttask, int lasttask) {
+        std::array<double, 4> amount{};
+        for (int task = firsttask; task <= lasttask; ++task) {
+            const int f = layout.independent[static_cast<std::size_t>(task)];
+            const std::vector<int>& moments = layout.moments[static_cast<std::size_t>(f)];
+            for (std::size_t k = 0; k < region.size(); ++k) {
+                const CellId c = region[k];
+                const Entry& e = entryof(k, c);
+                if (plates) {
+                    if (sources.move[k] == Move::none) continue;
+                    if (sources.move[k] == Move::margin) {
+                        // At a margin every field moves by the reference's transfer fractions:
+                        // coverage never exceeds the reference under rigid motion and a value is
+                        // a convex combination of its donors'.
+                        const std::array<double, 4>& a = sources.amount[k];
+                        const double r = (*reference)[c];
+                        const auto spread = [&](int g) {
+                            const double share = current[g][c] / r;
+                            if (share == 0) return;
+                            for (int t = 0; t < 4; ++t)
+                                if (a[t] != 0 && allowed(e.target[t])) next[g][e.target[t]] += a[t] * share;
+                        };
+                        spread(f);
+                        for (const int m : moments) spread(m);
+                        continue;
+                    }
+                }
+                if (!ownamounts(l, c, e, current[f], amount)) continue;
+                const double q = current[f][c];
+                for (int t = 0; t < 4; ++t) {
+                    if (amount[t] == 0 || !allowed(e.target[t])) continue;
+                    const CellId target = e.target[t];
+                    next[f][target] += amount[t];
+                    for (const int m : moments) next[m][target] += amount[t] * (current[m][c] / q);
+                }
             }
         }
-        for (const int f : layout.independent) {
-            if (!ownamounts(l, c, e, current[f], amount)) continue;
-            const double q = current[f][c];
-            for (int t = 0; t < 4; ++t) {
-                if (amount[t] == 0 || !allowed(e.target[t])) continue;
-                const CellId target = e.target[t];
-                next[f][target] += amount[t];
-                for (const int m : layout.moments[f]) next[m][target] += amount[t] * (current[m][c] / q);
+    }, 1);
+    parallelforrows(0, static_cast<int>(current.size()) - 1, [&](int firstfield, int lastfield) {
+        for (int f = firstfield; f <= lastfield; ++f) {
+            std::vector<double>& now = current[static_cast<std::size_t>(f)];
+            std::vector<double>& after = next[static_cast<std::size_t>(f)];
+            for (const CellId c : region) {
+                now[c] = after[c] / l.area_m2(c);
+                after[c] = 0;
             }
         }
-    }
-    for (const CellId c : region) {
-        const double area = l.area_m2(c);
-        for (std::size_t f = 0; f < current.size(); ++f) {
-            current[f][c] = next[f][c] / area;
-            next[f][c] = 0;
-        }
-    }
+    }, 1);
 }
 
 // Sizes, finite non-negative values, moments of independent fields and zero where their rock is.
@@ -403,6 +451,7 @@ Stencil::Stencil(std::shared_ptr<const Lattice> lattice, const Motion& motion) :
     one.moments.resize(1);
     std::vector<std::vector<double>> current(1, std::vector<double>(count, 0)), next(1, std::vector<double>(count, 0));
     std::vector<Entry> entries;
+    Sources sources;
     for (std::size_t g = 0; g < groups_.size(); ++g) {
         Group& group = groups_[g];
         const std::vector<CellId>& domain = domains[g];
@@ -414,7 +463,7 @@ Stencil::Stencil(std::shared_ptr<const Lattice> lattice, const Motion& motion) :
         group.domain = domain;
         group.history.clear();
         for (std::uint32_t step = 0; step < substeps_; ++step) {
-            substep(l, domain, entryof, one, &mark, false, nullptr, nullptr, current, next);
+            substep(l, domain, entryof, one, &mark, false, nullptr, nullptr, current, next, sources);
             if (step + 1 < substeps_)
                 for (const CellId c : domain) group.history.push_back(current[0][c]);
         }
@@ -460,6 +509,7 @@ std::vector<PlateLayer> Stencil::transport(const std::vector<const std::vector<d
     std::vector<std::vector<double>> next(fields.size() + 1, std::vector<double>(count, 0));
     std::vector<std::uint8_t> mark(count, 0), full(count, 0);
     std::vector<double> reference(count, 0);
+    Sources sources;
     std::vector<PlateLayer> layers;
     layers.reserve(groups_.size());
     for (const Group& group : groups_) {
@@ -477,7 +527,7 @@ std::vector<PlateLayer> Stencil::transport(const std::vector<const std::vector<d
                 const double cov = current[0][c], r = reference[c];
                 full[c] = cov > 0 && cov == r;  // bit-equal: an intact interior
             }
-            substep(l, group.reach, entryof, layout, &mark, true, &reference, &full, current, next);
+            substep(l, group.reach, entryof, layout, &mark, true, &reference, &full, current, next, sources);
         }
         for (const CellId c : group.domain) reference[c] = 0;
         for (const CellId c : group.reach) full[c] = 0;
@@ -543,8 +593,9 @@ std::vector<double> Stencil::remap(const std::vector<double>& values,
     for (CellId c = 0; c < count; ++c)
         entries[c] = makeentry(l, c, displacement_[c][0] / substeps_, displacement_[c][1] / substeps_);
     const auto entryof = [&](std::size_t, CellId c) -> const Entry& { return entries[c]; };
+    Sources sources;
     for (std::uint32_t step = 0; step < substeps_; ++step)
-        substep(l, all, entryof, layout, nullptr, false, nullptr, nullptr, current, next);
+        substep(l, all, entryof, layout, nullptr, false, nullptr, nullptr, current, next, sources);
     for (std::size_t m = 0; m < moments.size(); ++m) *moments[m] = std::move(current[m + 1]);
     return std::move(current[0]);
 }

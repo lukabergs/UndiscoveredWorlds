@@ -17,7 +17,9 @@
 // from the neighbour table; at a cube corner the missing diagonal's amount goes to the other
 // three targets in proportion to their weights. Amounts are value x source subcell area and the
 // result is the amount divided by the destination's area, so the integral of value x area is
-// conserved. The stencil serves every field and substep; the scatter is serial in id order.
+// conserved. The stencil serves every field and substep; the scatter adds each field's amounts
+// in id order. The fields (each independent field with its moments) run in parallel
+// (core/parallel_rows.hpp), so the result is bit-identical at any thread count (UW_THREADS).
 //
 // The splat alone does not keep a rigid plate uniform: the index displacement of a rotation
 // varies over a face (a ripple of about its gradient per update) and three face frames meet at
