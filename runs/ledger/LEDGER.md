@@ -108,6 +108,7 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 - `tectonics-0017`: a single legacy override on the new baseline without its paired key (validation refuses it)
 - `tectonics-0019`: a whole-level subgrid for windows (6.3 M cells at level 2 for N 64)
 - `tectonics-0019`: fixed 3-D axis noise banks without tangent-plane weighting (loses the warp directionality)
+- `tectonics-0020`: remapping imported elevation onto the cube by the mean across coasts (loses coastal land; use land/sea class)
 - `world-0003`: Re-enabling terrain.fastlem_mountains as it is: it does not terminate at seed 1, 256 columns.
 - `world-0007`: Regenerating the access file from 256-column runs only: it drops writes that occur at the default size.
 - `world-0035`: rewriting `accessor(...) > sealevel` without excluding an offset after sealevel or arithmetic before the accessor
@@ -446,6 +447,7 @@ Lessons:
 | `tectonics-0017` | 2026-10-18 | the user's approval (2026-10-18) and the identity check; review pass with notes | keep | terrain roadmap T4.12: the baseline switch to the Earth-like W3 set at 400 Myr (approved by the user, 2026-10-18) |
 | `tectonics-0018` | 2026-10-18 | design only; the user decides | keep | terrain roadmap T8 steps 1-2: the spherical world model, survey and design (no code; awaiting the user's yes) |
 | `tectonics-0019` | 2026-10-19 | interim; W2 in progress | keep | terrain roadmap T8 option (c): W0 design, W1 foundation, W2 parallel wave (interim) |
+| `tectonics-0020` | 2026-10-20 | done; awaiting the user look at base-v10 | keep | terrain roadmap T8 option (c): W2 engine and windows, W3 integration and acceptance |
 
 Lessons:
 
@@ -482,6 +484,10 @@ Lessons:
 - `tectonics-0019`: Two-point flux weights need a non-orthogonal correction on the cube (7-16 % errors at face edges and corners otherwise).
 - `tectonics-0019`: A per-plate coverage normalisation makes the cube splat transport keep rigid plates uniform.
 - `tectonics-0019`: Usage limits stop every agent at once: keep state in the roadmap table and resume each agent by message.
+- `tectonics-0020`: An export must keep the world's discrete answers (lakes open or closed, land or sea): remapping continuous fields alone changes them.
+- `tectonics-0020`: Judge seams by rank against randomly rotated cubes: land medians swing widely from geography alone.
+- `tectonics-0020`: The 30 % speed gate against the torus engine was the wrong reference once true areas made plates faster; gate against Earth and the calibration instead.
+- `tectonics-0020`: Workers must never stop processes by name on a shared machine.
 
 ## world
 
