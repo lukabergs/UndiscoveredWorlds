@@ -54,6 +54,15 @@ Steps (the box in the parent's cropped pixels, the margin in parent pixels, the 
   8. As the sandbox after its physics: the sea keeps its start depth (below the lowest level), troughs cut below the sea
      and joined to it become sea; no coast term, micro texture or filter (parent-level details); lakes at their spill
      level (Priority-Flood, nest.lakes).
+A cube parent (master plan 4.2: a window of a sandbox run with cube.enabled on a cube base bundle): its saved
+<domain>-elevation-physics.npy and -lake-surface.npy are the lat-lon export of its pixel box at k pixels per base
+pixel (bilinear from the window's cube cells; terrain_sandbox.export_for_render), and those pixels are the parent
+grid here (parent_grid): the box is in them, the child is a lat-lon patch on them and steps 1 to 8 run as on a
+lat-lon parent, so the parent cell means of step 6c are the export pixels' (not the cube cells'), a face edge inside
+the box is only where the export already crosses it, and the child's world fields (rock, uplift, precipitation) come
+from the base's lat-lon view (as for a lat-lon parent), not by the cube's G. A cube-native child (the per-face quadtree
+of sphere-mesh.md section 8, prolonged by G) needs a window built from parent-level keys, which terrain_sandbox.exe
+does not have (its `window` builds the whole base table). Only windows: the global domain is no parent.
 --parent is a sandbox run (naming.find: an id, <id>-<tag>, an earlier label or an absolute path); --label LABEL
 makes the tag nest-LABEL of a new run, out/scratch/sandbox/<id>-nest-LABEL/ of the main tree
 (scripts/uwtools/naming.py; an absolute path is that directory), whose page goes to out/evaluation/<id>-nest-LABEL/
@@ -127,6 +136,25 @@ def prepare_world(config):
     return bundle, world
 
 
+def parent_grid(config, bundle, name):
+    """The parent's pixels as a lat-lon Domain. A lat-lon parent: its window as terrain_sandbox.make_domains builds it.
+    A cube parent (cube.enabled on a cube base: a window on the cube): the lat-lon export of its pixel box at k pixels
+    per base pixel, the geometry of terrain_sandbox.export_for_render's view, which is what the run saved as
+    <domain>-elevation-physics.npy and -lake-surface.npy (the box only, no margin: crop the whole array)."""
+    if not ts.cube_on(config, bundle):
+        return ts.make_domains(config, bundle, [name])[0]
+    spec = config['domains'][name]
+    if name == 'global' or 'pixels' not in spec:
+        raise SystemExit(f'{name}: a cube parent must be a window (the global domain is not a nesting parent)')
+    radius_km = float(bundle.manifest.get('parameters', {}).get('world.body.radius_km', 6371.0))
+    W, H = 4 * bundle.face_cells, 2 * bundle.face_cells
+    c0, r0, c1, r1 = spec['pixels']
+    k = int(spec['scale'])
+    columns, rows = ts.pixel_columns(c0, c1, W) * k, (r1 - r0 + 1) * k
+    return ts.Domain(name, columns, rows, float(c0), float(r0), k, W, H, radius_km, crop=(0, rows, 0, columns),
+                     exaggeration=spec.get('exaggeration', 3.0), physics=config['physics']['window'])
+
+
 def physics_config(config, duration, glacial):
     """The parent's config with the nest's scale-dependent physics and the run's history."""
     nest = config['nest']
@@ -197,11 +225,15 @@ def main():
 
     started = time.perf_counter()
     bundle, world = prepare_world(config)
-    parent_domain = ts.make_domains(config, bundle, [arguments.domain])[0]
+    parent_domain = parent_grid(config, bundle, arguments.domain)
     timings['world'] = time.perf_counter() - started
     suffix = '-elevation-physics' if arguments.parent_surface == 'physics' else '-elevation'
     parent = np.load(parent_directory / f'{arguments.domain}{suffix}.npy').astype(np.float64)
     parent_lakes = np.load(parent_directory / f'{arguments.domain}-lake-surface.npy')
+    crop_rows, crop_columns = (parent_domain.crop[1] - parent_domain.crop[0], parent_domain.crop[3] - parent_domain.crop[2])
+    if parent.shape != (crop_rows, crop_columns):
+        raise SystemExit(f'{arguments.domain}: the saved parent {parent.shape} is not its grid\'s {crop_rows, crop_columns}')
+    cube_parent = ts.cube_on(config, bundle)
     if not (0 <= c0 - margin and c1 + margin < parent.shape[1] and 0 <= r0 - margin and r1 + margin < parent.shape[0]):
         raise SystemExit(f'box with margin outside the parent crop {parent.shape}')
     border = ring(parent.shape, 1)
@@ -404,6 +436,8 @@ def main():
             f'{parent_domain.fine_km:.3f} km) box {arguments.box} refined {f} times (k {k}, {child.fine_km * 1000:.0f} m '
             f'north-south, {pixel_ew_km * 1000:.0f} m east-west at {latitude_c:.2f} N), margin {margin} parent pixels; '
             f'physics {arguments.duration} Myr{" with a glacial pulse" if arguments.glacial else " at sea 0, no ice"}. '
+            + ('The parent is a window on the cube: its pixels are its lat-lon export (bilinear from the cube cells), '
+               'and the child is a lat-lon patch on them. ' if cube_parent else '') +
             'Written by scripts/sandbox/nested_window.py.')
     # The page goes to out/evaluation/<id>-<tag> (named like the run, as terrain_sandbox.py); the images stay here.
     page = naming.page_directory(named) if named is not None else directory

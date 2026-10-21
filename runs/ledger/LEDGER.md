@@ -94,6 +94,7 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 - `erosion-0106`: running sandbox look experiments on one base while the next base is being built (the user, 2026-10-18)
 - `erosion-0107`: resuming the pipeline with --from-bundle base-v10 --steps 19.. (geosphere.mineral_deposits is not in the bundle)
 - `erosion-0107`: measuring cube rivers on the lat-lon export
+- `erosion-0108`: a cube-native nest through terrain_sandbox window (it builds the whole base table: makecubegrid at N k = 16384 is not feasible)
 - `tectonics-0010`: Bilinear semi-Lagrangian sampling of the elevation for the uplift rate (spurious uplift at moving summits).
 - `tectonics-0011`: carrying the strain into new crust at divergent boundaries: young ocean floor showed 8 km of shortening
 - `tectonics-0012`: measuring continental area with crust_class (plate rasters): use the columns or continental_crust thickness
@@ -256,6 +257,7 @@ Lessons:
 | `erosion-0105` | 2026-10-17 | pending the user's look at the pages (asked 2026-10-17) | park | terrain roadmap T1 (step 1 of the 2026-10-17 session): confirming renders of the new defaults, the glacial-ratio pair, the global K question, straight rivers, fill_pits |
 | `erosion-0106` | 2026-10-18 | the user's look (recorded above) with the numbers deciding where the user deferred | keep | terrain roadmap T1: the user's verdicts of 2026-10-18 on the step-1 pages and the decisions taken from them by the numbers |
 | `erosion-0107` | 2026-10-21 | baseline complete | keep | master plan 5.1: river grid-bias measures on base-v10 before any routing code |
+| `erosion-0108` | 2026-10-21 | tool works on cube bases | keep | master plan 4.2: nested_window.py on cube bases |
 
 Lessons:
 
@@ -435,6 +437,7 @@ Lessons:
 - `erosion-0107`: On the cube, the per-cell axis-locked share does not predict heading bias over 16-step chords.
 - `erosion-0107`: Pipeline base bundles stop at terrain.roughness and carry no flow directions: d8_axis needs the full recipe.
 - `erosion-0107`: Check the headless executables' build time against recent src/cli commits before a sandbox render (the main tree's terrain_sandbox.exe predated e0658f9).
+- `erosion-0108`: A cube window's saved arrays are its lat-lon export at k pixels per base pixel, so a lat-lon tool can read them as a parent grid without exe changes.
 
 ## tectonics
 
