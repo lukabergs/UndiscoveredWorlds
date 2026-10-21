@@ -87,7 +87,7 @@ def load_diagnostics(directory, load_bundle):
             if values.shape[0] != 12:
                 raise ValueError(f"Monthly diagnostic must have twelve layers: {path}")
             fields[variable] = values
-            sources[variable] = path.as_posix()
+            sources[variable] = references.display(path)
     for east, north in (("u10m", "v10m"), ("u500", "v500"), ("u850", "v850"), ("viwve", "viwvn")):
         if east in fields and north in fields and fields[east].shape != fields[north].shape:
             raise ValueError(f"Vector component grids differ: {east}, {north}")

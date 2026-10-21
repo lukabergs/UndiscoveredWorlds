@@ -226,12 +226,12 @@ def main() -> int:
     parser.add_argument(
         "--temperature",
         type=Path,
-        default=references.path("worldclim_tavg").relative_to(references.ROOT),
+        default=references.path("worldclim_tavg"),
     )
     parser.add_argument(
         "--precipitation",
         type=Path,
-        default=references.path("imerg_prec").relative_to(references.ROOT),
+        default=references.path("imerg_prec"),
     )
     parser.add_argument(
         "--land-mask",
@@ -272,8 +272,8 @@ def main() -> int:
     metrics.update(
         {
             "name": args.name,
-            "temperature_bundle": str(args.temperature),
-            "precipitation_bundle": str(args.precipitation),
+            "temperature_bundle": references.display(args.temperature),
+            "precipitation_bundle": references.display(args.precipitation),
             "land_mask": str(args.land_mask),
             "reference": str(args.reference),
             "rules": {

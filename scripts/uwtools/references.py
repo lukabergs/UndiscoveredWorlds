@@ -20,10 +20,11 @@ from typing import NamedTuple
 
 import numpy as np
 
-ROOT = Path(__file__).resolve().parents[2]
 from .paths import DATA_ROOT  # noqa: E402
 from .protected_io import staged, write_text_into  # noqa: E402
-PROCESSED = DATA_ROOT / 'refs/processed'
+# One root for refs/: the tree that holds it (the main tree when run from a git worktree).
+ROOT = DATA_ROOT
+PROCESSED = ROOT / 'refs/processed'
 SCHEMA = 'uw-reference/v1'
 DTYPE = '<f4'
 # Every processed field is prepared on this grid width (rows = width / 2).
@@ -44,6 +45,15 @@ class Header(NamedTuple):
     @property
     def shape(self):
         return self.layers, self.rows, self.columns
+
+
+def display(path):
+    """Posix text of a path for receipts and manifests: relative to ROOT when under it."""
+    path = Path(path)
+    try:
+        return path.relative_to(ROOT).as_posix()
+    except ValueError:
+        return path.as_posix()
 
 
 def split(stem):

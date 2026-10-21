@@ -140,7 +140,7 @@ def refresh_additional_maps(args, widths):
             fields[variable] = load_field(path, variable)
             if fields[variable].shape[0] != 12:
                 raise ValueError(f"Expected twelve months: {path}")
-            sources[variable] = path.as_posix()
+            sources[variable] = references.display(path)
     if len(fields) == 2 and fields["viwve"].shape != fields["viwvn"].shape:
         raise ValueError("Moisture-flux component grids differ")
     for width in widths:
@@ -282,43 +282,43 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--elevation",
         type=Path,
-        default=Path("refs/processed/heightmap/2048.tif"),
+        default=references.PROCESSED / "heightmap/2048.tif",
         help="Signed float Earth elevation/bathymetry master.",
     )
     parser.add_argument(
         "--land-mask",
         type=Path,
-        default=Path("refs/processed/land_ocean/2048.png"),
+        default=references.PROCESSED / "land_ocean/2048.png",
         help="Non-zero for non-ocean cells; dimensions must match --elevation.",
     )
     parser.add_argument(
         "--precipitation",
         type=Path,
-        default=references.path("imerg_prec_annual", annual=True).relative_to(references.ROOT),
+        default=references.path("imerg_prec_annual", annual=True),
         help="Cell-centred annual IMERG precipitation field (.npy).",
     )
     parser.add_argument(
         "--temperature",
         type=Path,
-        default=references.path("worldclim_tavg").relative_to(references.ROOT),
+        default=references.path("worldclim_tavg"),
         help="Cell-centred monthly WorldClim temperature field (.npy).",
     )
     parser.add_argument(
         "--diagnostics",
         type=Path,
-        default=references.PROCESSED.relative_to(references.ROOT),
+        default=references.PROCESSED,
         help="Processed reference root holding era5/ and the ingested datasets; missing products are reported in the manifest.",
     )
     parser.add_argument(
         "--monthly-precipitation",
         type=Path,
-        default=references.path("imerg_prec").relative_to(references.ROOT),
+        default=references.path("imerg_prec"),
         help="Monthly precipitation (prec, mm/month) for observed Koppen classification.",
     )
     parser.add_argument(
         "--output-root",
         type=Path,
-        default=Path("refs/processed"),
+        default=references.PROCESSED,
     )
     parser.add_argument("--additional-family", nargs="+", choices=("era5", "land", "oisst", "marine", "ceres"),
                         help="With --refresh-additional, export only these ingestion families.")
@@ -409,15 +409,15 @@ def main() -> None:
         ):
             with Image.open(png) as preview:
                 source = args.precipitation if name == "precipitation" else args.temperature if name == "temperature" else args.elevation
-                emit(name, values, preview.copy(), unit, category=category, sources=[source.as_posix()],
+                emit(name, values, preview.copy(), unit, category=category, sources=[references.display(source)],
                      display=dict(palette=VISUAL_PALETTES[name], limit=None, factor=-1 if name == "sea" else 1))
         if monthly_precipitation is not None:
             export_koppen(temperature_layers, monthly_precipitation, width, mask, emit)
-            products[-1]["sources"] = [args.temperature.as_posix(), args.monthly_precipitation.as_posix()]
+            products[-1]["sources"] = [references.display(args.temperature), references.display(args.monthly_precipitation)]
         additional = export_additional(args.diagnostics, width, mask, load_field, emit)
         unavailable = export_diagnostics(diagnostics, diagnostic_sources, width, mask, emit, additional)
         if monthly_precipitation is None:
-            unavailable.append({"product": "koppen", "reason": f"Missing monthly precipitation: {args.monthly_precipitation}"})
+            unavailable.append({"product": "koppen", "reason": f"Missing monthly precipitation: {references.display(args.monthly_precipitation)}"})
 
         overlap = int(np.count_nonzero((land > 0) & (sea > 0)))
         uncovered = int(np.count_nonzero((land == 0) & (sea == 0)))
@@ -469,10 +469,10 @@ def main() -> None:
 
     receipt = {
         "map_layout_version": 1,
-        "elevation_source": args.elevation.as_posix(),
-        "land_mask_source": args.land_mask.as_posix(),
-        "precipitation_source": args.precipitation.as_posix(),
-        "temperature_source": args.temperature.as_posix(),
+        "elevation_source": references.display(args.elevation),
+        "land_mask_source": references.display(args.land_mask),
+        "precipitation_source": references.display(args.precipitation),
+        "temperature_source": references.display(args.temperature),
         "diagnostic_sources": diagnostic_sources,
         "grid": "cell-centred global equirectangular W x W/2",
         "latitude_formula": "90 - (y + 0.5) * 180 / height",
