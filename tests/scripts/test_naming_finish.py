@@ -66,6 +66,13 @@ class Tree(unittest.TestCase):
         self.addCleanup(patcher.stop)
         return mock
 
+    def new(self, kind, tag, module=None, grid="cube", social=False):
+        """A new named directory holding its kind's completion marker (a step check's says grid and social)."""
+        named = naming.new_directory(kind, tag, module=module)
+        marker = {"grid": grid, "social": social} if kind == "step-check" else {}
+        write(named.path / naming.COMPLETE[kind], json.dumps(marker))
+        return named
+
 
 def only(outcomes):
     """The one outcome of a finish that saw one earlier run."""
@@ -76,19 +83,19 @@ def only(outcomes):
 class FinishTests(Tree):
     def test_a_failed_run_or_a_first_run_archives_nothing(self):
         mock = self.stub(return_value=receipt())
-        first = naming.new_directory("sandbox", "base")
+        first = self.new("sandbox", "base")
         self.assertEqual(naming.finish(first, True), [])
-        second = naming.new_directory("sandbox", "base")
+        second = self.new("sandbox", "base")
         self.assertIsNone(naming.finish(second, False))
         mock.assert_not_called()
         self.assertNotIn("superseded_by", self.registry()[0])
 
     def test_a_passed_run_archives_the_previous_run_of_its_topic(self):
         mock = self.stub(return_value=receipt())
-        first = naming.new_directory("experiment", "seed1-w128", module="climate")
-        naming.new_directory("experiment", "other", module="climate")
-        naming.new_directory("sandbox", "seed1-w128")
-        third = naming.new_directory("experiment", "seed1-w128", module="climate")
+        first = self.new("experiment", "seed1-w128", module="climate")
+        self.new("experiment", "other", module="climate")
+        self.new("sandbox", "seed1-w128")
+        third = self.new("experiment", "seed1-w128", module="climate")
         outcome = only(naming.finish(third, True))
         mock.assert_called_once_with(first.path, f"superseded by {third.name}", apply=True)
         self.assertEqual((outcome["action"], outcome["previous"], outcome["id"]),
@@ -97,14 +104,14 @@ class FinishTests(Tree):
 
     def test_every_earlier_unarchived_run_is_archived_after_a_failed_one(self):
         mock = self.stub(return_value=receipt())
-        first = naming.new_directory("experiment", "seed1-w128", module="climate")
-        failed = naming.new_directory("experiment", "seed1-w128", module="climate")
+        first = self.new("experiment", "seed1-w128", module="climate")
+        failed = self.new("experiment", "seed1-w128", module="climate")
         self.assertIsNone(naming.finish(failed, False))
-        pinned = naming.new_directory("experiment", "seed1-w128", module="climate")
+        pinned = self.new("experiment", "seed1-w128", module="climate")
         write(self.root / "configs/evaluation/world.json", json.dumps({"baseline": f"out/evaluation/climate/{pinned.name}"}))
-        done = naming.new_directory("experiment", "seed1-w128", module="climate")
+        done = self.new("experiment", "seed1-w128", module="climate")
         write(done.path / archive.RECEIPT, "{}")
-        last = naming.new_directory("experiment", "seed1-w128", module="climate")
+        last = self.new("experiment", "seed1-w128", module="climate")
         outcomes = naming.finish(last, True)
         self.assertEqual([(outcome["id"], outcome["action"]) for outcome in outcomes],
                          [(4, "already-archived"), (3, "pinned"), (2, "archived"), (1, "archived")])
@@ -113,9 +120,9 @@ class FinishTests(Tree):
 
     def test_a_folder_that_is_not_a_run_is_marked_superseded(self):
         self.stub(side_effect=archive.NotARun("no evaluation.json"))
-        first = naming.new_directory("step-check", "parity")
-        other = naming.new_directory("sandbox", "base")
-        second = naming.new_directory("step-check", "parity")
+        first = self.new("step-check", "parity")
+        other = self.new("sandbox", "base")
+        second = self.new("step-check", "parity")
         before = self.registry()
         self.assertEqual(only(naming.finish(second, True))["action"], "superseded")
         after = self.registry()
@@ -129,15 +136,15 @@ class FinishTests(Tree):
         self.assertEqual(only(naming.finish(second, True))["action"], "already-superseded")
         self.assertEqual(self.registry(), after)
         # The next run of the topic marks the run before it, not the first one again.
-        third = naming.new_directory("step-check", "parity")
+        third = self.new("step-check", "parity")
         self.assertEqual([outcome["action"] for outcome in naming.finish(third, True)],
                          ["superseded", "already-superseded"])
         self.assertEqual(self.registry()[2]["superseded_by"], third.name)
         self.assertEqual(self.registry()[0]["superseded_by"], second.name)
 
     def test_a_refusal_or_an_error_is_reported_and_never_raised(self):
-        naming.new_directory("sandbox", "base")
-        second = naming.new_directory("sandbox", "base")
+        self.new("sandbox", "base")
+        second = self.new("sandbox", "base")
         before = self.registry()
         mock = self.stub(side_effect=archive.Refused("holds tracked files"))
         outcome = only(naming.finish(second, True))
@@ -150,45 +157,98 @@ class FinishTests(Tree):
     def test_pinned_runs_are_left_alone(self):
         mock = self.stub(return_value=receipt())
         # Named in a tracked sandbox configuration (a path inside the run).
-        base = naming.new_directory("sandbox", "base")
+        base = self.new("sandbox", "base")
         write(self.root / "configs/sandbox/terrain.json", json.dumps({"base_bundle": f"out/scratch/sandbox/{base.name}"}))
-        outcome = only(naming.finish(naming.new_directory("sandbox", "base"), True))
+        outcome = only(naming.finish(self.new("sandbox", "base"), True))
         self.assertEqual(outcome["action"], "pinned")
         self.assertIn("configs/sandbox/terrain.json", outcome["reason"])
         # An input of the new run: the step check's reference or --parent-run (an absolute path inside the run).
-        reference = naming.new_directory("step-check", "parity")
-        outcome = only(naming.finish(naming.new_directory("step-check", "parity"), True, [reference.path / "tectonics"]))
+        reference = self.new("step-check", "parity")
+        outcome = only(naming.finish(self.new("step-check", "parity"), True, [reference.path / "tectonics"]))
         self.assertEqual(outcome["action"], "pinned")
         self.assertIn("an input of", outcome["reason"])
         # The baseline of a module registry.
         write(self.root / "runs/registry/world.json", json.dumps(
             {"schema": "world-run-registry/v1", "baseline": 1, "runs": [{"id": 1, "run": "runs/world/1", "tag": "world"}]}))
-        (self.root / "runs/world/1").mkdir(parents=True)
-        outcome = only(naming.finish(naming.new_directory("run", "world", module="world"), True))
+        write(self.root / "runs/world/1/run.json", "{}")
+        outcome = only(naming.finish(self.new("run", "world", module="world"), True))
         self.assertEqual(outcome["action"], "pinned")
         self.assertIn("baseline", outcome["reason"])
         mock.assert_not_called()
         self.assertTrue(all("superseded_by" not in entry for entry in self.registry()))
 
+    def test_a_key_value_setting_in_a_configuration_pins_its_path(self):
+        mock = self.stub(return_value=receipt())
+        base = self.new("sandbox", "base")
+        write(self.root / "configs/sandbox/presets.json", json.dumps(
+            {"old-base": {"set": [f'base_bundle="out/scratch/sandbox/{base.name}"', "cube.enabled=false"]}}))
+        outcome = only(naming.finish(self.new("sandbox", "base"), True))
+        self.assertEqual(outcome["action"], "pinned")
+        self.assertIn("configs/sandbox/presets.json", outcome["reason"])
+        mock.assert_not_called()
+
+    def test_a_run_awaiting_its_review_is_pinned(self):
+        mock = self.stub(return_value=receipt())
+        pending = self.new("experiment", "seed1-w128", module="climate")
+        write(pending.path / "evaluation/evaluation.json", json.dumps({"verdict": {"checks": "pass", "review": "pending"}}))
+        requested = self.new("experiment", "seed1-w128", module="climate")
+        write(requested.path / "evaluation/evaluation.json", json.dumps({"verdict": {"review": "optional"}}))
+        write(requested.path / "evaluation/review-request.json", "{}")
+        write(requested.path / "evaluation/review.json", json.dumps({"entries": []}))
+        last = self.new("experiment", "seed1-w128", module="climate")
+        outcomes = naming.finish(last, True)
+        self.assertEqual([outcome["action"] for outcome in outcomes], ["pinned", "pinned"])
+        self.assertTrue(all("awaits a review" in outcome["reason"] for outcome in outcomes))
+        mock.assert_not_called()
+        # A verdict releases both: they are archived by the next passed run.
+        for run in (pending, requested):
+            write(run.path / "evaluation/review.json", json.dumps({"entries": [{"verdict": "approved", "reviewer": "user"}]}))
+        outcomes = naming.finish(self.new("experiment", "seed1-w128", module="climate"), True)
+        self.assertEqual([(outcome["id"], outcome["action"]) for outcome in outcomes],
+                         [(3, "archived"), (2, "archived"), (1, "archived")])
+
+    def test_a_step_check_of_another_grid_or_social_setting_is_left_alone(self):
+        self.stub(side_effect=archive.NotARun("no evaluation.json"))
+        latlon = self.new("step-check", "parity", grid="latlon")
+        social = self.new("step-check", "parity", social=True)
+        cube = self.new("step-check", "parity")
+        outcomes = naming.finish(self.new("step-check", "parity"), True)
+        self.assertEqual([(outcome["id"], outcome["action"]) for outcome in outcomes],
+                         [(cube.id, "superseded"), (social.id, "other-setting"), (latlon.id, "other-setting")])
+        self.assertEqual([entry.get("superseded_by") is not None for entry in self.registry()], [False, False, True, False])
+
+    def test_a_run_without_its_completion_marker_is_never_touched(self):
+        mock = self.stub(return_value=receipt())
+        running = naming.new_directory("sandbox", "base")  # no config.json yet: still running
+        write(running.path / "global-relief.png", "png")
+        outcome = only(naming.finish(self.new("sandbox", "base"), True))
+        self.assertEqual(outcome["action"], "incomplete")
+        experiment = naming.new_directory("experiment", "seed1-w128", module="climate")  # no run.json
+        self.assertEqual(only(naming.finish(self.new("experiment", "seed1-w128", module="climate"), True))["action"],
+                         "incomplete")
+        mock.assert_not_called()
+        self.assertTrue(all("superseded_by" not in entry for entry in self.registry()))
+        self.assertTrue(experiment.path.is_dir())
+
     def test_already_archived_and_missing_predecessors_are_skipped(self):
         mock = self.stub(return_value=receipt())
-        first = naming.new_directory("experiment", "seed1-w128", module="climate")
+        first = self.new("experiment", "seed1-w128", module="climate")
         write(first.path / archive.RECEIPT, "{}")
-        second = naming.new_directory("experiment", "seed1-w128", module="climate")
+        second = self.new("experiment", "seed1-w128", module="climate")
         self.assertEqual(only(naming.finish(second, True))["action"], "already-archived")
         # A record whose folder never existed (as after a folder went to the trash).
         runs.append_record("scratch", {"id": 3, "kind": "geology", "tag": "seed1", "run": "out/scratch/geology/3-seed1"},
                            root=self.root)
-        self.assertEqual(only(naming.finish(naming.new_directory("geology", "seed1"), True))["action"], "missing")
+        self.assertEqual(only(naming.finish(self.new("geology", "seed1"), True))["action"], "missing")
         mock.assert_not_called()
 
     def test_a_registered_run_without_an_evaluation_is_not_marked(self):
         self.stub(side_effect=archive.NotARun("no evaluation.json"))
         write(self.root / "runs/registry/world.json", json.dumps(
             {"schema": "world-run-registry/v1", "runs": [{"id": 1, "run": "runs/world/1", "tag": "world"}]}))
-        (self.root / "runs/world/1").mkdir(parents=True)
-        registry = (self.root / "runs/registry/world.json").read_bytes()
-        outcome = only(naming.finish(naming.new_directory("run", "world", module="world"), True))
+        write(self.root / "runs/world/1/run.json", "{}")
+        registry =(self.root / "runs/registry/world.json").read_bytes()
+        outcome = only(naming.finish(self.new("run", "world", module="world"), True))
         self.assertEqual(outcome["action"], "not-a-run")
         self.assertEqual((self.root / "runs/registry/world.json").read_bytes(), registry)
         self.assertEqual(self.registry(), [])
@@ -205,11 +265,11 @@ class FinishTests(Tree):
             naming.tool_environment(Path(other) / "outputs")
 
     def test_page_directory_is_named_like_the_run(self):
-        named = naming.new_directory("sandbox", "base")
+        named = self.new("sandbox", "base")
         page = naming.page_directory(named)
         self.assertEqual(page, self.root / "out/evaluation/1-base")
         self.assertTrue(page.is_dir())
-        self.assertEqual(naming.new_directory("page", "t8-acceptance").id, 2)  # the id is not drawn twice
+        self.assertEqual(self.new("page", "t8-acceptance").id, 2)  # the id is not drawn twice
 
 
 class RealArchiveTests(Tree):
@@ -236,9 +296,9 @@ class RealArchiveTests(Tree):
         write(named.path / "run.json", "{}")
 
     def test_the_real_archive_drops_the_pages_and_marks_a_sandbox(self):
-        first = naming.new_directory("experiment", "seed1-w128", module="climate")
+        first = self.new("experiment", "seed1-w128", module="climate")
         self.evaluated(first)
-        second = naming.new_directory("experiment", "seed1-w128", module="climate")
+        second = self.new("experiment", "seed1-w128", module="climate")
         self.evaluated(second)
         outcome = only(naming.finish(second, True))
         self.assertEqual(outcome["action"], "archived", self.output.getvalue())
@@ -249,9 +309,9 @@ class RealArchiveTests(Tree):
         document = json.loads((first.path / archive.RECEIPT).read_text(encoding="utf-8"))
         self.assertEqual((document["status"], document["reason"]), ("complete", f"superseded by {second.name}"))
         self.assertTrue((second.path / "evaluation/index.html").is_file())  # the new run is untouched
-        sandbox = naming.new_directory("sandbox", "base")
+        sandbox = self.new("sandbox", "base")
         write(sandbox.path / "global-relief.png", "png")
-        later = naming.new_directory("sandbox", "base")
+        later = self.new("sandbox", "base")
         self.assertEqual(only(naming.finish(later, True))["action"], "superseded")
         self.assertTrue((sandbox.path / "global-relief.png").is_file())
         self.assertEqual(self.registry()[2]["superseded_by"], later.name)

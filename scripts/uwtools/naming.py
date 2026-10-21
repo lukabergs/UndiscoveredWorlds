@@ -32,10 +32,13 @@ hypsometry.py, terrain_metrics.py, uw.py geology run). When the new run passed, 
 archived (scripts/uwtools/archive.py: its re-renderable map PNGs and pages dropped, with a receipt), so a failed run
 in between leaves nothing behind; a folder archive.py does not take as a run (a sandbox, step-check, geology or
 page folder: nothing in it is re-renderable) gets `superseded_by` and `superseded_utc` on its scratch.json record
-instead. Nothing happens to an earlier run that is pinned: the registry's `baseline` of a module, a path named in
-the main tree's (or this checkout's) configs/sandbox/*.json or configs/evaluation/*.json, or an input of the new
-run (its declared inputs, --baseline, the step check's reference, --parent-run, the sandbox's base bundle); nor
-to one already archived (archive-receipt.json) or superseded. A failed run archives nothing, and an earlier run that
+instead. Nothing happens to an earlier run that is pinned: the registry's `baseline` of a module, an evaluation
+awaiting its review (verdict.review 'pending' or a review-request.json, and no verdict in review.json), a path
+named in the main tree's (or this checkout's) configs/sandbox/*.json or configs/evaluation/*.json (also as the
+value of a key="path" setting), or an input of the new run (its declared inputs, --baseline, the step check's
+reference, --parent-run, the sandbox's base bundle); nor to one already archived (archive-receipt.json) or
+superseded; nor to one without its completion marker (COMPLETE: run.json, result.json, config.json, report.json or
+index.html by kind; a run still in progress); nor to a step check of another grid or --social setting. A failed run archives nothing, and an earlier run that
 cannot be archived is reported and left as it is: the finished run never fails because of it.
 
 tool_environment(directory) is the environment of a headless tool whose own outputs (climate diagnostics, images,
@@ -370,9 +373,29 @@ def _strings(value):
             yield from _strings(item)
 
 
+# A `--set`-style override string, key=value (configs/sandbox/presets.json: base_bundle="out/scratch/sandbox/base-v2").
+SETTING = re.compile(r'[A-Za-z_][\w.\-]*=(.+)')
+
+
+def _path_texts(text):
+    """The path-like texts a configuration string names: the string itself, and the value of a key=value setting
+    (a JSON string value unquoted)."""
+    texts = [text]
+    match = SETTING.fullmatch(text.strip())
+    if match:
+        value = match.group(1).strip()
+        try:
+            parsed = json.loads(value)
+        except ValueError:
+            parsed = value.strip('"\'')
+        if isinstance(parsed, str):
+            texts.append(parsed)
+    return [item for item in texts if ('/' in item or '\\' in item) and '\n' not in item and len(item) < 1000]
+
+
 def _config_paths(root):
-    """(config file, path) of every path-like string in the main tree's and this checkout's PINNING_CONFIGS; a
-    relative path is read against the main tree, where the runs are."""
+    """(config file, path) of every path-like string in the main tree's and this checkout's PINNING_CONFIGS (also the
+    value of a key="path" setting); a relative path is read against the main tree, where the runs are."""
     found = []
     for tree in dict.fromkeys([root, paths.ROOT]):
         for folder in PINNING_CONFIGS:
@@ -381,21 +404,55 @@ def _config_paths(root):
                     document = json.loads(file.read_text(encoding='utf-8-sig'))
                 except (OSError, ValueError):
                     continue
-                for text in _strings(document):
-                    if ('/' in text or '\\' in text) and '\n' not in text and len(text) < 1000:
+                for text in (item for string in _strings(document) for item in _path_texts(string)):
+                    try:
                         found.append((file.relative_to(tree).as_posix(), Path(text) if Path(text).is_absolute()
                                       else root / text))
+                    except (OSError, ValueError):
+                        continue
     return found
+
+
+def _review_open(folder):
+    """True when an evaluation folder awaits its review: its evaluation.json's verdict.review is 'pending' or it holds
+    a review-request.json, and its review.json holds no entry with a verdict. An unreadable file counts as open."""
+    evaluation, request, review = folder / 'evaluation.json', folder / 'review-request.json', folder / 'review.json'
+    asked = request.is_file()
+    if evaluation.is_file():
+        try:
+            document = json.loads(evaluation.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            return True
+        verdict = document.get('verdict') if isinstance(document, dict) else None
+        asked = asked or (isinstance(verdict, dict) and verdict.get('review') == 'pending')
+    if not asked:
+        return False
+    if not review.is_file():
+        return True
+    try:
+        entries = json.loads(review.read_text(encoding='utf-8')).get('entries') or []
+    except (OSError, ValueError, AttributeError):
+        return True
+    return not any(isinstance(entry, dict) and entry.get('verdict') for entry in entries)
+
+
+def awaiting_review(path):
+    """The first evaluation folder of a run (its root or an evaluation* child) that awaits its review, or None."""
+    folders = [path] + (sorted(item for item in path.glob('evaluation*') if item.is_dir()) if path.is_dir() else [])
+    return next((folder for folder in folders if _review_open(folder)), None)
 
 
 def pinned(named, record, path, inputs=(), config_paths=None):
     """Why an earlier run (record, at path) of named's topic must stay as it is, or None: the module registry's
-    baseline, a path named in configs/sandbox/*.json or configs/evaluation/*.json (config_paths: _config_paths, read
-    when not given), or an input of the new run."""
+    baseline, an evaluation awaiting its review, a path named in configs/sandbox/*.json or configs/evaluation/*.json
+    (config_paths: _config_paths, read when not given), or an input of the new run."""
     if named.kind == 'run':
         baseline = runs.registry(named.module, root=main_root()).get('baseline')
         if baseline is not None and str(baseline) == str(record['id']):
             return f'the baseline of runs/registry/{named.module}.json'
+    waiting = awaiting_review(path)
+    if waiting is not None:
+        return f'its evaluation awaits a review ({waiting.name})'
     for file, named_path in _config_paths(main_root()) if config_paths is None else config_paths:
         if _inside(named_path, path):
             return f'named in {file}'
@@ -434,6 +491,10 @@ def _mark_superseded(record, named):
     return entry
 
 
+# The file a tool writes when a run of a kind has ended (written last, or in a finally block): finish leaves an
+# earlier run without it alone, so a run still in progress is never touched.
+COMPLETE = {'run': 'run.json', 'experiment': 'run.json', 'step-check': 'result.json', 'sandbox': 'config.json',
+            'geology': 'report.json', 'page': 'index.html'}
 # Outcomes finish prints one line each for; the others (repeated at every run of a topic) only as counts.
 SHOWN = ('archived', 'superseded', 'pinned', 'refused', 'error')
 
@@ -469,20 +530,45 @@ def finish(named, passed, inputs=()):
     return outcomes
 
 
+def _step_check_setting(path):
+    """(grid, social) of a step check's result.json, or None when it cannot be read."""
+    try:
+        result = json.loads((path / 'result.json').read_text(encoding='utf-8'))
+        return result.get('grid'), bool(result.get('social'))
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def _other_setting(named, path):
+    """Why an earlier step check is another topic in effect (its result.json names another grid or --social setting
+    than the new check's, or either cannot be read), or ''; '' for the other kinds."""
+    if named.kind != 'step-check':
+        return ''
+    new, old = _step_check_setting(named.path), _step_check_setting(path)
+    if new is None or old is None:
+        return 'a result.json cannot be read'
+    if new != old:
+        return f'grid {old[0]}{", social" if old[1] else ""}, not {new[0]}{", social" if new[1] else ""}'
+    return ''
+
+
 def _finish_one(named, record, inputs, config_paths):
     """finish for one earlier record: its outcome; never raises."""
     path = main_root() / record['run']
     outcome = {'previous': record['run'], 'id': record['id'], 'action': None, 'reason': ''}
     try:
-        reason = pinned(named, record, path, inputs, config_paths)
-        if reason:
-            outcome.update(action='pinned', reason=reason)
-        elif record.get('superseded_by'):
+        if record.get('superseded_by'):
             outcome.update(action='already-superseded', reason=f'by {record["superseded_by"]}')
         elif not path.is_dir():
             outcome.update(action='missing', reason='the folder is gone')
+        elif not (path / COMPLETE[named.kind]).is_file():
+            outcome.update(action='incomplete', reason=f'no {COMPLETE[named.kind]}: running, or stopped before its end')
         elif os.path.lexists(storage.long_path(path) / archive.RECEIPT):
             outcome.update(action='already-archived', reason=archive.RECEIPT)
+        elif (setting := _other_setting(named, path)):
+            outcome.update(action='other-setting', reason=setting)
+        elif (reason := pinned(named, record, path, inputs, config_paths)):
+            outcome.update(action='pinned', reason=reason)
         else:
             try:
                 receipt = archive.archive(path, f'superseded by {named.name}', apply=True)

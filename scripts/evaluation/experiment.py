@@ -344,8 +344,8 @@ def main():
     if not args.archive:
         # The earlier runs of the topic are archived once this one passed (scripts/uwtools/naming.py, finish).
         passed = succeeded and document is not None and failure is None and document['verdict'].get('checks') != 'fail'
-        inputs = [Path(item['path']) if Path(item['path']).is_absolute() else ROOT / item['path'] for item in declared]
-        naming.finish(named, passed, inputs + ([args.baseline] if args.baseline else []))
+        pins = [Path(item['path']) if Path(item['path']).is_absolute() else ROOT / item['path'] for item in declared]
+        naming.finish(named, passed, pins + ([args.baseline] if args.baseline else []))
     if not succeeded:
         raise SystemExit(f"Tool failed; see {directory / record['runs'][-1]['log']}")
     if failure:

@@ -66,9 +66,9 @@ COMMANDS = {'tectonics': ('run', 'report', 'experiment', 'evaluate', 'dashboard'
             'regional': ('run', 'report', 'evaluate', 'review', 'ledger')}
 
 
-def call(command):
+def call(command, environment=None):
     print('>', ' '.join(map(str, command)), flush=True)
-    code = subprocess.run([str(part) for part in command], cwd=ROOT).returncode
+    code = subprocess.run([str(part) for part in command], cwd=ROOT, env=environment).returncode
     if code:
         raise SystemExit(code)
 
@@ -146,7 +146,18 @@ def tectonics_bundle(exe, seed, resolution, extra, output):
         raise SystemExit(f'Output exists; bundles are never overwritten: {output}')
     output.parent.mkdir(parents=True, exist_ok=True)
     grid = [] if resolution is None else ['--resolution', resolution]
-    call([exe, 'run', '--recipe', 'tectonics', '--seed', seed, *grid, *extra, '--bundle', output])
+    call([exe, 'run', '--recipe', 'tectonics', '--seed', seed, *grid, *extra, '--bundle', output],
+         tool_environment(output))
+
+
+def tool_environment(bundle):
+    """world_pipeline's environment with its own outputs (climate diagnostics, images) in <bundle>-outputs beside the
+    bundle when that lies on the storage drive, else in the main tree's out/scratch/geology/outputs/<bundle name>
+    (naming.tool_environment): nothing lands in out/images or out/climate-diagnostics on C."""
+    try:
+        return naming.tool_environment(bundle.with_name(f'{bundle.name}-outputs'))
+    except SystemExit:  # --output on C
+        return naming.tool_environment(naming.main_root() / 'out/scratch/geology/outputs' / bundle.name)
 
 
 def tectonics(args, extra):

@@ -1,7 +1,7 @@
 """Hypsographic curves of terrain sandbox worlds against Earth's (ETOPO 2022 at 2048 columns, the cached
 reference of scripts/uwtools/tectonics_earth_reference.py), with the summary numbers of compare_to_earth.
 
-  uv run python scripts/sandbox/hypsometry.py --name sea-v7 --labels sea-v3b,sea-v7
+  uv run python scripts/sandbox/hypsometry.py --name sea-levels --labels sea-v3b,sea-v7
       [--array run62=runs/archive/fields/tectonics/elevation/final/62.npy]
 
 A label (an id, <id>-<tag>, an earlier label or an absolute path: naming.find) reads the main tree's
@@ -27,7 +27,8 @@ sys.path.insert(0, str(ROOT / 'scripts'))
 from uwtools import naming  # noqa: E402
 from uwtools.tectonics_earth_reference import compare_to_earth, load_earth_reference, measure_earth  # noqa: E402
 
-SURFACE, TEXT, MUTED, GRID = '#1a1a19', '#f0efec', '#c3c2b7', '#3a3a38'
+TAG_PREFIX = 'hypsometry-'  # the page's tag: hypsometry-<name>
+SURFACE, TEXT, MUTED, GRID ='#1a1a19', '#f0efec', '#c3c2b7', '#3a3a38'
 SERIES = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300']  # categorical slots, dark mode
 
 PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>Hypsometry {name}</title>
@@ -52,12 +53,14 @@ def measure(elevation):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--name', required=True)
-    parser.add_argument('--labels', default='')
+    parser.add_argument('--name', required=True,
+                        help=f'the page tag is {TAG_PREFIX}<name> (the naming.py tag rule: lower-case words joined by '
+                             f'"-", no version suffix, at most {naming.TAG_LENGTH - len(TAG_PREFIX)} characters)')
+    parser.add_argument('--labels', default='', help='sandbox runs: ids, <id>-<tag> names or earlier labels')
     parser.add_argument('--array', action='append', default=[], metavar='NAME=PATH')
     arguments = parser.parse_args()
     try:
-        tag = naming.check_tag(f'hypsometry-{arguments.name}')
+        tag = naming.check_tag(f'{TAG_PREFIX}{arguments.name}')
     except ValueError as error:
         parser.error(str(error))
 

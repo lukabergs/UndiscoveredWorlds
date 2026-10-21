@@ -303,7 +303,7 @@ def finish(path, accept_newer=False):
 # A session starts with a warning below this much free space on the workspace drive.
 LOW_SPACE_GB = 60
 # status lists the folders under out/ other than these that hold more than OUT_LISTED_MB.
-OUT_KEPT = ('build', 'scratch', 'evaluation')
+OUT_KEPT = ('build', 'scratch', 'evaluation', 'inputs')  # out/inputs: derived inputs (scripts/evaluation/inputs.py)
 OUT_LISTED_MB = 10
 COMMAND = 'uv run --offline python scripts/uwtools/'
 
@@ -381,7 +381,7 @@ def unrouted(keep):
             lines.append(f'out/{item.name} on C ({size / 1e6:.0f} MB; not routable): when no longer needed, '
                          f'{COMMAND}trash.py move out/{item.name} --reason TEXT')
     presets = preset_builds()
-    for item in plain_folders(ROOT / 'out' / 'build') if presets is not None else []:
+    for item in plain_folders(ROOT / 'out' / 'build') if presets else []:  # no presets read: nothing to judge by
         if item.name in presets or tracking_build(item):
             continue
         lines.append(f'out/build/{item.name} is not a build of CMakePresets.json ({folder_bytes(item) / 1e6:.0f} MB): '

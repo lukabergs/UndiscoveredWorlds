@@ -76,6 +76,7 @@ sys.path.insert(0, str(SCRIPTS / 'evaluation'))
 from uwtools import grid, naming  # noqa: E402
 from uwtools.tectonics_earth_reference import load_earth_reference, reference_inputs  # noqa: E402
 
+TAG_PREFIX = 'metrics-'  # the page's tag: metrics-<name>
 WORLD_COLUMNS, WORLD_ROWS, RADIUS_KM = 256, 128, 6371.0
 BANDS = (0, 200, 500, 1000, 2000, 3000, 9000)
 ELEVATION_BANDS = tuple(zip(BANDS[:-1], BANDS[1:]))
@@ -424,14 +425,16 @@ def render(summary):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--name', required=True)
-    parser.add_argument('--labels', required=True)
+    parser.add_argument('--name', required=True,
+                        help=f'the page tag is {TAG_PREFIX}<name> (the naming.py tag rule: lower-case words joined by '
+                             f'"-", no version suffix, at most {naming.TAG_LENGTH - len(TAG_PREFIX)} characters)')
+    parser.add_argument('--labels', required=True, help='sandbox runs: ids, <id>-<tag> names or earlier labels')
     parser.add_argument('--domains', default='global,B,F,G')
     parser.add_argument('--earth-windows', default=DEFAULT_EARTH_WINDOWS,
                         help="earth_atlas.WINDOWS names, comma-separated; 'none' for no Earth windows")
     arguments = parser.parse_args()
     try:
-        tag = naming.check_tag(f'metrics-{arguments.name}')
+        tag = naming.check_tag(f'{TAG_PREFIX}{arguments.name}')
     except ValueError as error:
         parser.error(str(error))
     start = time.perf_counter()

@@ -54,10 +54,11 @@ Steps (the box in the parent's cropped pixels, the margin in parent pixels, the 
   8. As the sandbox after its physics: the sea keeps its start depth (below the lowest level), troughs cut below the sea
      and joined to it become sea; no coast term, micro texture or filter (parent-level details); lakes at their spill
      level (Priority-Flood, nest.lakes).
---parent is a sandbox run (naming.find: an id, <id>-<tag>, an earlier label or an absolute path); --label is the
-tag of a new run, out/scratch/sandbox/<id>-<TAG>/ of the main tree (scripts/uwtools/naming.py; an absolute path is
-that directory), whose page goes to out/evaluation/<id>-<TAG>/ (images linked by relative path) and whose finish
-marks the previous runs of the tag superseded (naming.finish; the --parent is never touched).
+--parent is a sandbox run (naming.find: an id, <id>-<tag>, an earlier label or an absolute path); --label LABEL
+makes the tag nest-LABEL of a new run, out/scratch/sandbox/<id>-nest-LABEL/ of the main tree
+(scripts/uwtools/naming.py; an absolute path is that directory), whose page goes to out/evaluation/<id>-nest-LABEL/
+(images linked by relative path) and whose finish marks the earlier runs of the tag superseded (naming.finish; the
+--parent is never touched).
 Outputs in the run's directory (the sandbox's names): <child>-elevation.npy (final bed), -elevation-procedural.npy
 (the physics' input), -sea.npy, -lake-surface.npy, -discharge.npy (m3/s), the totals, -grid.json (the pixel geometry, for glo30_windows.py
 --like and window_metrics.py), <child>-relief.png, -elevation.png, -discharge.png, the totals' maps; the parent's box
@@ -66,7 +67,7 @@ by nearest), its rivers routed on the prolonged surface (a zero-duration physics
 timings); the page index.html as above. The child is named <domain>-nest.
 
   uv run python scripts/sandbox/nested_window.py --parent t15-parent --domain G-coast --box 60,555,324,714
-      --factor 6 --margin 16 [--duration 0.5] [--glacial] --label t15-nest-a [--set nest.detail.relief_fraction=0.1]
+      --factor 6 --margin 16 [--duration 0.5] [--glacial] --label t15-coast [--set nest.detail.relief_fraction=0.1]
       [--exe PATH]
 """
 import argparse
@@ -88,6 +89,7 @@ from uwtools import naming  # noqa: E402
 from uwtools.bundle import Bundle  # noqa: E402
 
 DEFAULT_CONFIG = ROOT / 'configs' / 'sandbox' / 'nested.json'
+TAG_PREFIX = 'nest-'  # a nested run's topic: nest-<label>, apart from terrain_sandbox.py runs of the same label
 # The grid operations and the projection live in nesting.py, shared with terrain_sandbox.py's nesting (rule B).
 from nesting import (EIGHT, block_mean, catmull_rom_matrix, departure, flood, local_relief,  # noqa: E402,F401
                      nearest, project_means, prolong, remove_parent_means, ring)
@@ -160,7 +162,8 @@ def main():
     parser.add_argument('--duration', type=float, default=0.5, help='Myr')
     parser.add_argument('--glacial', action='store_true', help='a last-glacial-maximum pulse first (nest.pulse)')
     parser.add_argument('--label', required=True, metavar='TAG',
-                        help='the tag of the run: out/scratch/sandbox/<id>-<TAG>; an absolute path is that directory')
+                        help=f'the run is out/scratch/sandbox/<id>-{TAG_PREFIX}<TAG> (the naming.py tag rule, at most '
+                             f'{naming.TAG_LENGTH - len(TAG_PREFIX)} characters); an absolute path is that directory')
     parser.add_argument('--config', default=str(DEFAULT_CONFIG))
     parser.add_argument('--set', action='append', default=[], metavar='GROUP.KEY=JSON')
     parser.add_argument('--exe', default=str(ts.PHYSICS), help='terrain_sandbox.exe to run')
@@ -170,10 +173,11 @@ def main():
     started_all = time.perf_counter()
     timings = {}
 
+    tag = None
     try:
         parent_directory = naming.find('sandbox', arguments.parent)
         if not Path(arguments.label).is_absolute():
-            naming.check_tag(arguments.label)
+            tag = naming.check_tag(f'{TAG_PREFIX}{arguments.label}')  # its own topics beside terrain_sandbox.py's
     except (ValueError, FileNotFoundError) as error:
         parser.error(str(error))
     config = load_config(parent_directory, arguments.config, arguments.set)
@@ -185,7 +189,7 @@ def main():
         directory, name = Path(arguments.label), arguments.label
         directory.mkdir(parents=True, exist_ok=True)
     else:
-        named = naming.new_directory('sandbox', arguments.label)
+        named = naming.new_directory('sandbox', tag)
         directory, name = named.path, named.name
     print(directory, flush=True)
     f, margin = arguments.factor, arguments.margin
