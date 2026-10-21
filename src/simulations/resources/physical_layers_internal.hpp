@@ -60,9 +60,9 @@ inline void parallelforcells(const planet& world, Fn&& fn)
     }, cellsperworker);
 }
 
-// planet::outline and planet::coast on any grid (terrain's cell-grid forms). On lat-lon
-// they differ from the planet's only in the first and last columns, whose west and east
-// neighbours planet::wrapx takes one column short (it wraps by W - 1).
+// planet::outline and planet::coast on any grid (terrain's cell-grid forms). Their first and
+// last columns no longer differ from the planet's on lat-lon: planet::wrapx wraps by W since
+// master plan 1.5 (it wrapped by W - 1, one column short).
 inline bool isoutline(const planet& world, CellId c)
 {
     return terrain::coastgrid::outline(world, c);

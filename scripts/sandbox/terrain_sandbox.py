@@ -2932,7 +2932,7 @@ def export_for_render(domain, fields, result, config, directory):
     base = domain.base_face_cells
     if not domain.whole:  # a window: its pixel box at k cells per pixel, sampled on the window's own table
         c0, r0, c1, r1 = domain.pixels
-        columns, rows = (c1 - c0 + 1) * domain.k, (r1 - r0 + 1) * domain.k
+        columns, rows = pixel_columns(c0, c1, 4 * base) * domain.k, (r1 - r0 + 1) * domain.k
         view = Domain(domain.name, columns, rows, float(c0), float(r0), domain.k, 4 * base, 2 * base, domain.radius_km,
                       crop=(0, rows, 0, columns), exaggeration=domain.exaggeration, physics=domain.physics)
     else:

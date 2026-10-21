@@ -588,14 +588,14 @@ private:
     std::size_t inputindex(int x, int y) const { return cellindex(x, y); }
     void resizecells(int width, int height, const mesh::CellGrid* grid);
     bool inside(int x, int y) const { return !(y < 0 || y > inputs_.height || x < 0 || x > inputs_.width); }
-    // Same wrapping as planet::wrapx, which steps by the largest index.
+    // The column x wrapped into [0, W), as planet::wrapx; without columns (width -1) x unchanged.
     int wrapx(int x) const
     {
-        while (x > inputs_.width)
-            x = x - inputs_.width;
-        while (x < 0)
-            x = x + inputs_.width;
-        return x;
+        const int columns = inputs_.width + 1;
+        if (columns <= 0)
+            return x;
+        x %= columns;
+        return x < 0 ? x + columns : x;
     }
     int clipy(int y) const { return y < 0 ? 0 : (y > inputs_.height ? inputs_.height : y); }
     void noteclimatesolverread() const;

@@ -605,7 +605,7 @@ public:
 
     bool coast(int x, int y) const; // whether this is coast, next to land
 
-    void longitude(int x, int& degrees, int& minutes, int& seconds, bool& negative) const;   // returns the longitude of this point
+    void longitude(int x, int& degrees, int& minutes, int& seconds, bool& negative) const;   // returns the longitude of this column's cell centre
 
     void latitude(int y, int& degrees, int& minutes, int& seconds, bool& negative) const;   // returns the latitude of this row's cell centre
 

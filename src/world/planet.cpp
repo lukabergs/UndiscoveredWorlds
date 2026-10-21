@@ -466,15 +466,12 @@ void planet::longitude(int x, int &degrees, int &minutes, int &seconds, bool& ne
     if ( x<0 || x>body_.itswidth)
         return;
 
-    float fx = (float)x;
+    // Cell-centred, as latitude: column x spans the band whose centre is
+    // 360 (x + 0.5) / columns - 180 degrees.
+    const float columns = static_cast<float>(body_.itswidth + 1);
+    const float signedlongitude = 360.0f * (static_cast<float>(x) + 0.5f) / columns - 180.0f;
 
-    float worldwidth = (float)body_.itswidth + 1.0f;
-
-    float pixelsperlong = worldwidth / 360.0f;
-
-    float longitude = fx / pixelsperlong;
-
-    longitude = longitude - 180.0f;
+    const float longitude = std::fabs(signedlongitude);
 
     degrees = (int)longitude;
 
@@ -486,19 +483,7 @@ void planet::longitude(int x, int &degrees, int &minutes, int &seconds, bool& ne
 
     seconds = (int)dec2;
 
-    if (degrees < 0)
-        degrees = 0 - degrees;
-
-    if (minutes < 0)
-        minutes = 0 - minutes;
-
-    if (seconds < 0)
-        seconds = 0 - seconds;
-
-    negative = 0;
-
-    if (fx < worldwidth / 2.f)
-        negative = 1;
+    negative = signedlongitude < 0.0f; // western
 
     return;
 }
@@ -535,17 +520,14 @@ void planet::latitude(int y, int& degrees, int& minutes, int& seconds, bool &neg
     return;
 }
 
+// The row whose band holds the latitude lat (degrees, north positive), the inverse of
+// latitude: a row's centre maps back to that row. -90 is the last row.
 int planet::reverselatitude(int lat) const
 {
-    float flat = 90.0f - (float)lat;
+    const int rows = body_.itsheight + 1;
+    const int y = static_cast<int>(std::floor((90.0f - static_cast<float>(lat)) * static_cast<float>(rows) / 180.0f));
 
-    float equator = (float)body_.itsheight / 2.0f;
-
-    float pixelsperlat = equator / 90.0f;
-
-    float y = flat * pixelsperlat;
-
-    return (int)y;
+    return std::clamp(y, 0, body_.itsheight);
 }
 
 // slightly more complicated accessor functions
