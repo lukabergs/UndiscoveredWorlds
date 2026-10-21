@@ -37,7 +37,7 @@ awaiting its review (verdict.review 'pending' or a review-request.json, and no v
 named in the main tree's (or this checkout's) configs/sandbox/*.json or configs/evaluation/*.json (also as the
 value of a key="path" setting), or an input of the new run (its declared inputs, --baseline, the step check's
 reference, --parent-run, the sandbox's base bundle); nor to one already archived (archive-receipt.json) or
-superseded; nor to one without its completion marker (COMPLETE: run.json, result.json, config.json, report.json or
+superseded; nor to one without its completion marker (COMPLETE: ledger-entry.json, result.json, config.json, report.json or
 index.html by kind; a run still in progress); nor to a step check of another grid or --social setting. A failed run archives nothing, and an earlier run that
 cannot be archived is reported and left as it is: the finished run never fails because of it.
 
@@ -493,7 +493,7 @@ def _mark_superseded(record, named):
 
 # The file a tool writes when a run of a kind has ended (written last, or in a finally block): finish leaves an
 # earlier run without it alone, so a run still in progress is never touched.
-COMPLETE = {'run': 'run.json', 'experiment': 'run.json', 'step-check': 'result.json', 'sandbox': 'config.json',
+COMPLETE = {'run': 'ledger-entry.json', 'experiment': 'ledger-entry.json', 'step-check': 'result.json', 'sandbox': 'config.json',
             'geology': 'report.json', 'page': 'index.html'}
 # Outcomes finish prints one line each for; the others (repeated at every run of a topic) only as counts.
 SHOWN = ('archived', 'superseded', 'pinned', 'refused', 'error')

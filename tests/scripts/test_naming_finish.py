@@ -170,7 +170,7 @@ class FinishTests(Tree):
         # The baseline of a module registry.
         write(self.root / "runs/registry/world.json", json.dumps(
             {"schema": "world-run-registry/v1", "baseline": 1, "runs": [{"id": 1, "run": "runs/world/1", "tag": "world"}]}))
-        write(self.root / "runs/world/1/run.json", "{}")
+        write(self.root / "runs/world/1/ledger-entry.json", "{}")
         outcome = only(naming.finish(self.new("run", "world", module="world"), True))
         self.assertEqual(outcome["action"], "pinned")
         self.assertIn("baseline", outcome["reason"])
@@ -246,7 +246,7 @@ class FinishTests(Tree):
         self.stub(side_effect=archive.NotARun("no evaluation.json"))
         write(self.root / "runs/registry/world.json", json.dumps(
             {"schema": "world-run-registry/v1", "runs": [{"id": 1, "run": "runs/world/1", "tag": "world"}]}))
-        write(self.root / "runs/world/1/run.json", "{}")
+        write(self.root / "runs/world/1/ledger-entry.json", "{}")
         registry =(self.root / "runs/registry/world.json").read_bytes()
         outcome = only(naming.finish(self.new("run", "world", module="world"), True))
         self.assertEqual(outcome["action"], "not-a-run")

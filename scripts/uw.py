@@ -152,12 +152,12 @@ def tectonics_bundle(exe, seed, resolution, extra, output):
 
 def tool_environment(bundle):
     """world_pipeline's environment with its own outputs (climate diagnostics, images) in <bundle>-outputs beside the
-    bundle when that lies on the storage drive, else in the main tree's out/scratch/geology/outputs/<bundle name>
+    bundle when that lies on the storage drive, else in a new out/scratch/geology/<id>-tool-outputs of the main tree
     (naming.tool_environment): nothing lands in out/images or out/climate-diagnostics on C."""
     try:
         return naming.tool_environment(bundle.with_name(f'{bundle.name}-outputs'))
     except SystemExit:  # --output on C
-        return naming.tool_environment(naming.main_root() / 'out/scratch/geology/outputs' / bundle.name)
+        return naming.tool_environment(naming.new_directory('geology', 'tool-outputs', label=str(bundle)).path)
 
 
 def tectonics(args, extra):

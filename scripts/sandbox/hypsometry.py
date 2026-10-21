@@ -28,7 +28,7 @@ from uwtools import naming  # noqa: E402
 from uwtools.tectonics_earth_reference import compare_to_earth, load_earth_reference, measure_earth  # noqa: E402
 
 TAG_PREFIX = 'hypsometry-'  # the page's tag: hypsometry-<name>
-SURFACE, TEXT, MUTED, GRID ='#1a1a19', '#f0efec', '#c3c2b7', '#3a3a38'
+SURFACE, TEXT, MUTED, GRID = '#1a1a19', '#f0efec', '#c3c2b7', '#3a3a38'
 SERIES = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300']  # categorical slots, dark mode
 
 PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>Hypsometry {name}</title>
