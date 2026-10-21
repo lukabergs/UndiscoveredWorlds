@@ -32,7 +32,19 @@ Since 2026-10-20 a session runs a **wave**, not one phase: up to four C++ worktr
 
 ### The brief
 
-The brief is a worker's only context. It states: the goal in one sentence; the plan step (document and section); the files to change and the files to leave alone; what is already ruled out and why; the exact check commands and their expected results; what not to run; whether to commit; what to report. A brief that cannot be written clearly means the step is not ready to delegate: the planner refines the plan first.
+The brief (orchestrator to worker, mechanic or surveyor) is the agent's only context. Its fields, in this order (R required, O optional; write `none` under an empty one):
+
+- **Goal** (R): one sentence.
+- **Step** (R): the step id and the plan section (`master plan 2.8`, §3 Phase 2).
+- **Lane, start commit** (R): the lane and the commit to work from.
+- **Files to change** / **Files to leave alone** (R): the second includes the files of workers running in parallel.
+- **Ruled out** (O): what was already tried or decided against, with the ledger ids.
+- **Checks** (R): the exact commands and their expected results.
+- **Do not run** (R): the checks, suites, builds and runs that stay out.
+- **Commit** (R): yes or no.
+- **Report** (R): "the headings of 'The report'" (a surveyor's: its answers and `## Unverified`), plus any extra the step needs.
+
+A brief that cannot be written clearly means the step is not ready to delegate: the planner refines the plan first.
 
 Parallel workers get disjoint file sets. Two steps that must touch the same file are one step, or the second waits. When a worker must experiment destructively on shared files, run it with `isolation: worktree`; the orchestrator merges.
 
@@ -52,9 +64,62 @@ Learned in erosion Phase R2 (2026-10-09, the lead session itself on Fable 5.1): 
 
 Learned in erosion Phase E5 (2026-10-09, the lead session on Fable 5.1): when the implementing model's session limit stops parallel worktree workers after their code and tests are complete but before their measurements, their diffs (`git -C <worktree> diff | git apply`) land cleanly on the main tree when the contracts step gave each its own files; the lead finishes the measurements in-session, commits each step by its files (`git add <paths>`; the commits then share a timestamp, so the ledger records the real figure beside the commit-to-commit one) and has each commit reviewed. A contracts review that runs while the workers build on the contracts pays for itself: it found a placement rule that read the solved elevation in the innermost halo ring (not seam-safe; only the start surface, the sea and the channel beds agree there: a placement or eligibility rule reads a pure global quantity, the upsampled base), a probe that took a climate constant for the world's lapse rate (read the field the code reads), and a zero-filled field passed as present. An overlap variant must assert the feature on the shared cells, not somewhere in the window; a number inferred from a sweep's shape (the catchments) is measured before the entry cites it; a sweep whose variable saturates at a cap reports the cap as the control. `step_check.py` needs `--directory` when the reference label lives outside `out/scratch/phase5`. Relief forms of a few hundred metres are invisible on the 10 km elevation palette: the next form-cutting step needs a hillshade or on-minus-off composite in `scripts/evaluation/maps.py` first.
 
+### The report
+
+A worker's or mechanic's answer to the orchestrator, under these `## ` headings in this order (R required, O optional; `none` where empty; no narrative of the process). `scripts/check_records.py --report FILE --kind worker` checks the headings.
+
+- `Files changed` (R): one line per file, what changed (mechanic: the occurrences changed per file).
+- `Checks` (R): each command, its exit code and its result (identical or not, test counts); a mechanic also gives the search for forbidden results and its output.
+- `Not done` (R): what the brief asked that was not done, with the reason (mechanic: the occurrences left and why).
+- `Not run` (R): the checks skipped and what the minimal world cannot show; it goes into the ledger entry's `not_run`.
+- `Questions` (R): each question for the plan with a recommended option.
+- `Triage` (O): issues seen outside the step, each as one proposed row with the phase that owns it (`AGENTS.md`, "Tracks and triage").
+- `Commit` (R when the brief says commit): the hash and the paths.
+- `Duration` (R): start and end clock times and the minutes.
+
+### Questions to the user
+
+Every open question goes to the user in one message, and each is also recorded in the plan's §5; no prompt for the next session is printed while any is open (`AGENTS.md`). Per question:
+
+- `Q<n>` (R): the question in one sentence.
+- Options (R): lettered, each with its consequence in one line.
+- Recommendation (R): the option and a one-line reason.
+- Blocks (R): which steps wait on it and what continues meanwhile.
+- Evidence (O): page paths, ledger ids.
+
+### The wave handoff
+
+Printed in the chat when a wave closes (master plan §2, step 8), under these headings:
+
+- `Wave` (R): the track, the wave number and the start..end commit range (for the adversarial review).
+- `Steps` (R): id, status, commit and duration of each step, equal to the plan's §4 rows.
+- `Checks` (R): `check_records.py` exit 0; the `step_check.py` label to use as the next reference.
+- `Looks` (R): the paths of the pages waiting for the user's look.
+- `Learned` (R): where the session wrote what it learned.
+- `Cleanup` (R): worktrees retired, branches dropped, trash entries.
+- `Questions` (R): `none`, or "asked; no prompt".
+- `Next prompt` (R only when `Questions` is `none`): the prompt for the next session.
+
+### Status row and ledger entry
+
+`scripts/check_records.py` checks both (in `step_check.py` and the pre-commit hook); rows and entries written before these fields are grandfathered in the script.
+
+Status row (master plan §4, one per closed step):
+
+- Step: a §3 step id, optionally followed by `(word ...)` (lower-case words and digits).
+- Status: `done: ...`, `part: ...` or `stopped: ...`.
+- Commit: the hashes (`h, h`), or `this commit`, which the next step replaces with the hash.
+- Duration: `<who> N min; N min from <hash>` (the worker's time, then the time from the previous step's commit).
+
+Ledger entry (strict fields, beside the required ones of `scripts/uwtools/ledger.py`):
+
+- `phase`: `master plan <id>: ...` for a master-plan step (the id is a §3 step).
+- `duration`: `start <hash> (<time>); ...`, with the time span in `N min` or `N h`.
+- `not_run`: a list (the report's `Not run`).
+
 ### Verification is scripts first
 
-- Default check of a step: `scripts/evaluation/step_check.py <label> --reference <previous label>` (headless build, the three seed-1 bundles at the minimal configuration with `--audit-access`, bundle comparison, `parameters.py --check`, `check_layout.py`, `process_access.py --check`); `--desktop` only when `src/app` changed. Labels are used once.
+- Default check of a step: `scripts/evaluation/step_check.py <label> --reference <previous label>` (headless build, the three seed-1 bundles at the minimal configuration with `--audit-access`, bundle comparison, `parameters.py --check`, `check_layout.py`, `check_structure.py`, `check_records.py`, `process_access.py --check`); `--desktop` only when `src/app` changed. Labels are used once.
 - New behaviour comes with its own deterministic test: a GoogleTest on a synthetic grid of a few hundred cells for a kernel (`tests/`, run as `ctest -R "^<Suite>\."`), a profile check for a run-level invariant (`configs/evaluation/<module>.json`, `scripts/evaluation/checks.py`), a Python unit test for a script. The test states the expected numbers; "looks right" is not a test.
 - One build per step, not per edit. No full ctest, Python suite or desktop launch unless the step changes what they cover, and then only the affected suite (`-R`, `-k`).
 - Runs: the minimal configuration (128 x 64, `--duration 50`, `--climate-resolution 32 --climate-coupling-iterations 2`) for every "did anything change" question; one 256-column run with the default duration per phase close when the phase changes mountains or terrain (the plan names it); 512 columns only when the user asks. Before a run longer than a few minutes, ask whether a smaller one answers the same question and record what the small one cannot show.
@@ -63,7 +128,15 @@ Learned in erosion Phase E5 (2026-10-09, the lead session on Fable 5.1): when th
 
 ### Review
 
-`reviewer` gets: the plan step, the commit range or the dirty files, the draft ledger entry, and nothing of the author's reasoning. It answers whether the step is satisfied, whether each claim has evidence, what the minimal configuration could not exercise, and what to fix. Its findings go into the ledger entry (`observed`, `not_run`, `lessons`) or back to the worker. The adversarial review by GPT-6 Astra is the user's step: when a phase closes, the orchestrator lists the commit range and the plan section in the handoff so the user can hand them over; findings the user brings back are new steps or §Open items.
+`reviewer` gets: the plan step, the commit range or the dirty files, the draft ledger entry, and nothing of the author's reasoning. Its verdict comes under these `## ` headings, in this order (`scripts/check_records.py --report FILE --kind reviewer` checks them):
+
+- `Verdict` (R): `pass`, `pass with notes` or `rework`.
+- `Findings` (R): numbered by consequence, each with file:line, what is wrong, and the smallest fix or check that settles it.
+- `Claims` (R): one line per claim of the draft ledger entry: supported, unsupported or contradicted.
+- `Not exercised` (R): what the minimal configuration and the recorded checks could not exercise.
+- `Scope` (R): what was asked and not done; what was done and not asked.
+
+Its findings go into the ledger entry (`observed`, `not_run`, `lessons`) or back to the worker. The adversarial review by GPT-6 Astra is the user's step: when a phase closes, the orchestrator lists the commit range and the plan section in the handoff so the user can hand them over; findings the user brings back are new steps or §Open items.
 
 ### Budget
 

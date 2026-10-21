@@ -17,4 +17,4 @@ Rules:
 - Checks: the compile build the brief names (headless by default; desktop only when `src/app` changed) and the `--check` scripts it names. No tests, runs or builds beyond that.
 - `uv` runs through the PowerShell tool. Do not commit unless the brief says so.
 
-Report back: the occurrences changed (count per file), the ones left and why, the build result, and the exact search you ran for forbidden results with its (empty) output.
+Report under these `## ` headings, in this order (agent-workflow.md, 'The report'): `Files changed` (the occurrences changed, count per file), `Checks` (the build result, and the exact search you ran for forbidden results with its output), `Not done` (the occurrences left and why), `Not run`, `Questions`, `Triage`, `Commit`, `Duration`; write `none` where empty. No narrative of your process.

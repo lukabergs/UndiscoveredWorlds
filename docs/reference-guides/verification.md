@@ -26,6 +26,7 @@ ctest --test-dir out/build/headless -C Release -L tectonics                     
 uv run --offline python -m unittest discover -s tests/scripts                    # Python suite
 uv run --offline python scripts/check_layout.py                                   # layout and tectonics header boundary
 uv run --offline python scripts/check_structure.py                                # files only in the places configs/structure.json names (--path P... for new paths)
+uv run --offline python scripts/check_records.py                                  # ledger fields, plan §4 status rows (--staged in pre-commit; --report FILE --kind worker|reviewer)
 uv run --offline python tests/scripts/check_tectonics_cli.py out/build/headless/bin/Release/world_pipeline.exe
 uv run --offline python tests/scripts/check_grid_cli.py out/build/headless/bin/Release/world_pipeline.exe   # --grid and --from-bundle, imported lakes on the cube
 ```
@@ -49,7 +50,7 @@ uv run --offline python scripts/evaluation/process_access.py (Get-ChildItem runs
 uv run --offline scripts/uw.py tectonics experiment --duration 20 --repeat --explicit-recipe
 ```
 
-The check of one refactoring step (headless build, the three minimal seed-1 bundles with `--audit-access`, comparison with the previous step's, `parameters.py --check`, `check_layout.py`, `check_structure.py`, `process_access.py --check`):
+The check of one refactoring step (headless build, the three minimal seed-1 bundles with `--audit-access`, comparison with the previous step's, `parameters.py --check`, `check_layout.py`, `check_structure.py`, `check_records.py`, `process_access.py --check`):
 
 ```
 uv run --offline python scripts/evaluation/step_check.py <label> --reference <previous label> [--desktop] [--social] [--grid latlon]

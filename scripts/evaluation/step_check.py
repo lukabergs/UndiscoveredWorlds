@@ -7,8 +7,8 @@ Builds the headless preset (and the desktop preset with --desktop), makes the th
 bundles at 128 export columns (tectonics 50 Myr; climate on 32 columns with 2 coupling iterations;
 --audit-access) as <directory>/<LABEL>-<recipe>, on the world_pipeline default grid, the cube of
 N 32 (--grid latlon: on 128 x 64 lat-lon, for lat-lon parity), compares each with the bundle of the
-reference label, then runs parameters.py --check, check_layout.py, check_structure.py and process_access.py --check
-on the stored report sets. --social adds a procedural world with society (<LABEL>-social).
+reference label, then runs parameters.py --check, check_layout.py, check_structure.py, check_records.py and
+process_access.py --check on the stored report sets. --social adds a procedural world with society (<LABEL>-social).
 Build and run output goes to <directory>/<LABEL>-*.log. Exit status: 0 when every build,
 run and check passed and every comparison was identical.
 
@@ -104,6 +104,9 @@ def main():
     passed = passed and status == 0
     status = subprocess.run([sys.executable, 'scripts/check_structure.py'], cwd=ROOT).returncode
     print(f'check_structure exit {status}')
+    passed = passed and status == 0
+    status = subprocess.run([sys.executable, 'scripts/check_records.py'], cwd=ROOT).returncode
+    print(f'check_records exit {status}')
     passed = passed and status == 0
     reports = [str(path) for name in ACCESS_SETS for path in sorted((DATA_ROOT / 'runs/reports' / name).glob('*.json'))]
     status = subprocess.run([sys.executable, 'scripts/evaluation/process_access.py', '--check'] + reports, cwd=ROOT).returncode

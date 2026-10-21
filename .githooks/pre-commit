@@ -1,5 +1,11 @@
 #!/bin/sh
 if command -v python >/dev/null 2>&1; then
-    exec python scripts/repository_scope.py --staged
+    PYTHON=python
+else
+    PYTHON=python3
 fi
-exec python3 scripts/repository_scope.py --staged
+"$PYTHON" scripts/repository_scope.py --staged || exit 1
+# core.hooksPath shares this hook with every worktree; a tree branched before check_records.py skips it.
+TOP=$(git rev-parse --show-toplevel)
+[ -f "$TOP/scripts/check_records.py" ] || exit 0
+exec "$PYTHON" "$TOP/scripts/check_records.py" --staged

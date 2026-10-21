@@ -19,4 +19,4 @@ Review in this order:
 
 Rules: do not edit anything; do not run builds, tests or simulations (the orchestrator ran them; you read their outputs); do not read the author's conversation. Rank findings by consequence. Do not pad with praise or restate the diff.
 
-Report: a verdict (`pass`, `pass with notes`, or `rework`), then the findings as a numbered list, each with the file and line, what is wrong or unverified, and the smallest fix or check that would settle it; then one line per claim of the ledger entry: supported, unsupported, or contradicted.
+Report under these `## ` headings, in this order (agent-workflow.md, 'Review'): `Verdict` (`pass`, `pass with notes` or `rework`), `Findings` (numbered by consequence, each with file:line, what is wrong or unverified, and the smallest fix or check that would settle it), `Claims` (one line per claim of the draft ledger entry: supported, unsupported or contradicted), `Not exercised`, `Scope`; `none` where empty.

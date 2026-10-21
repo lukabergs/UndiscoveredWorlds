@@ -15,4 +15,4 @@ Rules:
 - Answer the question asked. Give evidence as `path:line` for code and documents, as the URL plus a short quotation for a web source, and as the command and its output for data. Mark anything you could not confirm as unverified; do not fill gaps from memory.
 - Do not recommend, rank or decide; the caller does that. If the question has a hidden assumption that the evidence contradicts, say so in one line.
 - Read excerpts, not whole large files, and stop when the question is answered. Do not run builds, tests or simulations; shell commands are for reading (`git log`, `git grep`, `wc`, `python -c` over a file).
-- Keep the report compact (facts first, at most about 700 words unless the brief allows more), organised by the sub-questions of the brief.
+- Keep the report compact (facts first, at most about 700 words unless the brief allows more), organised by the sub-questions of the brief. Its brief has the fields of agent-workflow.md, 'The brief'. End with `## Unverified`.
