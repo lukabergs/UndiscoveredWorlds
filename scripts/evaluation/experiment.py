@@ -32,8 +32,11 @@ evaluation failed or the run was interrupted. A run directory holds run.json (co
 state, timing, steps, exit codes, verdict), log.txt, bundle/, checkpoints/ when the
 settings ask for them, evaluation/ (evaluation.json, review request, run page, maps) and
 ledger-entry.json, a draft to complete and append with `uw.py <module> ledger --add`.
-Files the tool writes on its own (validation tables, images) are scratch and go to
-out/evaluation/outputs/<module>/<name>/, not into the run directory.
+Files the tool writes on its own (validation tables, images) are scratch and go to the main
+tree's out/evaluation/outputs/<module>/<name>/ (on the storage drive; naming.tool_environment), not
+into the run directory. A run that passed (tool, evaluation and checks) archives every earlier run of
+its topic not archived yet (naming.finish: the same module and tag, registered or scratch; not with
+--archive), except the registry's baseline, runs named in configs, and the inputs and --baseline of this run.
 """
 import argparse
 import datetime
@@ -53,10 +56,6 @@ import inputs
 import report
 
 ROOT = Path(__file__).resolve().parents[2]
-# Environment overrides that send a tool's own outputs to scratch (OUTPUTS/<module>/<name>).
-OUTPUT_VARIABLES = {
-    'UW_CLIMATE_DIAGNOSTICS_DIR': 'diagnostics',
-    'UW_DEFAULT_IMAGE_DIR': 'images', 'UW_DEFAULT_WORLD_DIR': 'worlds', 'UW_DEFAULT_UWS_DIR': 'worlds'}
 
 
 def now():
@@ -117,7 +116,7 @@ def expand(arguments, resolution, directory, values):
 
 
 def run_tool(command, directory, label, environment, outputs):
-    environment = dict(environment, **{name: str(outputs / path) for name, path in OUTPUT_VARIABLES.items()})
+    environment = naming.tool_environment(outputs, environment)  # the tool's own outputs to outputs/, on D
     log = 'log.txt' if label == 'run' else f'log-{label}.txt'
     started = time.time()
     with (directory / log).open('x', encoding='utf-8') as stream:
@@ -211,10 +210,10 @@ def main():
         raise SystemExit(f'Build {spec["tool"]} first: {executable}')
     explicit = []
     if args.explicit_recipe and not scenario:
-        named = spec.get('registered', {}).get('recipe')
-        if not named or not (ROOT / named).is_file():
+        recipe_name = spec.get('registered', {}).get('recipe')
+        if not recipe_name or not (ROOT / recipe_name).is_file():
             raise SystemExit(f'Profile {args.module} names no recipe file for --explicit-recipe')
-        recipe_path = ROOT / named
+        recipe_path = ROOT / recipe_name
         explicit = recipe_options(json.loads(recipe_path.read_text(encoding='utf-8')))
     if args.archive:
         runs.refuse_archive(ROOT / args.archive)
@@ -269,7 +268,7 @@ def main():
         record['recipe'] = recipe
     print(f"{'Run ' + args.module + ' ' + name if args.register else 'Scratch run ' + name}: {' '.join(record['command'])}", flush=True)
     labels = ['run'] + ['repeat'] * args.repeat + ['explicit'] * args.explicit_recipe
-    outputs = ROOT / 'out/evaluation/outputs' / args.module / name
+    outputs = naming.main_root() / 'out/evaluation/outputs' / args.module / name  # routed out/evaluation (D)
     start = time.time()
     document, failure, succeeded = None, None, False
     try:
@@ -342,6 +341,11 @@ def main():
             runs.append_record(args.module, entry, root=main)
             print(f"Registered {args.module} run {identifier} ({entry['status']}) in {runs.registry_path(args.module, main)}")
     print(f'Run directory: {directory}')
+    if not args.archive:
+        # The earlier runs of the topic are archived once this one passed (scripts/uwtools/naming.py, finish).
+        passed = succeeded and document is not None and failure is None and document['verdict'].get('checks') != 'fail'
+        inputs = [Path(item['path']) if Path(item['path']).is_absolute() else ROOT / item['path'] for item in declared]
+        naming.finish(named, passed, inputs + ([args.baseline] if args.baseline else []))
     if not succeeded:
         raise SystemExit(f"Tool failed; see {directory / record['runs'][-1]['log']}")
     if failure:

@@ -12,7 +12,10 @@ process_access.py --check on the stored report sets. --social adds a procedural 
 The directory is the main tree's out/scratch/step-check/<id>-<TAG> (scripts/uwtools/naming.py: a new id
 each time, recorded in runs/registry/scratch.json; TAG names the topic, without a version suffix). Build
 and run output goes to <directory>/*.log; <directory>/result.json records passed, compared (every bundle
-compared with the reference's), grid, social and the reference. Exit status: 0 when every build, run and check passed and every comparison was identical.
+compared with the reference's), grid, social and the reference. The pipeline's own outputs (climate diagnostics,
+images) go to <directory>/diagnostics and <directory>/images (naming.tool_environment), not out/ on C. A check that
+passed marks the earlier checks of its tag superseded in runs/registry/scratch.json (naming.finish), except its
+reference. Exit status: 0 when every build, run and check passed and every comparison was identical.
 
 REF is an id, an <id>-<tag> name, a label of the earlier layout (flat <label>-<recipe> bundles in
 out/scratch/step-check, out/scratch/sphere/step-check or out/scratch/phase5) or an absolute path.
@@ -54,9 +57,9 @@ ACCESS_SETS = ('phase4-access', 'phase4b-access', 'phase4c-access', 'erosion-a-a
                't8-w2t2-access', 't8-e3-access', 't8-w3-access')
 
 
-def logged(command, log, cwd=ROOT):
+def logged(command, log, cwd=ROOT, environment=None):
     with open(log, 'w', encoding='utf-8', errors='replace') as stream:
-        return subprocess.run(command, cwd=cwd, stdout=stream, stderr=subprocess.STDOUT).returncode
+        return subprocess.run(command, cwd=cwd, env=environment, stdout=stream, stderr=subprocess.STDOUT).returncode
 
 
 def build(preset, log):
@@ -125,6 +128,8 @@ def checks(arguments, directory, reference, result):
         passed = build('desktop', directory / 'build-desktop.log')
 
     executable = paths.executable('world_pipeline')
+    # The pipeline's own outputs (climate diagnostics, images) go to <directory>/diagnostics, ... on D, not out/ on C.
+    environment = naming.tool_environment(directory)
     runs = dict(RECIPES)
     grid = ['--grid', 'latlon'] if arguments.grid == 'latlon' else []
     if arguments.social:
@@ -133,7 +138,7 @@ def checks(arguments, directory, reference, result):
         bundle = directory / name
         start = time.time()
         status = logged([str(executable), 'run'] + options + COMMON + grid + ['--bundle', str(bundle)], directory / f'{name}.log',
-                        cwd=DATA_ROOT)
+                        cwd=DATA_ROOT, environment=environment)
         print(f'{name} run exit {status} in {time.time() - start:.0f} s')
         result['runs'][name] = status
         passed = passed and status == 0
@@ -201,6 +206,8 @@ def main():
         # compared: every recipe's bundle was compared with the reference's (a later default reference needs it).
         result['compared'] = sorted(result['comparisons']) == sorted(recipes)
         (directory / 'result.json').write_text(json.dumps(result, indent=2) + '\n', encoding='utf-8')
+    # A passed check marks the earlier checks of its tag superseded, except this check's reference.
+    naming.finish(named, result['passed'], [reference])
     return 0 if result['passed'] else 1
 
 

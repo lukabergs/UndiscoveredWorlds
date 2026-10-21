@@ -149,8 +149,11 @@ reads its parent's arrays from the same run's directory, or from --parent-run RE
       [--domains global,A,B] [--no-physics] [--parent-run REF]
 Writes the main tree's out/scratch/sandbox/<id>-<TAG>/ (scripts/uwtools/naming.py: a new id each run, recorded in
 runs/registry/scratch.json; TAG names the topic and ends in no -<digits> or -v<digits>; a --label that is an
-absolute path is that directory): index.html, the PNGs, config.json (the values used) and timings. Folders
-written before the ids (base-v10, v9, ...) keep their names.
+absolute path is that directory): the PNGs, config.json (the values used) and timings; the page index.html goes to
+out/evaluation/<id>-<TAG>/ (the same name; the images linked by relative path), or into the directory of an
+absolute --label. A finished run marks the earlier runs of its TAG superseded in runs/registry/scratch.json
+(naming.finish), except runs named in configs/sandbox/*.json (the base bundle), the --parent-run and the base
+bundle. Folders written before the ids (base-v10, v9, ...) keep their names.
 """
 import argparse
 import copy
@@ -181,6 +184,7 @@ import cube_domain  # noqa: E402
 import erosion_filter  # noqa: E402
 import nesting  # noqa: E402
 import overlays  # noqa: E402
+import report  # noqa: E402  (scripts/evaluation/report.py: link)
 
 DEFAULT_CONFIG = ROOT / 'configs' / 'sandbox' / 'terrain.json'
 PHYSICS = ROOT / 'out' / 'build' / 'headless' / 'bin' / 'Release' / 'terrain_sandbox.exe'
@@ -2752,11 +2756,13 @@ pre{{background:#0d0f12;padding:8px;overflow:auto;font-size:12px}}</style></head
 <h2>Timings and physics</h2><pre>{timings}</pre></body></html>"""
 
 
-def write_page(directory, label, sections, config, timings, bundle=None):
+def write_page(directory, label, sections, config, timings, bundle=None, page=None):
+    """page/index.html (default directory/index.html), linking the images of directory by relative path."""
+    page = Path(page or directory)
     html = []
     for title, images in sections:
-        figures = ''.join(f'<figure><a href="{path}"><img src="{path}"></a><figcaption>{caption}</figcaption></figure>'
-                          for caption, path in images)
+        figures = ''.join(f'<figure><a href="{href}"><img src="{href}"></a><figcaption>{caption}</figcaption></figure>'
+                          for caption, href in ((caption, report.link(directory / path, page)) for caption, path in images))
         html.append(f'<h2>{title}</h2><div class="row">{figures}</div>')
     note = (f'Seed 1; base: {config.get("base_bundle")}, procedural-world at 256 columns after the tectonics (base-v9: '
             'the W3 baseline, 400 Myr) and the terrain stages, before the climate and the global erosion. Uniform runoff, no climate. Windows are zooms of the same '
@@ -2767,9 +2773,10 @@ def write_page(directory, label, sections, config, timings, bundle=None):
                 f'({bundle.recipe}). ' + ('The global domain runs on the cube (cube.enabled); its maps are drawn from '
                                           'the lat-lon export.' if config.get('cube', {}).get('enabled', False)
                                           else 'The sandbox runs on its lat-lon export.'))
-    (directory / 'index.html').write_text(PAGE.format(label=label, note=note, sections=''.join(html),
-                                                      config=json.dumps(config, indent=1),
-                                                      timings=json.dumps(timings, indent=1)), encoding='utf-8')
+    (page / 'index.html').write_text(PAGE.format(label=label, note=note, sections=''.join(html),
+                                                 config=json.dumps(config, indent=1),
+                                                 timings=json.dumps(timings, indent=1)), encoding='utf-8')
+    return page / 'index.html'
 
 
 # ---------------------------------------------------------------- main
@@ -3069,6 +3076,7 @@ def main():
 
     config = load_config(arguments.config, preset_overrides(arguments.preset) + arguments.set)
     use_noise_divisor(config)
+    named = None
     if Path(arguments.label).is_absolute():
         directory, name = Path(arguments.label), arguments.label
         directory.mkdir(parents=True, exist_ok=True)
@@ -3142,8 +3150,12 @@ def main():
         timings[domain.name] = {key: (round(value, 2) if isinstance(value, float) else value) for key, value in timing.items()}
         print(f'{domain.name}: {timings[domain.name]}', flush=True)
     (directory / 'config.json').write_text(json.dumps(config, indent=1), encoding='utf-8')
-    write_page(directory, name, sections, config, timings, bundle)
-    print(directory / 'index.html')
+    # The page goes to out/evaluation/<id>-<tag> (named like the run); its images stay here and are linked.
+    page = write_page(directory, name, sections, config, timings, bundle,
+                      naming.page_directory(named) if named is not None else None)
+    print(page)
+    if named is not None:  # the earlier runs of the tag are marked superseded unless pinned or an input of this one
+        naming.finish(named, True, [parent_run, ROOT / config['base_bundle']])
 
 
 if __name__ == '__main__':

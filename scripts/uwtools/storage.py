@@ -302,6 +302,115 @@ def finish(path, accept_newer=False):
 
 # A session starts with a warning below this much free space on the workspace drive.
 LOW_SPACE_GB = 60
+# status lists the folders under out/ other than these that hold more than OUT_LISTED_MB.
+OUT_KEPT = ('build', 'scratch', 'evaluation')
+OUT_LISTED_MB = 10
+COMMAND = 'uv run --offline python scripts/uwtools/'
+
+
+def keep_on_primary(config=None):
+    """The repository-relative paths runs/storage.json keeps on the workspace drive (posix, no trailing slash)."""
+    path = Path(CONFIG if config is None else config)
+    try:
+        items = json.loads(path.read_text(encoding='utf-8-sig')).get('keep_on_primary', [])
+    except (OSError, ValueError, AttributeError):
+        return []
+    return [str(item).replace('\\', '/').strip('/') for item in items]
+
+
+def folder_bytes(path):
+    """The bytes of the files below path, links never followed and unreadable entries skipped."""
+    total, stack = 0, [str(long_path(path))]
+    while stack:
+        try:
+            entries = list(os.scandir(stack.pop()))
+        except OSError:
+            continue
+        for entry in entries:
+            try:
+                if is_link(entry):
+                    continue
+                if entry.is_dir(follow_symlinks=False):
+                    stack.append(entry.path)
+                else:
+                    total += entry.stat(follow_symlinks=False).st_size
+            except OSError:
+                continue
+    return total
+
+
+def plain_folders(parent):
+    """The folders of parent that are neither links nor leftover migration backups."""
+    if not parent.is_dir():
+        return []
+    return [item for item in sorted(parent.iterdir()) if item.is_dir() and not is_link(item)
+            and not item.name.endswith('.storage-migration-backup')]
+
+
+def unrouted(keep):
+    """Lines for the folders on C that the routing rules would send to storage: plain folders under runs/reports and
+    runs/work not kept on the primary drive (a folder holding a kept path lists its other children, for the trash,
+    since routing it would move the kept path too; a __pycache__ for the trash), folders under out/ other than OUT_KEPT
+    over OUT_LISTED_MB, and out/build folders that are neither a CMakePresets.json build nor the tracking build."""
+    lines = []
+    for parent in ('runs/reports', 'runs/work'):
+        for item in plain_folders(ROOT / parent):
+            relative = f'{parent}/{item.name}'
+            if relative in keep:
+                continue
+            if item.name == '__pycache__':  # a Python cache, not run data: nothing to route
+                lines.append(f'{relative} is a Python cache on C ({folder_bytes(item) / 1e6:.0f} MB): '
+                             f'{COMMAND}trash.py move {relative} --reason TEXT')
+                continue
+            kept = [path for path in keep if path.startswith(relative + '/')]
+            if not kept:
+                lines.append(f'{relative} is a folder on C ({folder_bytes(item) / 1e6:.0f} MB), not a junction: '
+                             f'{COMMAND}storage.py route {relative}')
+                continue
+            for child in plain_folders(item):
+                inner = f'{relative}/{child.name}'
+                if inner in keep or any(path.startswith(inner + '/') for path in keep):
+                    continue
+                lines.append(f'{inner} on C ({folder_bytes(child) / 1e6:.0f} MB; not routable, {relative} holds the kept '
+                             f'{", ".join(kept)}): when no longer needed, {COMMAND}trash.py move {inner} --reason TEXT')
+    for item in plain_folders(ROOT / 'out'):
+        if item.name in OUT_KEPT or f'out/{item.name}' in keep:
+            continue
+        size = folder_bytes(item)
+        if size > OUT_LISTED_MB * 1e6:
+            lines.append(f'out/{item.name} on C ({size / 1e6:.0f} MB; not routable): when no longer needed, '
+                         f'{COMMAND}trash.py move out/{item.name} --reason TEXT')
+    presets = preset_builds()
+    for item in plain_folders(ROOT / 'out' / 'build') if presets is not None else []:
+        if item.name in presets or tracking_build(item):
+            continue
+        lines.append(f'out/build/{item.name} is not a build of CMakePresets.json ({folder_bytes(item) / 1e6:.0f} MB): '
+                     f'when no longer needed, {COMMAND}trash.py move out/build/{item.name} --reason TEXT')
+    return lines
+
+
+def preset_builds():
+    """The names of the out/build/<name> folders CMakePresets.json's configure presets build in (binaryDir), or None
+    when the file cannot be read."""
+    try:
+        document = json.loads((ROOT / 'CMakePresets.json').read_text(encoding='utf-8-sig'))
+    except (OSError, ValueError):
+        return None
+    names = set()
+    for preset in document.get('configurePresets', []) if isinstance(document, dict) else []:
+        text = str(preset.get('binaryDir', '')).replace('\\', '/').rstrip('/') if isinstance(preset, dict) else ''
+        if '/out/build/' in f'/{text}':
+            names.add(text.rsplit('/', 1)[-1])
+    return names
+
+
+def tracking_build(folder):
+    """True for the field-access tracking build (its CMakeCache.txt sets UW_TRACK_FIELD_READS on; AGENTS.md: measure
+    access only when a change alters which fields a process reads or writes), which is kept beside the presets."""
+    try:
+        return 'UW_TRACK_FIELD_READS:BOOL=ON' in (folder / 'CMakeCache.txt').read_text(encoding='utf-8', errors='replace')
+    except OSError:
+        return False
 
 
 def status():
@@ -315,6 +424,7 @@ def status():
     for name in ('scratch', 'evaluation'):
         if junction_target(ROOT / 'out' / name) is None and (ROOT / 'out' / name).exists():
             lines.append(f'out/{name} is a directory on C, not the junction: storage.py route out/{name}')
+    lines += unrouted(keep_on_primary())
     worktrees = ROOT / '.claude' / 'worktrees'
     count = sum(1 for item in worktrees.iterdir() if item.is_dir()) if worktrees.is_dir() else 0
     if count:

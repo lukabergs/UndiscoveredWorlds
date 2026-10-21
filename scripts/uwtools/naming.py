@@ -25,9 +25,27 @@ before the scheme start with a letter and are not renamed; find() still resolves
 directory is (kind, module, tag); previous() gives the topic's newest earlier record.
 
 `new` prints the created path, for hand-run tools (world_pipeline --bundle <path>/bundle).
+
+Automatic moves (master plan 2.4). finish(named, passed, inputs) runs at the end of every tool that names its
+directory (experiment.py, step_check.py, terrain_sandbox.py, nested_window.py, acceptance.py, compare_runs.py,
+hypsometry.py, terrain_metrics.py, uw.py geology run). When the new run passed, every earlier run of its topic is
+archived (scripts/uwtools/archive.py: its re-renderable map PNGs and pages dropped, with a receipt), so a failed run
+in between leaves nothing behind; a folder archive.py does not take as a run (a sandbox, step-check, geology or
+page folder: nothing in it is re-renderable) gets `superseded_by` and `superseded_utc` on its scratch.json record
+instead. Nothing happens to an earlier run that is pinned: the registry's `baseline` of a module, a path named in
+the main tree's (or this checkout's) configs/sandbox/*.json or configs/evaluation/*.json, or an input of the new
+run (its declared inputs, --baseline, the step check's reference, --parent-run, the sandbox's base bundle); nor
+to one already archived (archive-receipt.json) or superseded. A failed run archives nothing, and an earlier run that
+cannot be archived is reported and left as it is: the finished run never fails because of it.
+
+tool_environment(directory) is the environment of a headless tool whose own outputs (climate diagnostics, images,
+worlds; the UW_*_DIR variables) go to directory on the storage drive instead of the pipeline's defaults under out/
+on C. page_directory(named) is out/evaluation/<name> of the main tree, where a scratch run's HTML page goes.
 """
 import argparse
+import copy
 import datetime
+import json
 import os
 import re
 import subprocess
@@ -37,10 +55,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 if __package__:
-    from . import paths, runs, storage
+    from . import archive, paths, runs, storage
 else:  # run as a script: uv run python scripts/uwtools/naming.py new ...
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from uwtools import paths, runs, storage
+    from uwtools import archive, paths, runs, storage
 
 REGISTRY = 'scratch'
 PARENTS = {'sandbox': 'out/scratch/sandbox', 'step-check': 'out/scratch/step-check', 'geology': 'out/scratch/geology',
@@ -55,6 +73,12 @@ TAG_LENGTH = 40
 NUMBERED = re.compile(r'([0-9]+)(?:-|$)')
 LOCK = 'out/scratch/naming.lock'
 LOCK_TIMEOUT_SECONDS = 600.0
+# Where a headless tool writes its own outputs (src: app.env, command_line_generation.cpp), below tool_environment's
+# directory.
+TOOL_OUTPUTS = {'UW_CLIMATE_DIAGNOSTICS_DIR': 'diagnostics', 'UW_DEFAULT_IMAGE_DIR': 'images',
+                'UW_DEFAULT_WORLD_DIR': 'worlds', 'UW_DEFAULT_UWS_DIR': 'worlds'}
+# Tracked configurations whose paths pin a run (finish never archives it).
+PINNING_CONFIGS = ('configs/sandbox', 'configs/evaluation')
 _main_root = None
 
 
@@ -276,15 +300,205 @@ def find(kind, ref, module=None):
     raise FileNotFoundError(f'No {kind} named {ref!r} in {parent}')
 
 
+def earlier(named):
+    """The earlier records of named's topic (kind, module, tag), newest first."""
+    if named.kind == 'run':
+        found = [entry for entry in runs.registry(named.module, root=main_root())['runs']
+                 if entry.get('tag') == named.tag and entry['id'] < named.id]
+    else:
+        found = [entry for entry in records(named.kind)
+                 if entry.get('module') == named.module and entry.get('tag') == named.tag and entry['id'] < named.id]
+    return sorted(found, key=lambda entry: entry['id'], reverse=True)
+
+
 def previous(named):
     """The newest earlier record of named's topic (kind, module, tag), or None."""
+    return next(iter(earlier(named)), None)
+
+
+def _now():
+    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')
+
+
+def tool_environment(directory, base=None):
+    """base (default os.environ) with the UW_*_DIR variables pointing below directory (TOOL_OUTPUTS), so a headless
+    tool's own outputs land there; SystemExit when directory does not resolve under the storage root."""
+    directory = Path(os.path.abspath(directory))
+    store = _storage()
+    if not _under(directory, store):
+        raise SystemExit(f'{directory} does not resolve under the storage root {store}; a tool writes its own '
+                         'outputs to the storage drive')
+    environment = dict(os.environ if base is None else base)
+    environment.update({name: str(directory / folder) for name, folder in TOOL_OUTPUTS.items()})
+    return environment
+
+
+def page_directory(named):
+    """out/evaluation/<name> of the main tree (created when missing): the page folder of a scratch run, named like
+    the run (same id and tag; no record of its own). Its pages link the run's images by relative path."""
+    root = main_root()
+    parent = _storage_parent(root / PARENTS['page'], root, _storage())
+    path = parent / named.name
+    path.mkdir(exist_ok=True)
+    return path
+
+
+def _forms(path):
+    """A path as given (absolute) and resolved through links, case-folded."""
+    path = Path(path)
+    forms = {Path(os.path.normcase(os.path.abspath(path)))}
+    try:
+        forms.add(Path(os.path.normcase(os.path.realpath(path))))
+    except (OSError, ValueError):
+        pass
+    return forms
+
+
+def _inside(path, folder):
+    """True when path is folder or lies inside it, compared as given and as resolved."""
+    return any(inner == outer or outer in inner.parents for inner in _forms(path) for outer in _forms(folder))
+
+
+def _strings(value):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _strings(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _strings(item)
+
+
+def _config_paths(root):
+    """(config file, path) of every path-like string in the main tree's and this checkout's PINNING_CONFIGS; a
+    relative path is read against the main tree, where the runs are."""
+    found = []
+    for tree in dict.fromkeys([root, paths.ROOT]):
+        for folder in PINNING_CONFIGS:
+            for file in sorted((tree / folder).glob('*.json')):
+                try:
+                    document = json.loads(file.read_text(encoding='utf-8-sig'))
+                except (OSError, ValueError):
+                    continue
+                for text in _strings(document):
+                    if ('/' in text or '\\' in text) and '\n' not in text and len(text) < 1000:
+                        found.append((file.relative_to(tree).as_posix(), Path(text) if Path(text).is_absolute()
+                                      else root / text))
+    return found
+
+
+def pinned(named, record, path, inputs=(), config_paths=None):
+    """Why an earlier run (record, at path) of named's topic must stay as it is, or None: the module registry's
+    baseline, a path named in configs/sandbox/*.json or configs/evaluation/*.json (config_paths: _config_paths, read
+    when not given), or an input of the new run."""
     if named.kind == 'run':
-        earlier = [entry for entry in runs.registry(named.module, root=main_root())['runs']
-                   if entry.get('tag') == named.tag and entry['id'] < named.id]
-    else:
-        earlier = [entry for entry in records(named.kind)
-                   if entry.get('module') == named.module and entry.get('tag') == named.tag and entry['id'] < named.id]
-    return max(earlier, key=lambda entry: entry['id'], default=None)
+        baseline = runs.registry(named.module, root=main_root()).get('baseline')
+        if baseline is not None and str(baseline) == str(record['id']):
+            return f'the baseline of runs/registry/{named.module}.json'
+    for file, named_path in _config_paths(main_root()) if config_paths is None else config_paths:
+        if _inside(named_path, path):
+            return f'named in {file}'
+    for item in inputs:
+        if item and _inside(Path(item), path):
+            return f'an input of {named.name} ({item})'
+    return None
+
+
+def _mark_superseded(record, named):
+    """superseded_by (the new run's name) and superseded_utc on record in the main tree's scratch.json, under the
+    naming lock; every other byte of meaning stays (the document is checked after the write)."""
+    root = main_root()
+    path = runs.registry_path(REGISTRY, root)
+    with _Lock(root):
+        data = path.read_bytes()
+        document = json.loads(data.decode('utf-8'))
+        before = copy.deepcopy(document)
+        indices = [index for index, entry in enumerate(document['runs'])
+                   if entry.get('id') == record['id'] and entry.get('run') == record.get('run')]
+        if len(indices) != 1:
+            raise RuntimeError(f'{path}: {len(indices)} records of id {record["id"]} at {record.get("run")}')
+        entry = document['runs'][indices[0]]
+        if entry.get('superseded_by'):
+            return entry
+        entry.update(superseded_by=named.name, superseded_utc=_now())
+        newline = '\r\n' if b'\r\n' in data else '\n'
+        text = json.dumps(document, indent=2, ensure_ascii=False) + '\n'
+        path.write_bytes(text.replace('\n', newline).encode('utf-8'))
+        written = json.loads(path.read_bytes().decode('utf-8'))
+        restored = copy.deepcopy(written)
+        for key in ('superseded_by', 'superseded_utc'):
+            restored['runs'][indices[0]].pop(key, None)
+        if written != document or restored != before:
+            raise RuntimeError(f'{path}: the record of {record["run"]} did not read back as written; check the registry')
+    return entry
+
+
+# Outcomes finish prints one line each for; the others (repeated at every run of a topic) only as counts.
+SHOWN = ('archived', 'superseded', 'pinned', 'refused', 'error')
+
+
+def finish(named, passed, inputs=()):
+    """The automatic move after a run of named's topic ends (module docstring, "Automatic moves"): every earlier run
+    of the topic that is not pinned, archived or superseded yet is archived or marked, newest first, so a failed run
+    in between leaves nothing behind.
+
+    Returns None when the run did not pass, else a list (newest first) of {'previous', 'id', 'action' (archived,
+    superseded, pinned, already-archived, already-superseded, missing, not-a-run, refused or error), 'reason'}.
+    Never raises because of an earlier run: a refusal or an error is printed and that run stays as it is."""
+    if not passed:
+        return None
+    try:
+        found = [record for record in earlier(named) if record.get('run')]
+        config_paths = _config_paths(main_root()) if found else []
+    except Exception as error:  # an unreadable registry or configuration: the finished run stands
+        print(f'finish {named.name}: earlier runs unknown ({type(error).__name__}: {error})', flush=True)
+        return [{'previous': None, 'id': None, 'action': 'error', 'reason': f'{type(error).__name__}: {error}'}]
+    outcomes = [_finish_one(named, record, inputs, config_paths) for record in found]
+    for outcome in outcomes:
+        if outcome['action'] in SHOWN:
+            print(f'finish {named.name}: earlier {outcome["previous"]} {outcome["action"]}'
+                  + (f' ({outcome["reason"]})' if outcome['reason'] else ''), flush=True)
+    others = {}
+    for outcome in outcomes:
+        if outcome['action'] not in SHOWN:
+            others[outcome['action']] = others.get(outcome['action'], 0) + 1
+    if others:
+        print(f'finish {named.name}: ' + ', '.join(f'{count} {action}' for action, count in sorted(others.items())),
+              flush=True)
+    return outcomes
+
+
+def _finish_one(named, record, inputs, config_paths):
+    """finish for one earlier record: its outcome; never raises."""
+    path = main_root() / record['run']
+    outcome = {'previous': record['run'], 'id': record['id'], 'action': None, 'reason': ''}
+    try:
+        reason = pinned(named, record, path, inputs, config_paths)
+        if reason:
+            outcome.update(action='pinned', reason=reason)
+        elif record.get('superseded_by'):
+            outcome.update(action='already-superseded', reason=f'by {record["superseded_by"]}')
+        elif not path.is_dir():
+            outcome.update(action='missing', reason='the folder is gone')
+        elif os.path.lexists(storage.long_path(path) / archive.RECEIPT):
+            outcome.update(action='already-archived', reason=archive.RECEIPT)
+        else:
+            try:
+                receipt = archive.archive(path, f'superseded by {named.name}', apply=True)
+                outcome.update(action='archived', reason=f'{len(receipt["dropped"])} files, '
+                                                         f'{receipt["dropped_bytes"] / 1e6:.1f} MB dropped')
+            except archive.NotARun:
+                if named.kind == 'run':  # a module registry is append-only: nothing to mark
+                    outcome.update(action='not-a-run', reason='no evaluation folder; left as it is')
+                else:
+                    _mark_superseded(record, named)
+                    outcome.update(action='superseded', reason=f'superseded_by {named.name} in {REGISTRY}.json')
+            except archive.Refused as error:
+                outcome.update(action='refused', reason=str(error))
+    except Exception as error:  # the finished run stands; an earlier run's problem is only reported
+        outcome.update(action='error', reason=f'{type(error).__name__}: {error}')
+    return outcome
 
 
 def main(argv=None):

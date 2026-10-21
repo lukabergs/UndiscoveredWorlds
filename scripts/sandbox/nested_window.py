@@ -54,12 +54,16 @@ Steps (the box in the parent's cropped pixels, the margin in parent pixels, the 
   8. As the sandbox after its physics: the sea keeps its start depth (below the lowest level), troughs cut below the sea
      and joined to it become sea; no coast term, micro texture or filter (parent-level details); lakes at their spill
      level (Priority-Flood, nest.lakes).
-Outputs in out/scratch/sandbox/<label>/ (the sandbox's names): <child>-elevation.npy (final bed), -elevation-procedural.npy
+--parent is a sandbox run (naming.find: an id, <id>-<tag>, an earlier label or an absolute path); --label is the
+tag of a new run, out/scratch/sandbox/<id>-<TAG>/ of the main tree (scripts/uwtools/naming.py; an absolute path is
+that directory), whose page goes to out/evaluation/<id>-<TAG>/ (images linked by relative path) and whose finish
+marks the previous runs of the tag superseded (naming.finish; the --parent is never touched).
+Outputs in the run's directory (the sandbox's names): <child>-elevation.npy (final bed), -elevation-procedural.npy
 (the physics' input), -sea.npy, -lake-surface.npy, -discharge.npy (m3/s), the totals, -grid.json (the pixel geometry, for glo30_windows.py
 --like and window_metrics.py), <child>-relief.png, -elevation.png, -discharge.png, the totals' maps; the parent's box
 as <domain>-parent-*: the prolonged surface (the child's start without detail), the parent's sea and lakes (upsampled
 by nearest), its rivers routed on the prolonged surface (a zero-duration physics call); nest.json (diagnostics,
-timings) and index.html. The child is named <domain>-nest.
+timings); the page index.html as above. The child is named <domain>-nest.
 
   uv run python scripts/sandbox/nested_window.py --parent t15-parent --domain G-coast --box 60,555,324,714
       --factor 6 --margin 16 [--duration 0.5] [--glacial] --label t15-nest-a [--set nest.detail.relief_fraction=0.1]
@@ -80,9 +84,9 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 ROOT = SCRIPTS.parent
 sys.path.insert(0, str(SCRIPTS / 'sandbox'))
 import terrain_sandbox as ts  # noqa: E402  (puts scripts/ and scripts/evaluation on the path)
+from uwtools import naming  # noqa: E402
 from uwtools.bundle import Bundle  # noqa: E402
 
-SANDBOX = ROOT / 'out' / 'scratch' / 'sandbox'
 DEFAULT_CONFIG = ROOT / 'configs' / 'sandbox' / 'nested.json'
 # The grid operations and the projection live in nesting.py, shared with terrain_sandbox.py's nesting (rule B).
 from nesting import (EIGHT, block_mean, catmull_rom_matrix, departure, flood, local_relief,  # noqa: E402,F401
@@ -147,14 +151,16 @@ def physics_config(config, duration, glacial):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--parent', required=True, help='the parent run label under out/scratch/sandbox')
+    parser.add_argument('--parent', required=True,
+                        help='the parent sandbox run: an id, <id>-<tag>, an earlier label or an absolute path')
     parser.add_argument('--domain', required=True)
     parser.add_argument('--box', required=True, help="c0,r0,c1,r1: the parent's cropped pixels, inclusive")
     parser.add_argument('--factor', type=int, default=6)
     parser.add_argument('--margin', type=int, default=16, help='parent pixels around the box')
     parser.add_argument('--duration', type=float, default=0.5, help='Myr')
     parser.add_argument('--glacial', action='store_true', help='a last-glacial-maximum pulse first (nest.pulse)')
-    parser.add_argument('--label', required=True)
+    parser.add_argument('--label', required=True, metavar='TAG',
+                        help='the tag of the run: out/scratch/sandbox/<id>-<TAG>; an absolute path is that directory')
     parser.add_argument('--config', default=str(DEFAULT_CONFIG))
     parser.add_argument('--set', action='append', default=[], metavar='GROUP.KEY=JSON')
     parser.add_argument('--exe', default=str(ts.PHYSICS), help='terrain_sandbox.exe to run')
@@ -164,13 +170,24 @@ def main():
     started_all = time.perf_counter()
     timings = {}
 
-    parent_directory = SANDBOX / arguments.parent
+    try:
+        parent_directory = naming.find('sandbox', arguments.parent)
+        if not Path(arguments.label).is_absolute():
+            naming.check_tag(arguments.label)
+    except (ValueError, FileNotFoundError) as error:
+        parser.error(str(error))
     config = load_config(parent_directory, arguments.config, arguments.set)
     ts.use_noise_divisor(config)
     nest = config['nest']
     ts.PHYSICS = Path(arguments.exe)
-    directory = SANDBOX / arguments.label
-    directory.mkdir(parents=True, exist_ok=True)
+    named = None
+    if Path(arguments.label).is_absolute():
+        directory, name = Path(arguments.label), arguments.label
+        directory.mkdir(parents=True, exist_ok=True)
+    else:
+        named = naming.new_directory('sandbox', arguments.label)
+        directory, name = named.path, named.name
+    print(directory, flush=True)
     f, margin = arguments.factor, arguments.margin
     c0, r0, c1, r1 = (int(value) for value in arguments.box.split(','))
 
@@ -384,16 +401,20 @@ def main():
             f'north-south, {pixel_ew_km * 1000:.0f} m east-west at {latitude_c:.2f} N), margin {margin} parent pixels; '
             f'physics {arguments.duration} Myr{" with a glacial pulse" if arguments.glacial else " at sea 0, no ice"}. '
             'Written by scripts/sandbox/nested_window.py.')
-    html = ''.join(f'<figure><a href="{path}"><img src="{path}"></a><figcaption>{caption}</figcaption></figure>'
-                   for caption, path in images)
-    (directory / 'index.html').write_text(ts.PAGE.format(
-        label=arguments.label, note=note, sections=f'<h2>{child.name}</h2><div class="row">{html}</div>',
+    # The page goes to out/evaluation/<id>-<tag> (named like the run, as terrain_sandbox.py); the images stay here.
+    page = naming.page_directory(named) if named is not None else directory
+    html = ''.join(f'<figure><a href="{href}"><img src="{href}"></a><figcaption>{caption}</figcaption></figure>'
+                   for caption, href in ((caption, ts.report.link(directory / path, page)) for caption, path in images))
+    (page / 'index.html').write_text(ts.PAGE.format(
+        label=name, note=note, sections=f'<h2>{child.name}</h2><div class="row">{html}</div>',
         config=json.dumps(run, indent=1), timings=json.dumps(diagnostics, indent=1)), encoding='utf-8')
     print(json.dumps({key: diagnostics[key] for key in ('prolongation_parent_mean_error_m', 'detail_parent_mean_max_abs_m',
                                                          'detail_rms_m_land', 'detail_rms_scale', 'start_fill',
                                                          'start_parent_mean_departure_m', 'physics_parent_mean_change_m_land',
                                                          'physics_report', 'lakes', 'timings_s')}, indent=1))
-    print(directory / 'index.html')
+    print(page / 'index.html')
+    if named is not None:  # the previous runs of the tag are marked superseded unless pinned or the --parent
+        naming.finish(named, True, [parent_directory])
 
 
 if __name__ == '__main__':

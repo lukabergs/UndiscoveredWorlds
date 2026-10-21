@@ -130,12 +130,12 @@ def pages(args, extra):
         raise SystemExit('--earth: a run page shows the Earth window chosen when it was evaluated (evaluate --earth NAME; '
                          'evaluations are never overwritten); --earth belongs to a comparison of several evaluations')
     if args.command == 'dashboard':
-        output = args.output or ROOT / 'out/evaluation' / args.module / 'dashboard'
+        output = args.output or naming.main_root() / 'out/evaluation' / args.module / 'dashboard'  # routed (D)
         call([UV, 'run', '--offline', script, 'dashboard', args.module, '--output', output])
     elif len(args.evaluation) == 1:
         call([UV, 'run', '--offline', script, 'run', args.evaluation[0]])
     else:
-        output = args.output or ROOT / 'out/evaluation' / args.module / 'comparison'
+        output = args.output or naming.main_root() / 'out/evaluation' / args.module / 'comparison'  # routed (D)
         earth = ['--earth', args.earth] if args.earth else []
         call([UV, 'run', '--offline', script, 'compare', *args.evaluation, '--output', output, *earth])
 
@@ -181,7 +181,8 @@ def tectonics(args, extra):
 
 def geology(args, extra):
     exe = args.executable or WORLD_EXE
-    output = Path(args.output or naming.new_directory('geology', f'seed{args.seed}', label=args.label or '').path)
+    named = None if args.output else naming.new_directory('geology', f'seed{args.seed}', label=args.label or '')
+    output = Path(args.output or named.path)
     widths = [args.resolution] if args.resolution else [128, 256]
     bundles = []
     for width in widths:
@@ -190,6 +191,8 @@ def geology(args, extra):
         bundles.append(bundle)
     python_script('benchmark_geology.py', '--bundle', *bundles, '--width', str(args.reference_width),
                   '--output', output / 'report.json')
+    if named is not None:  # every call above exits on failure: this run passed
+        naming.finish(named, True)
 
 
 def main():

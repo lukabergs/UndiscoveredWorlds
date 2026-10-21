@@ -4,11 +4,13 @@ reference of scripts/uwtools/tectonics_earth_reference.py), with the summary num
   uv run python scripts/sandbox/hypsometry.py --name sea-v7 --labels sea-v3b,sea-v7
       [--array run62=runs/archive/fields/tectonics/elevation/final/62.npy]
 
-A label reads out/scratch/sandbox/<label>/global-elevation.npy (the world after the physics, or the procedural
+A label (an id, <id>-<tag>, an earlier label or an absolute path: naming.find) reads the main tree's
+out/scratch/sandbox/<name>/global-elevation.npy (the world after the physics, or the procedural
 surface of a --no-physics run); --array adds any 2:1 elevation array (metres from the sea level). Every curve
 is weighted by spherical cell area (measure_earth); land is elevation above 0 (Earth's mask also counts land
-below the sea and lakes as land). Writes out/scratch/sandbox/hypsometry-<name>/index.html, hypsometry.png and
-summary.json.
+below the sea and lakes as land). Writes index.html, hypsometry.png and summary.json to the main tree's
+out/evaluation/<id>-hypsometry-<name>/ (scripts/uwtools/naming.py, kind page: the tag hypsometry-<name> follows
+the tag rule); earlier pages of that tag are then marked superseded (naming.finish).
 """
 import argparse
 import json
@@ -22,9 +24,9 @@ import numpy as np  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'scripts'))
+from uwtools import naming  # noqa: E402
 from uwtools.tectonics_earth_reference import compare_to_earth, load_earth_reference, measure_earth  # noqa: E402
 
-SANDBOX = ROOT / 'out' / 'scratch' / 'sandbox'
 SURFACE, TEXT, MUTED, GRID = '#1a1a19', '#f0efec', '#c3c2b7', '#3a3a38'
 SERIES = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300']  # categorical slots, dark mode
 
@@ -54,12 +56,20 @@ def main():
     parser.add_argument('--labels', default='')
     parser.add_argument('--array', action='append', default=[], metavar='NAME=PATH')
     arguments = parser.parse_args()
+    try:
+        tag = naming.check_tag(f'hypsometry-{arguments.name}')
+    except ValueError as error:
+        parser.error(str(error))
 
     reference = load_earth_reference(ROOT, 2048)
     earth = reference['metrics']
     worlds = []
     for label in [item for item in arguments.labels.split(',') if item]:
-        worlds.append((label, np.load(SANDBOX / label / 'global-elevation.npy')))
+        try:
+            run = naming.find('sandbox', label)  # the main tree's run: an id, <id>-<tag>, an earlier label, a path
+        except (ValueError, FileNotFoundError) as error:
+            raise SystemExit(str(error))
+        worlds.append((label, np.load(run / 'global-elevation.npy')))
     for item in arguments.array:
         name, _, path = item.partition('=')
         worlds.append((name, np.load(ROOT / path)))
@@ -98,8 +108,8 @@ def main():
     for text in legend.get_texts():
         text.set_color(TEXT)
     figure.tight_layout()
-    directory = SANDBOX / f'hypsometry-{arguments.name}'
-    directory.mkdir(parents=True, exist_ok=True)
+    named = naming.new_directory('page', tag)
+    directory = named.path
     figure.savefig(directory / 'hypsometry.png', dpi=110, facecolor=SURFACE)
 
     land_earth = 100 * earth['land_fraction']
@@ -115,6 +125,7 @@ def main():
     (directory / 'index.html').write_text(PAGE.format(name=arguments.name, earth=reference.get('title', 'ETOPO 2022, 2048 x 1024'),
                                                       rows=''.join(rows)), encoding='utf-8')
     print(directory / 'index.html')
+    naming.finish(named, True)  # earlier pages of the tag marked superseded
 
 
 if __name__ == '__main__':

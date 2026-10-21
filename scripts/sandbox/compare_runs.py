@@ -8,7 +8,9 @@
 --map takes a comma-separated list (one block of rows per map). --extra adds a row of single images
 (SANDBOX/LABEL/DOMAIN-<map>.png), e.g. a nested window's parent box once instead of once per label.
 --table renders a window_metrics.py JSON (its items as rows) under the images and copies it beside the page.
-Writes out/scratch/sandbox/compare-<name>/index.html; the images are referenced, not copied.
+Writes the main tree's out/evaluation/<id>-compare-<name>/index.html (scripts/uwtools/naming.py, kind page: the
+tag compare-<name> follows the tag rule; earlier pages of that tag are then marked superseded, naming.finish); the
+images are linked by relative path, not copied.
 """
 import argparse
 import json
@@ -18,7 +20,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'scripts'))
+sys.path.insert(0, str(ROOT / 'scripts' / 'evaluation'))
+from uwtools import naming  # noqa: E402
 from uwtools.paths import main_root  # noqa: E402
+import report  # noqa: E402  (link)
 
 # The main tree's runs and atlas (also from a git worktree, which holds neither).
 SANDBOX = main_root() / 'out' / 'scratch' / 'sandbox'
@@ -33,9 +38,8 @@ th:first-child,td:first-child{{text-align:left}}</style></head><body>
 <h1>Sandbox comparison: {name}</h1>{sections}</body></html>"""
 
 
-def figure(path, caption):
-    relative = Path('..') / path.relative_to(SANDBOX) if path.is_relative_to(SANDBOX) else path.as_uri()
-    source = relative.as_posix() if isinstance(relative, Path) else relative
+def figure(path, caption, page):
+    source = report.link(path, page)
     return f'<figure><a href="{source}"><img src="{source}"></a><figcaption>{caption}</figcaption></figure>'
 
 
@@ -62,22 +66,26 @@ def main():
     parser.add_argument('--extra', default='', help='LABEL/DOMAIN images in a row of their own')
     parser.add_argument('--table', default=None, help='a window_metrics.py JSON to show as a table')
     arguments = parser.parse_args()
+    try:
+        tag = naming.check_tag(f'compare-{arguments.name}')
+    except ValueError as error:
+        parser.error(str(error))
 
-    directory = SANDBOX / f'compare-{arguments.name}'
-    directory.mkdir(parents=True, exist_ok=True)
+    named = naming.new_directory('page', tag)
+    directory = named.path
     sections = []
     for map_name in arguments.map.split(','):
         for domain in arguments.domains.split(','):
-            figures = [figure(SANDBOX / label / f'{domain}-{map_name}.png', f'{label}: {domain} {map_name}')
+            figures = [figure(SANDBOX / label / f'{domain}-{map_name}.png', f'{label}: {domain} {map_name}', directory)
                        for label in arguments.labels.split(',')]
             sections.append(f'<h2>{domain} ({map_name})</h2><div class="row">{"".join(figures)}</div>')
         if arguments.extra:
-            figures = [figure(SANDBOX / f'{item}-{map_name}.png', f'{item} {map_name}')
+            figures = [figure(SANDBOX / f'{item}-{map_name}.png', f'{item} {map_name}', directory)
                        for item in arguments.extra.split(',')]
             sections.append(f'<h2>Also ({map_name})</h2><div class="row">{"".join(figures)}</div>')
         earth_map = arguments.earth_map or map_name
         if arguments.earth:
-            figures = [figure(ATLAS / f'{stem}-{earth_map}.png', f'Earth: {stem} {earth_map}')
+            figures = [figure(ATLAS / f'{stem}-{earth_map}.png', f'Earth: {stem} {earth_map}', directory)
                        for stem in arguments.earth.split(',')]
             sections.append(f'<h2>Earth references (refs/processed/earth-atlas; {earth_map})</h2>'
                             f'<div class="row">{"".join(figures)}</div>')
@@ -87,6 +95,7 @@ def main():
             shutil.copyfile(arguments.table, directory / Path(arguments.table).name)
     (directory / 'index.html').write_text(PAGE.format(name=arguments.name, sections=''.join(sections)), encoding='utf-8')
     print(directory / 'index.html')
+    naming.finish(named, True)  # earlier pages of the tag marked superseded
 
 
 if __name__ == '__main__':

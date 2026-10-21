@@ -4,7 +4,7 @@
         [--base-v10 FILE] [--scores STEP=FILE ...] [--no-maps]
 
 The page goes to DIR, by default a new out/evaluation/<id>-t8-acceptance of the main tree
-(scripts/uwtools/naming.py, kind page).
+(scripts/uwtools/naming.py, kind page); the earlier default pages are then marked superseded (naming.finish).
 
 The collector reads the evidence the T8 steps left under the main tree's out/scratch/sphere (DIR) and
 writes one document (OUT, default DIR/acceptance/t8-acceptance.json) with a section per topic: the engine
@@ -719,8 +719,10 @@ def main(argv=None):
     if any('=' not in item for item in args.scores):
         parser.error('--scores takes STEP=FILE')
     json_path = args.json or args.scratch / 'acceptance/t8-acceptance.json'
+    named = None
     if args.output is None:
-        args.output = naming.new_directory('page', 't8-acceptance').path
+        named = naming.new_directory('page', 't8-acceptance')
+        args.output = named.path
     args.output.mkdir(parents=True, exist_ok=True)
     document = collect(args.scratch, args.output, args.base_v10, not args.no_maps,
                        [tuple(item.split('=', 1)) for item in args.scores])
@@ -731,6 +733,8 @@ def main(argv=None):
           f"placeholders: {', '.join(summary['placeholders']) or 'none'}")
     for item in summary['failing']:
         print(f'  fail {item}')
+    if named is not None:  # the page was written: the earlier t8-acceptance pages are marked superseded
+        naming.finish(named, True)
     return 0
 
 

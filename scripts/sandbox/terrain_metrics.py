@@ -5,12 +5,14 @@ and pits, v18, v19, v20).
   uv run python scripts/sandbox/terrain_metrics.py --name NAME --labels v18,v19
       [--domains global,B,F,G] [--earth-windows norway,patagonia,alps | none]
 
-A label reads out/scratch/sandbox/<label>/: config.json (the domain geometry), <domain>-elevation.npy (the
+A label (an id, <id>-<tag>, an earlier label or an absolute path: naming.find) reads the main tree's
+out/scratch/sandbox/<name>/: config.json (the domain geometry), <domain>-elevation.npy (the
 final surface), -elevation-physics.npy (the physics' surface before the lakes and rivers are drawn; the final
 surface when missing), -elevation-procedural.npy (the physics input; without it the drowned land is not
 measured and the sea is not seeded), -lake-surface.npy (NaN off the lakes), the totals -glacial_eroded_m,
--ice_time_myr, -eroded_m and -province.npy when present. A missing domain is skipped. Writes
-out/scratch/sandbox/metrics-<NAME>/summary.json and index.html.
+-ice_time_myr, -eroded_m and -province.npy when present. A missing domain is skipped. Writes summary.json and
+index.html to the main tree's out/evaluation/<id>-metrics-<NAME>/ (scripts/uwtools/naming.py, kind page: the tag
+metrics-<NAME> follows the tag rule); earlier pages of that tag are then marked superseded (naming.finish).
 
 Geometry: the base world is 256 x 128 cells; the global domain has k = columns / 256 cells per world cell, a
 window the config's inclusive world pixels [c0, r0, c1, r1] at its `scale` k. Cells are dy x dy cos(latitude)
@@ -71,10 +73,9 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / 'scripts'
 sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(SCRIPTS / 'evaluation'))
-from uwtools import grid  # noqa: E402
+from uwtools import grid, naming  # noqa: E402
 from uwtools.tectonics_earth_reference import load_earth_reference, reference_inputs  # noqa: E402
 
-SANDBOX = ROOT / 'out' / 'scratch' / 'sandbox'
 WORLD_COLUMNS, WORLD_ROWS, RADIUS_KM = 256, 128, 6371.0
 BANDS = (0, 200, 500, 1000, 2000, 3000, 9000)
 ELEVATION_BANDS = tuple(zip(BANDS[:-1], BANDS[1:]))
@@ -178,8 +179,17 @@ def optional(directory, domain, field):
     return np.load(path).astype(np.float64) if path.is_file() else None
 
 
+def run_directory(label):
+    """The main tree's sandbox run a label names (naming.find: an id, <id>-<tag>, an earlier label or an absolute
+    path); SystemExit when there is none."""
+    try:
+        return naming.find('sandbox', label)
+    except (ValueError, FileNotFoundError) as error:
+        raise SystemExit(str(error))
+
+
 def run_metrics(label, domain):
-    directory = SANDBOX / label
+    directory = run_directory(label)
     config = json.loads((directory / 'config.json').read_text(encoding='utf-8'))
     final = np.load(directory / f'{domain}-elevation.npy').astype(np.float64)
     notes = []
@@ -420,6 +430,10 @@ def main():
     parser.add_argument('--earth-windows', default=DEFAULT_EARTH_WINDOWS,
                         help="earth_atlas.WINDOWS names, comma-separated; 'none' for no Earth windows")
     arguments = parser.parse_args()
+    try:
+        tag = naming.check_tag(f'metrics-{arguments.name}')
+    except ValueError as error:
+        parser.error(str(error))
     start = time.perf_counter()
     labels = [item for item in arguments.labels.split(',') if item]
     domains = [item for item in arguments.domains.split(',') if item]
@@ -429,11 +443,11 @@ def main():
                'definitions': 'scripts/sandbox/terrain_metrics.py docstring', 'code_revision': code_revision(),
                'created': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')}
     for label in labels:
-        if not (SANDBOX / label / 'config.json').is_file():
-            raise SystemExit(f'no run {SANDBOX / label}')
+        if not (run_directory(label) / 'config.json').is_file():
+            raise SystemExit(f'no run {run_directory(label)}')
         summary['runs'][label] = {}
         for domain in domains:
-            if not (SANDBOX / label / f'{domain}-elevation.npy').is_file():
+            if not (run_directory(label) / f'{domain}-elevation.npy').is_file():
                 continue
             summary['runs'][label][domain] = run_metrics(label, domain)
             print(f'{label} {domain}', flush=True)
@@ -450,12 +464,13 @@ def main():
             print(f'earth {name}', flush=True)
     summary['seconds'] = time.perf_counter() - start
 
-    directory = SANDBOX / f'metrics-{arguments.name}'
-    directory.mkdir(parents=True, exist_ok=True)
+    named = naming.new_directory('page', tag)
+    directory = named.path
     (directory / 'summary.json').write_text(json.dumps(summary, indent=1) + '\n', encoding='utf-8')
     (directory / 'index.html').write_text(render(summary), encoding='utf-8')
     print(directory / 'index.html')
     print(f'{summary["seconds"]:.1f} s')
+    naming.finish(named, True)  # earlier pages of the tag marked superseded
 
 
 if __name__ == '__main__':
