@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from uwtools import palettes, references
 from uwtools.hashing import sha256
 from uwtools.protected_io import write_text_into
-from cell_grid import conservative_remap, grid_dimensions, latitude_centres
+from uwtools.cell_grid import conservative_remap, grid_dimensions, latitude_centres
 from reference_climate_maps import export_additional, export_diagnostics, export_koppen, load_diagnostics
 from reference_map_rendering import write_float32_geotiff
 from reference_map_layout import product_path

@@ -160,4 +160,12 @@ if(TARGET world_pipeline)
     target_link_libraries(cube_flags_tests PRIVATE uw_headless GTest::gtest GTest::gtest_main)
     target_include_directories(cube_flags_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     gtest_discover_tests(cube_flags_tests)
+
+    # The access audit of a recipe run counts an undeclared write (master plan 2.6).
+    add_executable(recipe_audit_tests
+        pipeline/recipe_audit_tests.cpp
+    )
+    target_link_libraries(recipe_audit_tests PRIVATE uw_headless GTest::gtest GTest::gtest_main)
+    target_include_directories(recipe_audit_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    gtest_discover_tests(recipe_audit_tests)
 endif()

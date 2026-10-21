@@ -16,7 +16,7 @@ ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT/'scripts'))
 sys.path.insert(0,str(ROOT/'scripts/refs'))
 sys.path.insert(0,str(ROOT/'scripts/benchmarks'))
-from cell_grid import conservative_remap
+from uwtools.cell_grid import conservative_remap
 from uwtools import references
 from uwtools.protected_io import install
 from climate_palettes import field_rgb,anchors,DEFINITION

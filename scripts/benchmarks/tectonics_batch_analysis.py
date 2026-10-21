@@ -12,7 +12,7 @@ from uwtools.tectonics import snapshot_manifest
 from tectonics_report_data import load_bundle, write_json
 from tectonics_review import review
 from uwtools.tectonics_earth_reference import load_earth_reference
-from map_rendering import colourize
+from uwtools.map_rendering import colourize
 
 ROOT = Path(__file__).resolve().parents[2]
 LEVELS = [-6000, -4000, -2000, -1000, -258, -200, -160, 0, 1000, 2000, 4000]

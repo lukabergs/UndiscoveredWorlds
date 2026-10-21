@@ -15,7 +15,7 @@ from PIL import Image, ImageDraw
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from uwtools import grid, references
-from cell_grid import (
+from uwtools.cell_grid import (
     conservative_remap,
     grid_dimensions,
 )

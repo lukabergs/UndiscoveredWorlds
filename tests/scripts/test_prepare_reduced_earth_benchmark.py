@@ -89,7 +89,7 @@ class EarthBenchmarkMapTests(unittest.TestCase):
                 self.assertEqual(stored[0, 2], np.float32(-9999.9))
 
     def test_divergence_is_periodic_conservative_and_has_northward_sign(self):
-        from cell_grid import spherical_area_weights, latitude_centres
+        from uwtools.cell_grid import spherical_area_weights, latitude_centres
         east = np.full((8, 16), 12, dtype=np.float32)
         north = np.zeros_like(east)
         np.testing.assert_array_equal(rendering.divergence(east, north), 0)

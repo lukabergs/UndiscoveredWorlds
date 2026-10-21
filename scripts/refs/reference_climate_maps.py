@@ -3,10 +3,13 @@
 import importlib.util
 import json
 from pathlib import Path
+import sys
 
 import numpy as np
 
-from cell_grid import conservative_remap
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from uwtools.cell_grid import conservative_remap
 from uwtools import palettes, references
 from reference_map_rendering import (
     divergence, display_rgb, lic_luminance, lic_preview, particle_intensity, particle_preview,

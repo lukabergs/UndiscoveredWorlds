@@ -13,7 +13,7 @@ from PIL import Image, TiffImagePlugin
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from uwtools import references
-from cell_grid import conservative_remap, grid_dimensions
+from uwtools.cell_grid import conservative_remap, grid_dimensions
 
 
 CLIMATOLOGICAL_MONTH_DAYS = (31.0, 28.25, 31.0, 30.0, 31.0, 30.0, 31.0, 31.0, 30.0, 31.0, 30.0, 31.0)

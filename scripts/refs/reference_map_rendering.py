@@ -9,11 +9,12 @@ import sys
 
 import numpy as np
 from PIL import Image, ImageDraw, TiffImagePlugin
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'benchmarks'))
 from climate_palettes import rgb as shared_rgb
 from uwtools import palettes
 
-from cell_grid import latitude_centres, latitude_edges
+from uwtools.cell_grid import latitude_centres, latitude_edges
 
 EARTH_RADIUS_M = 6371000.0
 NODATA = -9999.9

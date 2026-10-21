@@ -12,7 +12,7 @@ from uwtools import palettes, runs
 from uwtools.hashing import sha256
 from tectonics_report_data import load_bundle, diagnostics, write_json
 from uwtools.tectonics_earth_reference import load_earth_reference, compare_to_earth
-from map_rendering import colourize
+from uwtools.map_rendering import colourize
 
 ROOT = Path(__file__).resolve().parents[2]
 

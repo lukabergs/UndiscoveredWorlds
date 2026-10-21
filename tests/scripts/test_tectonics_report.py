@@ -10,9 +10,9 @@ from unittest.mock import patch
 import numpy as np
 from PIL import Image
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts/benchmarks"))
-import map_rendering
-from uwtools import runs
+from uwtools import map_rendering, runs
 from tectonics_report_data import DTYPES, compare_fields, diagnostics, elevation_m, load_bundle, hypsography_shape, largest_connected_patch, near_convergence
 from tectonics_report_data import plate_topology, local_relief, terrain_detail, plate_events, coast_distance, coastal_terrain, island_sizes
 

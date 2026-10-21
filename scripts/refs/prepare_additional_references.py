@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from uwtools import palettes, references
 from uwtools.hashing import sha256
 from uwtools.protected_io import staged, write_text_into
-from cell_grid import conservative_remap, grid_dimensions
+from uwtools.cell_grid import conservative_remap, grid_dimensions
 
 # source variable: (bundle prefix, stored variable, units, scale, offset,
 #                   expected source units, display maximum, palette, ocean only)
