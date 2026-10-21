@@ -9,6 +9,7 @@ import json
 import os
 import re
 import shutil
+import stat
 from pathlib import Path
 
 if __package__:
@@ -97,7 +98,8 @@ def remove_tree(root):
     """Delete a directory tree that holds no link (2026-10-07: a recursive delete followed a junction into refs/).
 
     Scans the whole tree first and deletes nothing if it finds a link; while deleting it never descends
-    into a link and stops at one that appeared since the scan.
+    into a link and stops at one that appeared since the scan. A read-only file or folder (git packs, a
+    read-only directory) is made writable and its delete tried once more; a link is never made writable.
     """
     root = long_path(root)
     if is_link(root):
@@ -116,9 +118,15 @@ def remove_tree(root):
                 try:
                     os.unlink(entry.path)
                 except PermissionError:
-                    os.chmod(entry.path, 0o666)
+                    os.chmod(entry.path, stat.S_IWRITE, follow_symlinks=False)
                     os.unlink(entry.path)
-        os.rmdir(directory)
+        try:
+            os.rmdir(directory)
+        except PermissionError:
+            if is_link(Path(directory)):
+                raise
+            os.chmod(directory, stat.S_IWRITE, follow_symlinks=False)
+            os.rmdir(directory)
 
     remove(root)
 

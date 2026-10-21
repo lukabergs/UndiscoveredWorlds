@@ -11,6 +11,8 @@ files, bytes, SHA-256 of every file). On the same drive the move is a rename, so
 another drive every file is copied, verified by digest, and only then removed from its source. The trash carries
 protect.py's deny-delete permission (each moved item's permissions are reset to inherit it), so nothing in it can
 be deleted until the user unlocks it to empty it; `restore` copies an entry back and leaves it in place.
+A read-only file or folder is made writable and its removal tried once more. A move that stopped half-way (its
+item still 'moving' in an entry's receipt) is finished by naming the same path again, alone: see resume.
 
 Refuses: links (the path itself or anything inside it: a recursive move must never follow a junction,
 2026-10-07), tracked files (use git rm), anything outside the repository and the storage root, and the protected
@@ -22,6 +24,7 @@ import datetime
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -108,6 +111,17 @@ def files_of(real):
     return sorted(item for item in storage.long_path(real).rglob('*') if item.is_file())
 
 
+def writable_retry(action, path):
+    """action(path); on a PermissionError clear the read-only attribute and try once more (never on a link)."""
+    try:
+        action(path)
+    except PermissionError:
+        if storage.is_link(Path(path)):
+            raise
+        os.chmod(path, stat.S_IWRITE, follow_symlinks=False)
+        action(path)
+
+
 def remove_verified(real, verified):
     """Remove only the files whose copies were verified and that still match them (re-hashed just before), then
     the folders bottom-up; fail if anything is left."""
@@ -115,23 +129,124 @@ def remove_verified(real, verified):
     if not real.is_dir():
         if sha256(base) != next(iter(verified.values())):
             raise OSError(f'{real} changed after its copy was verified; the source is kept')
-        os.unlink(base)
+        writable_retry(os.unlink, base)
         return
     for key, digest in verified.items():
         if sha256(base / key) != digest:
             raise OSError(f'{base / key} changed after its copy was verified; it and the rest are kept')
-        os.unlink(base / key)
+        writable_retry(os.unlink, base / key)
     for folder in sorted((item for item in base.rglob('*') if item.is_dir()), key=lambda item: -len(item.parts)):
-        os.rmdir(folder)  # fails on a folder that still holds a file nobody verified
-    os.rmdir(base)
+        writable_retry(os.rmdir, folder)  # fails on a folder that still holds a file nobody verified
+    writable_retry(os.rmdir, base)
+
+
+def pending(real):
+    """(entry, receipt, item) of an interrupted move of real (its item still 'moving'), or None."""
+    found = []
+    for entry in entries():
+        receipt = json.loads((entry / 'receipt.json').read_text(encoding='utf-8'))
+        for item in receipt['items']:
+            if item.get('status') == 'moving' and os.path.normcase(item['original']) == os.path.normcase(str(real)):
+                found.append((entry, receipt, item))
+    if len(found) > 1:
+        raise OSError(f'{real}: {len(found)} interrupted moves in the trash ({[entry.name for entry, _, _ in found]}); '
+                      'sort them out by hand')
+    return found[0] if found else None
+
+
+def finish(target, item, receipt, receipt_path):
+    # A rename keeps the item's old permissions; reset them to the trash's inherited ones, so the trash's
+    # deny-delete permission (scripts/uwtools/protect.py) covers the item too.
+    reset = subprocess.run(['icacls', str(target), '/reset', '/T', '/C', '/Q'], capture_output=True, text=True,
+                           encoding='mbcs', errors='replace')
+    item['status'] = 'moved' if reset.returncode == 0 else 'moved; permissions not reset: ' + reset.stdout[-200:]
+    receipt_path.write_text(json.dumps(receipt, indent=1) + '\n', encoding='utf-8')
+
+
+def resume(real, label, entry, receipt, item):
+    """Finish an interrupted move of real into its entry, by the receipt's digests (taken before the move began).
+
+    A rename is atomic: done now if the trash copy does not exist yet, refused if both exist. A copy: every file
+    left in the source must be in the receipt and still match its digest; every file of the receipt must have a
+    copy in the entry matching its digest, copied again from the source where it is missing or wrong (refused when
+    the source no longer has it). Only then are the files left in the source removed (remove_verified), and the
+    item is marked moved. Anything else is refused with nothing more removed.
+    """
+    if item['label'] != label.as_posix():
+        raise OSError(f'{real}: its interrupted move in {entry.name} has the label {item["label"]}, not {label.as_posix()}')
+    receipt_path = entry / 'receipt.json'
+    target = entry / label
+    copied = storage.long_path(target)
+    base = storage.long_path(real)
+    digests = item['sha256']
+    if item['method'] == 'rename':
+        if os.path.lexists(copied):
+            raise OSError(f'{real}: both it and {target} exist after an interrupted rename; sort it out by hand')
+        os.rename(base, copied)
+    else:
+        is_dir = real.is_dir()
+        left = {(path.relative_to(base).as_posix() if is_dir else real.name): path for path in files_of(real)}
+        unknown = [key for key in left if key not in digests]
+        if unknown:
+            raise OSError(f'{real}: {len(unknown)} files not in the receipt of {entry.name}, e.g. {unknown[0]}; '
+                          'nothing more removed')
+        changed = [key for key, path in left.items() if sha256(path) != digests[key]]
+        if changed:
+            raise OSError(f'{real}: {len(changed)} files changed since the move began, e.g. {changed[0]}; '
+                          'nothing more removed')
+        for key, digest in digests.items():
+            destination = copied / key if is_dir else copied
+            if destination.is_file() and sha256(destination) == digest:
+                continue
+            if key not in left:
+                raise OSError(f'{key}: gone from the source while its copy in {entry.name} is missing or wrong; '
+                              'nothing more removed')
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            writable_retry(lambda path, source=left[key]: shutil.copy2(source, path), destination)
+            if sha256(destination) != digest:
+                raise OSError(f'Copy verification failed for {key}; nothing more removed')
+        remove_verified(real, {key: digests[key] for key in left})
+    item['resumed_utc'] = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')
+    finish(target, item, receipt, receipt_path)
+    return entry, receipt
 
 
 def move(paths, reason):
-    checked = [check(path) for path in paths]  # every path is checked before anything moves
+    if len(paths) == 1 and not os.path.lexists(os.path.abspath(paths[0])):
+        # A move whose source is already gone but whose receipt was not updated: a rename that went through, or a
+        # copy whose source was removed. Only the permission reset and the status are left; a copy is finished only
+        # when every file of the receipt is in the trash and matches its digest. Anything else for a path that does
+        # not exist is refused by check below.
+        found = pending(Path(os.path.realpath(os.path.abspath(paths[0]))))
+        if found is not None:
+            entry, receipt, item = found
+            target = entry / item['label']
+            copied = storage.long_path(target)
+            complete = False
+            if item['method'] == 'rename':
+                complete = os.path.lexists(copied)
+            elif copied.is_dir():
+                complete = all((copied / key).is_file() and sha256(copied / key) == digest
+                               for key, digest in item['sha256'].items())
+            elif copied.is_file():
+                complete = len(item['sha256']) == 1 and sha256(copied) == next(iter(item['sha256'].values()))
+            if complete:
+                item['resumed_utc'] = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')
+                finish(target, item, receipt, entry / 'receipt.json')
+                return entry, receipt
+            raise OSError(f'{paths[0]}: gone, and its interrupted move in {entry.name} is not complete in the trash '
+                          '(a file missing or not matching its digest); nothing done, sort it out by hand')
+    checked =[check(path) for path in paths]  # every path is checked before anything moves
     for first, _ in checked:
         for second, _ in checked:
             if first != second and inside(second, first):
                 raise OSError(f'{second} lies inside {first}: name each place once')
+    interrupted = [(real, label, found) for real, label in checked if (found := pending(real)) is not None]
+    if interrupted:
+        if len(checked) != 1:
+            raise OSError(f'{interrupted[0][0]}: an interrupted move; name it alone to finish it')
+        real, label, (entry, receipt, item) = interrupted[0]
+        return resume(real, label, entry, receipt, item)
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
     root = trash_root()
     number = 0
@@ -166,12 +281,7 @@ def move(paths, reason):
                 if sha256(copied / key if real.is_dir() else copied) != digest:
                     raise OSError(f'Copy verification failed for {key}; the source {real} is untouched')
             remove_verified(real, digests)
-        # A rename keeps the item's old permissions; reset them to the trash's inherited ones, so the trash's
-        # deny-delete permission (scripts/uwtools/protect.py) covers the item too.
-        reset = subprocess.run(['icacls', str(target), '/reset', '/T', '/C', '/Q'], capture_output=True, text=True,
-                               encoding='mbcs', errors='replace')
-        item['status'] = 'moved' if reset.returncode == 0 else 'moved; permissions not reset: ' + reset.stdout[-200:]
-        receipt_path.write_text(json.dumps(receipt, indent=1) + '\n', encoding='utf-8')
+        finish(target, item, receipt, receipt_path)
     return entry, receipt
 
 
