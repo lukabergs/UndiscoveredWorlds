@@ -213,8 +213,8 @@ deterministic coupling and rejected incomplete basin solves.
   coupling passed at iteration 13 with 1.49% aggregate heating change.
   Higher-resolution validation remains open.
 - Fresh validation workbook: `runs/archive/metrics/metrics.xlsx`.
-  Only run 159 is included. Numeric cell exports and
-  `scripts/benchmarks/summarize-climate-validation.py` provide paired spatial inputs;
+  Only run 159 is included. Numeric cell exports and the validation summary script
+  (retired with the legacy climate chain in `7bc373a`) provided paired spatial inputs;
   Excel calculates derived scores. Global Koppen uses spherical areas and
   common masks; regional tables cover other variables. Reference gaps are explicit.
 - Export the ocean solver's native wet-cell mask: final terrain changes after
