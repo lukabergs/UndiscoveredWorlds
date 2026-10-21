@@ -508,24 +508,14 @@ void planet::latitude(int y, int& degrees, int& minutes, int& seconds, bool &neg
     if (y<0 || y>body_.itsheight)
         return;
 
-    bool hemisphere = 0; // 1 for southern
+    // Cell-centred, as the exports and the climate grids: row y spans the band whose
+    // centre is 90 - 180 (y + 0.5) / rows degrees.
+    const float rows = static_cast<float>(body_.itsheight + 1);
+    const float signedlatitude = 90.0f - 180.0f * (static_cast<float>(y) + 0.5f) / rows;
 
-    float fy = (float)y;
+    const bool hemisphere = signedlatitude < 0.0f; // southern
 
-    float worldheight = (float)body_.itsheight;
-    float worldhalfheight = worldheight / 2.0f;
-
-    float pixelsperlat = worldhalfheight / 90.0f;
-
-    float latitude;
-
-    if (fy <= worldhalfheight)
-        latitude = (worldhalfheight - fy) / pixelsperlat;
-    else
-    {
-        latitude = (fy - worldhalfheight) / pixelsperlat;
-        hemisphere = 1;
-    }
+    const float latitude = std::fabs(signedlatitude);
 
     degrees = (int)latitude;
 
@@ -2221,19 +2211,21 @@ bool planet::loadworld(string filename)
 
 // Private member functions.
 
-int planet::wrapx(int x) const // This wraps X coordinates so they point to proper locations on the map.
+// The column x wrapped into [0, W): x = W is column 0, x = -1 is column W - 1. A cube world
+// (itswidth -1) has no columns and returns x unchanged.
+int planet::wrapx(int x) const
 {
-    while (x > body_.itswidth) // If it's too large, wrap it.
-    {
-        x = x - body_.itswidth;
-    }
+    const int columns = body_.itswidth + 1;
 
-    while (x < 0) // If it's too small, wrap it.
-    {
-        x = x + body_.itswidth;
-    }
+    if (columns <= 0)
+        return x;
 
-    return(x);
+    x %= columns;
+
+    if (x < 0)
+        x += columns;
+
+    return x;
 }
 
 int planet::clipy(int y) const // This clips Y coordinates so they can't be off the map.
@@ -2258,44 +2250,7 @@ T smoothingcell(const worldgrid<T>& grid, int x, int y)
 }
 }
 
-// Smooths the base elevation, in whole metres, where there are no mountains.
-void planet::smoothnom(int amount)
-{
-    for (int i = 0; i <= body_.itswidth; i++)
-    {
-        for (int j = 1; j < body_.itsheight; j++)
-        {
-            if (geosphere_.mountainheights[i][j] == 0)
-            {
-                int crount = 0;
-                int ave = 0;
-
-                for (int k = i - amount; k <= i + amount; k++)
-                {
-                    int kk = k;
-
-                    if (kk < 0)
-                        kk = body_.itswidth;
-
-                    if (kk > body_.itswidth)
-                        kk = 0;
-
-                    for (int l = j - amount; l <= j + amount; l++)
-                    {
-                        ave = ave + wholemetres(smoothingcell(geosphere_.mapnom, kk, l));
-                        crount++;
-                    }
-                }
-                ave = ave / crount;
-
-                if (ave > 0 && ave < geosphere_.itsmaxheight)
-                    geosphere_.mapnom[i][j] = static_cast<float>(ave);
-            }
-        }
-    }
-}
-
-// This does the same, but only over land.
+// Smooths a grid over land.
 
 void planet::smoothoverland(worldgrid<int>& arr, int amount, bool uponly)
 {

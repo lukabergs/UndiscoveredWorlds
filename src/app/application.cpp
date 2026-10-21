@@ -759,37 +759,6 @@ bool Application::showdeferredworkwindow(short& pass, const char* windowTitle, c
     return false;
 }
 
-void Application::preparecustomworldgeneration()
-{
-    initialiseworld(*world);
-    world->clear();
-    world->setsize(currentsize);
-    applyworlddimensions(*world, worldpropertycontrols);
-
-    resizeglobaldisplayforworld(*world, globaldisplay, highlightdisplay);
-
-    world->setseed(0 - createrandomseednumber());
-
-    updatereport("Generating custom world terrain from seed: " + to_string(world->seed()) + ":");
-    updatereport("");
-    begintimedreporting();
-
-    invalidateGlobalMaps();
-    fast_srand(world->seed());
-}
-
-void Application::finishcustomworldgeneration(short& pass)
-{
-    endtimedreporting();
-    resetmapcache(globalmaps);
-
-    mapview = relief;
-    showGlobalMapView(mapview);
-
-    pass = 0;
-    screenmode = importscreen;
-}
-
 void Application::run()
 {
     sf::Clock deltaClock;

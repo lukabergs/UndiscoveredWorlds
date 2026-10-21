@@ -607,7 +607,7 @@ public:
 
     void longitude(int x, int& degrees, int& minutes, int& seconds, bool& negative) const;   // returns the longitude of this point
 
-    void latitude(int y, int& degrees, int& minutes, int& seconds, bool& negative) const;   // returns the latitude of this point
+    void latitude(int y, int& degrees, int& minutes, int& seconds, bool& negative) const;   // returns the latitude of this row's cell centre
 
     int reverselatitude(int lat) const; // returns the y coordinate of a latitude
 
@@ -1371,7 +1371,6 @@ public:
     // Other public functions.
 
     void clear();   // Clears all of the maps.
-    void smoothnom(int amount); // Smoothes the no-mountain map to a given amount.
     void smoothextraelev(int amount); // Smoothes the extra elevation map to a given amount.
     void shiftterrain(int offset); // Shifts the physical terrain by a given amount.
     void setmaxriverflow(); // Calculates the largest river flow on the map.

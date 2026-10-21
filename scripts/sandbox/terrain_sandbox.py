@@ -399,6 +399,12 @@ def base_cube(bundle):
     return BASE_CUBES[key]
 
 
+def pixel_columns(c0, c1, world_columns):
+    """World columns of a pixel box from c0 to c1 inclusive, east across the date line when c1 < c0 (the domain
+    then reaches past column W - 1; its fields are sampled with the columns wrapped)."""
+    return (c1 - c0) % world_columns + 1
+
+
 def make_domains(config, bundle, names, directory=None):
     radius_km = float(bundle.manifest.get('parameters', {}).get('world.body.radius_km', 6371.0))
     W, H = bundle.columns, bundle.rows
@@ -444,7 +450,7 @@ def make_domains(config, bundle, names, directory=None):
                 raise ValueError(f'{name}: scale {k} is not a multiple of its parent\'s {parent_k}')
             factor = k // parent_k
             margin = int(config['nesting'].get('margin_parent_cells', {}).get(str(k), spec['margin'] * parent_k))
-            columns = ((c1 - c0 + 1) * parent_k + 2 * margin) * factor
+            columns = (pixel_columns(c0, c1, W) * parent_k + 2 * margin) * factor
             rows = ((r1 - r0 + 1) * parent_k + 2 * margin) * factor
             crop = (margin * factor, rows - margin * factor, margin * factor, columns - margin * factor)
             domains.append(Domain(name, columns, rows, c0 - margin / parent_k, r0 - margin / parent_k, k, W, H,
@@ -453,7 +459,7 @@ def make_domains(config, bundle, names, directory=None):
         else:
             c0, r0, c1, r1 = spec['pixels']
             k, m = spec['scale'], spec['margin']
-            columns, rows = (c1 - c0 + 1 + 2 * m) * k, (r1 - r0 + 1 + 2 * m) * k
+            columns, rows = (pixel_columns(c0, c1, W) + 2 * m) * k, (r1 - r0 + 1 + 2 * m) * k
             crop = (m * k, rows - m * k, m * k, columns - m * k)
             physics = config['physics']['window']
             if config['physics'].get('use_levels', False):  # the level's kappa, K and threshold on an unnested window

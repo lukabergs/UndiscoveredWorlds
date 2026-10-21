@@ -188,8 +188,6 @@ struct Application
     SocialGenerationOptions socialoptionsfromworldcontrols();
     void startproceduralworkbenchsession();
     bool showdeferredworkwindow(short& pass, const char* windowTitle, const char* message, ImVec2 position, ImVec2 size);
-    void preparecustomworldgeneration();
-    void finishcustomworldgeneration(short& pass);
 
     float currentversion = 1.0f;
 
