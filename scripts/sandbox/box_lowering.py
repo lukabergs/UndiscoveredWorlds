@@ -30,7 +30,9 @@ def main():
         report[label] = {}
         for name in domains:
             x0, y0, x1, y1 = config['domains'][name]['pixels']
-            box = (slice(int(y0 * cell), int((y1 + 1) * cell)), slice(int(x0 * cell), int((x1 + 1) * cell)))
+            x1 += world_columns if x1 < x0 else 0  # a box across the date line wraps
+            box = np.ix_(np.arange(int(y0 * cell), int((y1 + 1) * cell)),
+                         np.arange(int(x0 * cell), int((x1 + 1) * cell)) % columns)
             land = procedural[box] > 0
             p, q = procedural[box][land], physics[box][land]
             report[label][name] = {'land_cells': int(land.sum()), 'procedural_m': round(float(p.mean()), 1),

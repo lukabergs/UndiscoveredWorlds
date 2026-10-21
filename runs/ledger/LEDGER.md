@@ -601,6 +601,7 @@ Lessons:
 | `world-0086` | 2026-10-07 | recovered except one hand-written guide | keep | incident during erosion plan Phase D: refs/processed deleted through a worktree junction, regenerated from refs/source; backup, guard hook and reference palettes |
 | `world-0087` | 2026-10-10 | fields added | Valley spacing calibrated to Perron et al. 2009's Napa Valley D/K and scaled per cell by erodibility and runoff (orchestrator's decision; the worker had marked it the user's); U = the erosion rate (steady state); procedural-world only; the parameters in terrain.json (S3.0's rules barred landscape.json in group d). | multiscale plan, step S3.6: the global grid carries subgrid statistics (diagnoser terrain.subgrid_statistics writing geosphere.relief_amplitude and geosphere.valley_spacing; the regional adapter passes them to the refinement) |
 | `world-0088` | 2026-10-21 | done: no export change needed | keep | master plan 1.3: hydrology of the lat-lon export of a cube world |
+| `world-0089` | 2026-10-21 | accepted | keep | master plan 1.5: small code faults (wrap, cell-centred coordinates, date-line windows, dead code) |
 
 Lessons:
 
@@ -742,3 +743,4 @@ Lessons:
 - `world-0087`: A grid-scale closure's coefficients (here the erosion's D and K) are not physical constants: a sub-grid law needs its own calibration.
 - `world-0088`: Check a plan row's quoted numbers against the latest evaluation before planning a fix.
 - `world-0088`: Projecting the native routing onto the lat-lon grid separates the export's share of a gap from the world's.
+- `world-0089`: A private helper's fault matters only through its callers: list them before planning a parity question.

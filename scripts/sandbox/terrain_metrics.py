@@ -109,7 +109,7 @@ def geometry(config, domain, shape):
     else:
         c0, r0, c1, r1 = config['domains'][domain]['pixels']
         k = config['domains'][domain]['scale']
-        if ((c1 - c0 + 1) * k, (r1 - r0 + 1) * k) != (columns, rows):
+        if (((c1 - c0) % WORLD_COLUMNS + 1) * k, (r1 - r0 + 1) * k) != (columns, rows):
             raise SystemExit(f'{domain}: array {shape} does not match the config pixels {[c0, r0, c1, r1]} at k {k}')
         north = 90.0 - r0 * 180.0 / WORLD_ROWS
     pixel_deg = 180.0 / WORLD_ROWS / k
