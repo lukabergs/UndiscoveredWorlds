@@ -35,7 +35,7 @@ class StructureRuleTests(unittest.TestCase):
     def test_unnamed_folders_are_refused(self):
         self.assertRefused('tmp/x.txt', 'notes.txt', 'docs/notes/x.md', 'scripts/helpers/x.py',
                            'src/simulations/New Folder/x.cpp', 'src/gui/x.cpp', 'configs/old/x.json',
-                           'out/images/x.png', 'refs/extra/x.csv', 'runs/world/latest/run.json',
+                           'out/unnamed/x.png', 'refs/extra/x.csv', 'runs/world/latest/run.json',
                            'runs/world/run.json')
         self.assertIn('not a place', structure.judge('tmp/x.txt', CONFIG))
 

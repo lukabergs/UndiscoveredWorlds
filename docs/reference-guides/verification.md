@@ -53,12 +53,14 @@ uv run --offline scripts/uw.py tectonics experiment --duration 20 --repeat --exp
 The check of one refactoring step (headless build, the three minimal seed-1 bundles with `--audit-access`, comparison with the previous step's, `parameters.py --check`, `check_layout.py`, `check_structure.py`, `check_records.py`, `process_access.py --check`):
 
 ```
-uv run --offline python scripts/evaluation/step_check.py <label> --reference <previous label> [--desktop] [--social] [--grid latlon]
+uv run --offline python scripts/evaluation/step_check.py <tag> [--reference <id, id-tag or earlier label>] [--desktop] [--social] [--grid latlon]
 ```
+
+Each check writes a new `out/scratch/step-check/<id>-<tag>/` of the main tree (`scripts/uwtools/naming.py`: the id from `runs/registry/scratch.json`, the tag the topic, never ending in `-<digits>` or `-v<digits>`), with the bundles as `<recipe>/`, the logs and `result.json` (passed, grid, social, reference). Without `--reference` the newest passing step check with the same `--grid` and `--social` is the reference; a label of the earlier layout (`out/scratch/phase5`, `out/scratch/sphere/step-check`) still resolves.
 
 The world grid is `world_pipeline`'s default, the cube (`--grid cube`, N = W / 4: N 32 at the minimal 128 columns), since T8 W3.2; `--grid latlon` runs on 128 x 64 lat-lon, the grid of every reference made before W3.2 (lat-lon parity). Imported recipes (imported-world, earth-climate, earth-hydrology) read their maps on lat-lon and remap the terrain onto the cube. A cube reference and a lat-lon reference are never compared with each other.
 
-A label is used once: the check refuses a directory that already holds any `<label>-*` entry, a log written there by hand included, so keep your own logs in a subdirectory.
+Bundles are never overwritten: every check takes a new id, so the same tag can be run again.
 
 Parameters: edit `configs/parameters/<module>.json`, then `uv run --offline python scripts/parameters.py` writes the headers (`--check` fails on a stale one). One run with another value: `world_pipeline run ... --set hydrology.rivers.minimum_flow=80`, or `--parameters FILE.json`; the bundle's `manifest.json` lists every value under `parameters`.
 

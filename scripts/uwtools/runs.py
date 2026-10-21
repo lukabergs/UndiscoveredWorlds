@@ -18,12 +18,13 @@ ARCHIVE = ROOT / 'runs/archive'
 SEALED_KINDS = ('checkpoints', 'diagnostics', 'fields', 'logs', 'maps', 'manifests', 'parameters', 'metrics')
 
 
-def registry_path(module):
-    return ROOT / 'runs/registry' / f'{module}.json'
+def registry_path(module, root=None):
+    """runs/registry/<module>.json of root (default this checkout; naming.py passes the main tree)."""
+    return (root or ROOT) / 'runs/registry' / f'{module}.json'
 
 
-def registry(module):
-    path = registry_path(module)
+def registry(module, root=None):
+    path = registry_path(module, root)
     return json.loads(path.read_text(encoding='utf-8')) if path.is_file() else {'runs': []}
 
 
@@ -82,13 +83,15 @@ def refuse_archive(path):
     return path
 
 
-def append_record(module, entry):
-    """Append one record to runs/registry/<module>.json as text: every existing byte stays as it is.
+def append_record(module, entry, root=None):
+    """Append one record to runs/registry/<module>.json (of root, default this checkout) as text: every
+    existing byte stays as it is.
 
     A missing registry is created as {"schema": "<module>-run-registry/v1", "runs": []}. One
-    session registers runs at a time: concurrent appends are not supported, and a registry
-    changed between reading and writing, or a record missing after the write, raises."""
-    path = registry_path(module)
+    session registers runs at a time: concurrent appends are not supported (naming.py holds a lock
+    around its appends to scratch.json), and a registry changed between reading and writing, or a
+    record missing after the write, raises."""
+    path = registry_path(module, root)
     if not path.is_file():
         path.write_bytes(json.dumps({'schema': f'{module}-run-registry/v1', 'runs': []}, indent=2).encode('utf-8') + b'\n')
     data = path.read_bytes()
@@ -107,7 +110,7 @@ def append_record(module, entry):
     if path.read_bytes() != data:
         raise RuntimeError(f'{path} changed while appending run {entry["id"]}; register one run at a time')
     path.write_bytes(updated)
-    if path.read_bytes() != updated or registry(module)['runs'][-1] != entry:
+    if path.read_bytes() != updated or registry(module, root)['runs'][-1] != entry:
         raise RuntimeError(f'{path}: run {entry["id"]} is not the last record after writing; check the registry')
 
 

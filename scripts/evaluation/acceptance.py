@@ -3,6 +3,9 @@
     uv run --offline python scripts/evaluation/acceptance.py [--scratch DIR] [--json OUT] [--output DIR]
         [--base-v10 FILE] [--scores STEP=FILE ...] [--no-maps]
 
+The page goes to DIR, by default a new out/evaluation/<id>-t8-acceptance of the main tree
+(scripts/uwtools/naming.py, kind page).
+
 The collector reads the evidence the T8 steps left under the main tree's out/scratch/sphere (DIR) and
 writes one document (OUT, default DIR/acceptance/t8-acceptance.json) with a section per topic: the engine
 (E6/acceptance.json, the gates as amended after E6), striping by band and A4 on the lat-lon view and
@@ -34,7 +37,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from uwtools import paths  # noqa: E402
+from uwtools import naming, paths  # noqa: E402
 import report  # noqa: E402
 
 SCHEMA = 'uw-t8-acceptance/v1'
@@ -704,8 +707,9 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('--scratch', type=Path, default=scratch, help='the T8 scratch directory (out/scratch/sphere)')
     parser.add_argument('--json', type=Path, help='the document (default SCRATCH/acceptance/t8-acceptance.json)')
-    parser.add_argument('--output', type=Path, default=scratch.parents[1] / 'evaluation/t8-acceptance',
-                        help='the page directory (default out/evaluation/t8-acceptance of the main tree)')
+    parser.add_argument('--output', type=Path,
+                        help='the page directory (default a new out/evaluation/<id>-t8-acceptance of the main tree, '
+                             'scripts/uwtools/naming.py kind page)')
     parser.add_argument('--base-v10', type=Path, help='base-v10 totals (default SCRATCH/W2-SB2/totals.json)')
     parser.add_argument('--scores', action='append', default=[], metavar='STEP=FILE',
                         help='a later step\'s Earth scores (the W3.3c scores.json layout), shown after W3.3c\'s and '
@@ -715,6 +719,8 @@ def main(argv=None):
     if any('=' not in item for item in args.scores):
         parser.error('--scores takes STEP=FILE')
     json_path = args.json or args.scratch / 'acceptance/t8-acceptance.json'
+    if args.output is None:
+        args.output = naming.new_directory('page', 't8-acceptance').path
     args.output.mkdir(parents=True, exist_ok=True)
     document = collect(args.scratch, args.output, args.base_v10, not args.no_maps,
                        [tuple(item.split('=', 1)) for item in args.scores])

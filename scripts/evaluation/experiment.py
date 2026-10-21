@@ -1,7 +1,7 @@
 """Run a module experiment: write a run bundle with a headless tool, then evaluate it.
 
-    uv run --offline python scripts/evaluation/experiment.py <module> [--register] \\
-        [--name NAME] [--archive runs/reports/<experiment>] [--seed 1] [--resolution W] \\
+    uv run --offline python scripts/evaluation/experiment.py <module> [--register [--tag TAG]] \\
+        [--name TAG] [--archive runs/reports/<experiment>] [--seed 1] [--resolution W] \\
         [--baseline BUNDLE] [--repeat] [--explicit-recipe] [--executable EXE] [--label TEXT] [--topic TEXT] \\
         [-- native options]
 
@@ -21,12 +21,14 @@ each present) must be among the arguments, every bundle directory named in the c
 declared as an input by its manifest's SHA-256, and run.json records the seed, grid and
 window of the bundle written.
 
-Without --register the run is scratch, in out/evaluation/<module>/<name>/, or in a
-runs/reports/<experiment> archive (routed to the storage drive) with --archive. With
+Without --register the run is scratch, in the main tree's out/evaluation/<module>/<id>-<name>/
+(scripts/uwtools/naming.py, kind `experiment`: --name is the tag, default seed<S>-w<W>, or the module
+for a profile that is not seeded; the id comes from runs/registry/scratch.json), or in
+runs/reports/<experiment>/<name> (routed to the storage drive) with --archive. With
 --register (`uw.py <module> run`) the run takes the next id of runs/registry/<module>.json,
-runs in runs/<module>/<id>/ and appends a registry record naming that directory when it
-ends, with status `failed` (and no score) when the tool or the evaluation failed or the
-run was interrupted. A run directory holds run.json (command, executable and inputs with SHA-256, code
+runs in runs/<module>/<id>/ and appends a registry record naming that directory and its --tag
+(default the module) when it ends, with status `failed` (and no score) when the tool or the
+evaluation failed or the run was interrupted. A run directory holds run.json (command, executable and inputs with SHA-256, code
 state, timing, steps, exit codes, verdict), log.txt, bundle/, checkpoints/ when the
 settings ask for them, evaluation/ (evaluation.json, review request, run page, maps) and
 ledger-entry.json, a draft to complete and append with `uw.py <module> ledger --add`.
@@ -43,7 +45,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from uwtools import ledger, paths, runs, storage
+from uwtools import ledger, naming, paths, runs, storage
 from uwtools.bundle import Bundle
 from uwtools.hashing import sha256
 from evaluate import code_state, evaluate, load_profile
@@ -123,9 +125,7 @@ def run_tool(command, directory, label, environment, outputs):
     return {'label': label, 'command': command, 'exit_code': code, 'seconds': round(time.time() - started, 3), 'log': log}
 
 
-def scratch_directory(module, name, archive):
-    if archive is None:
-        return ROOT / 'out/evaluation' / module / name
+def archive_directory(archive, name):
     return storage.route(ROOT / archive) / name
 
 
@@ -157,7 +157,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('module', help='Profile name in configs/evaluation/')
     parser.add_argument('--register', action='store_true', help='Registered run in runs/<module>/<id>/')
-    parser.add_argument('--name', help='Scratch run directory name (default: UTC time and seed)')
+    parser.add_argument('--tag', help='Tag of a registered run, stored in its registry record (default: the module)')
+    parser.add_argument('--name', help='Tag of a scratch run, out/evaluation/<module>/<id>-<name> (default: seed<S>-w<W>, '
+                                       'or the module when not seeded); with --archive the directory name '
+                                       '(default: UTC time and seed)')
     parser.add_argument('--archive', help='runs/reports/<experiment> archive for kept scratch evidence')
     parser.add_argument('--seed', type=int, help='World seed (default 1; a profile with "seeded": false passes it only when given)')
     parser.add_argument('--resolution', type=int, help='Grid width W (default from the profile)')
@@ -173,6 +176,8 @@ def main():
     native = [argument for argument in native if argument != '--']
     if args.register and (args.name or args.archive):
         raise SystemExit('A registered run lives in runs/<module>/<id>/; --name and --archive are for scratch runs')
+    if args.tag and not args.register:
+        raise SystemExit("--tag names a registered run; a scratch run's tag is --name")
     profile, profile_path = load_profile(args.module)
     if 'run' not in profile:
         raise SystemExit(f'Profile {args.module} has no run section')
@@ -186,6 +191,16 @@ def main():
     for group in spec.get('required_options', []):
         if not any(option in given for option in group):
             raise SystemExit(f"{args.module} runs require {' or '.join(group)} (a native option or a registered argument)")
+    tag = None
+    if args.register:
+        tag = args.tag or args.module
+    elif args.archive is None:
+        tag = args.name or (f'seed{1 if args.seed is None else args.seed}-w{resolution}' if seeded else args.module)
+    if tag is not None:
+        try:
+            naming.check_tag(tag)
+        except ValueError as error:
+            raise SystemExit(str(error))
     # What was already tried is shown before anything runs, so it does not depend on an instruction to read the ledger.
     previous = ledger.relevant(args.module, args.topic)
     if previous:
@@ -210,16 +225,17 @@ def main():
         variable, path = inputs.resolve(item, resolution)
         environment[variable] = str(path)
         declared.append({'path': relative(path), 'sha256': sha256(path), 'environment': variable})
-    if args.register:
-        identifier = runs.next_id(args.module)
-        name = str(identifier)
-        directory = storage.run_directory(args.module, identifier)
-    else:
+    if args.archive:
         identifier = None
         stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
         name = args.name or (f'{stamp}-seed{1 if args.seed is None else args.seed}-{resolution}' if seeded else f'{stamp}-{args.module}')
-        directory = scratch_directory(args.module, name, args.archive)
+        directory = archive_directory(args.archive, name)
         directory.mkdir(parents=True, exist_ok=False)
+    else:
+        named = naming.new_directory('run' if args.register else 'experiment', tag, module=args.module,
+                                     label=args.label or '')
+        identifier = named.id if args.register else None
+        name, directory = named.name, named.path
     tool_command = lambda options: [str(executable), *expand(options, resolution, directory, values)]
     if seeded:
         seed = ['--seed', str(1 if args.seed is None else args.seed)]
@@ -316,7 +332,7 @@ def main():
             # Every registered id gets its record, so it is never reused; only a run evaluated to the end is complete.
             complete = succeeded and document is not None and 'error' not in record
             entry = {'id': identifier, 'status': 'complete' if complete else 'failed', 'run': relative(directory),
-                     'date': record['started'], 'label': args.label or ''}
+                     'date': record['started'], 'label': args.label or '', 'tag': tag}
             score = document['validation']['scores'].get('run', {}).get('score') if complete else None
             if score is not None:
                 entry['score'] = round(score, 4)

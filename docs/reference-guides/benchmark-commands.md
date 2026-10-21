@@ -221,7 +221,7 @@ The climate/erosion feedback experiment (run 63) has no runner: its solver was r
 
 ## Geology
 
-Tectonics at each width, scored for seafloor age and collisions against Earth references. Output: `out/bench/geology/report.json`.
+Tectonics at each width, scored for seafloor age and collisions against Earth references. Output: `out/scratch/geology/<id>-seed<S>/report.json` of the main tree, a new id each run (`scripts/uwtools/naming.py`, recorded in `runs/registry/scratch.json`), unless `--output` names a folder.
 
 ```powershell
 uv run --offline scripts/uw.py geology run

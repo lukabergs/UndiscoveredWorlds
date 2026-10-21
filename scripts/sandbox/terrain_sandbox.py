@@ -97,8 +97,8 @@ mechanism for every level below the global domain: a region of a region is a map
 256-column world bundle (156 km cells), L1 the global domain (2048 columns, 19.5 km), L2 the k 64 windows (2.44 km,
 factor 8 from L1), L3 the k 256 windows (0.61 km, factor 4 from L2); L4, 100 m, is nested_window.py. A window domain
 names its parent in domains.<name>.parent; with nesting on, the domains run parents first (run_order) and a child
-reads its parent's arrays from the same run's directory, or from --parent-run LABEL for a parent not in --domains
-(otherwise the parent is run too).
+reads its parent's arrays from the same run's directory, or from --parent-run REF for a parent not in --domains
+(an id, <id>-<tag>, a label written before the ids or an absolute path; otherwise the parent is run too).
 - Rule A (L1, a domain without a parent): today's procedural chain (base, sea floor, warp, relief, uplands, coast,
   fill) and the full history, unchanged.
 - Rule B (every nested level, nested_start): start = the Catmull-Rom prolongation of the parent's physics surface
@@ -145,10 +145,12 @@ reads its parent's arrays from the same run's directory, or from --parent-run LA
 - Open (for the user, 2026-10-16): the global domain's physics (K 3000 on 19.5 km cells, 22.6 Myr) lowers G-coast's
   box from a 2562 m procedural mean to 850 m, and every nested window inherits that denudation.
 
-  uv run python scripts/sandbox/terrain_sandbox.py --label try1 [--config FILE] [--set group.key=value ...]
-      [--domains global,A,B] [--no-physics] [--parent-run LABEL]
-Writes out/scratch/sandbox/<label>/ (a label that is an absolute path is that directory): index.html, the PNGs,
-config.json (the values used) and timings.
+  uv run python scripts/sandbox/terrain_sandbox.py --label TAG [--config FILE] [--set group.key=value ...]
+      [--domains global,A,B] [--no-physics] [--parent-run REF]
+Writes the main tree's out/scratch/sandbox/<id>-<TAG>/ (scripts/uwtools/naming.py: a new id each run, recorded in
+runs/registry/scratch.json; TAG names the topic and ends in no -<digits> or -v<digits>; a --label that is an
+absolute path is that directory): index.html, the PNGs, config.json (the values used) and timings. Folders
+written before the ids (base-v10, v9, ...) keep their names.
 """
 import argparse
 import copy
@@ -3036,23 +3038,38 @@ def render_domain(domain, fields, result, config, directory, physics_on, nest_in
 
 
 def main():
+    from uwtools import naming  # scripts/uwtools/naming.py: out/scratch/sandbox/<id>-<tag> of the main tree
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--label', required=True)
+    parser.add_argument('--label', required=True, metavar='TAG',
+                        help='the tag of the run (naming.py tag rule): it writes out/scratch/sandbox/<id>-<TAG>; '
+                             'an absolute path is that directory')
     parser.add_argument('--config', default=str(DEFAULT_CONFIG))
     parser.add_argument('--set', action='append', default=[], metavar='GROUP.KEY=VALUE')
     parser.add_argument('--preset', default=None, metavar='NAME[,NAME]',
                         help='named looks from configs/sandbox/presets.json, applied before --set')
     parser.add_argument('--domains', default=None, help="comma-separated, default the config's default_domains")
     parser.add_argument('--no-physics', action='store_true')
-    parser.add_argument('--parent-run', default=None, metavar='LABEL',
-                        help='with nesting: read the parents not in --domains from out/scratch/sandbox/LABEL '
-                             '(default: run them here)')
+    parser.add_argument('--parent-run', default=None, metavar='REF',
+                        help='with nesting: read the parents not in --domains from that sandbox run (an id, '
+                             '<id>-<tag>, a label of out/scratch/sandbox written before the ids, or an absolute path; '
+                             'default: run them here)')
     arguments = parser.parse_args()
+    try:
+        parent_run = naming.find('sandbox', arguments.parent_run) if arguments.parent_run else None
+        if not Path(arguments.label).is_absolute():
+            naming.check_tag(arguments.label)
+    except (ValueError, FileNotFoundError) as error:
+        parser.error(str(error))
 
     config = load_config(arguments.config, preset_overrides(arguments.preset) + arguments.set)
     use_noise_divisor(config)
-    directory = ROOT / 'out' / 'scratch' / 'sandbox' / arguments.label
-    directory.mkdir(parents=True, exist_ok=True)
+    if Path(arguments.label).is_absolute():
+        directory, name = Path(arguments.label), arguments.label
+        directory.mkdir(parents=True, exist_ok=True)
+    else:
+        named = naming.new_directory('sandbox', arguments.label)
+        directory, name = named.path, named.name
+    print(directory, flush=True)
     bundle = Bundle.open(ROOT / config['base_bundle'])
     world = world_fields(bundle, native=cube_on(config, bundle))
     radius_m = float(bundle.manifest.get('parameters', {}).get('world.body.radius_km', 6371.0)) * 1000.0
@@ -3072,7 +3089,7 @@ def main():
         parent_name = config['domains'][domain.name].get('parent') if nesting_on(config) else None
         run_config, nest_info, band = config, None, {}
         if parent_name:  # rule B (docstring, "Nesting")
-            source = directory if parent_name in names else ROOT / 'out' / 'scratch' / 'sandbox' / arguments.parent_run
+            source = directory if parent_name in names else parent_run
             parent = load_parent(config, source, parent_name, bundle.columns)
             fields, timing, nest_info = nested_start(domain, world, config, parent, config['seed'])
             del parent
@@ -3119,7 +3136,7 @@ def main():
         timings[domain.name] = {key: (round(value, 2) if isinstance(value, float) else value) for key, value in timing.items()}
         print(f'{domain.name}: {timings[domain.name]}', flush=True)
     (directory / 'config.json').write_text(json.dumps(config, indent=1), encoding='utf-8')
-    write_page(directory, arguments.label, sections, config, timings, bundle)
+    write_page(directory, name, sections, config, timings, bundle)
     print(directory / 'index.html')
 
 

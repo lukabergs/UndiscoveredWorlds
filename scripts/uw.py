@@ -21,7 +21,8 @@ Modules and commands:
                        the terrain and relief maps (default on evaluate: the entry holding the map's metres per
                        pixel with the nearest centre latitude; scripts/evaluation/earth_windows.py)
     tectonics report   comparison page of the evaluations of registered runs (--runs A B ...), in runs/reports/tectonics/
-    geology   run      tectonics bundles at each width, scored against Earth references (out/bench/geology)
+    geology   run      tectonics bundles at each width, scored against Earth references (default a new
+                       out/scratch/geology/<id>-seed<S> of the main tree, scripts/uwtools/naming.py)
     climate|tectonics|world|erosion|hydrology report --evaluation DIR [DIR ...] [--output DIR]
                        pages from evaluation.json (scripts/evaluation/report.py): one DIR rewrites its run
                        page (index.html, report.md); several give a comparison page, the first DIR being the
@@ -49,14 +50,13 @@ import subprocess
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from uwtools import ledger, paths, runs
+from uwtools import ledger, naming, paths, runs
 
 # `uv run` exports its own path; subprocesses may not find uv on PATH.
 UV = os.environ.get('UV', 'uv')
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / 'scripts/benchmarks'
 WORLD_EXE = paths.executable('world_pipeline')
-SCRATCH = ROOT / 'out/bench'
 EVALUATION = ROOT / 'scripts/evaluation'
 COMMANDS = {'tectonics': ('run', 'report', 'experiment', 'evaluate', 'dashboard', 'ledger', 'review'), 'geology': ('run',),
             'climate': ('run', 'report', 'experiment', 'evaluate', 'dashboard', 'ledger', 'review'),
@@ -181,7 +181,7 @@ def tectonics(args, extra):
 
 def geology(args, extra):
     exe = args.executable or WORLD_EXE
-    output = Path(args.output or SCRATCH / 'geology')
+    output = Path(args.output or naming.new_directory('geology', f'seed{args.seed}', label=args.label or '').path)
     widths = [args.resolution] if args.resolution else [128, 256]
     bundles = []
     for width in widths:
