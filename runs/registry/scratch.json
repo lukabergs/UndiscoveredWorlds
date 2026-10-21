@@ -143,6 +143,19 @@
         "revision": "18d0233843d71957822d8b51909fd774abc14414",
         "dirty": true
       }
+    },
+    {
+      "id": 12,
+      "kind": "sandbox",
+      "tag": "t25-sea-all",
+      "run": "out/scratch/sandbox/12-t25-sea-all",
+      "date": "2026-10-21T19:35:01+00:00",
+      "label": "",
+      "tool": "terrain_sandbox",
+      "code": {
+        "revision": "18d0233843d71957822d8b51909fd774abc14414",
+        "dirty": true
+      }
     }
   ]
 }
