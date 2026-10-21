@@ -3,7 +3,8 @@
     uv run --offline python scripts/uwtools/naming.py new KIND TAG [--module M] [--label TEXT]
 
 Registered module runs keep runs/<module>/<id> and the ids of runs/registry/<module>.json (kind
-`run`; experiment.py appends their record, which now carries the tag). Every other directory a tool
+`run`; experiment.py appends their record, which now carries the tag, to the main tree's registry,
+also from a worktree). Every other directory a tool
 creates is `<parent>/<id>-<tag>`, its id drawn from one sequence shared by all those kinds and
 recorded in runs/registry/scratch.json:
 
@@ -49,7 +50,7 @@ KINDS = ('run',) + tuple(PARENTS)
 LEGACY_STEP_CHECKS = ('out/scratch/step-check', 'out/scratch/sphere/step-check', 'out/scratch/phase5')
 LEGACY_STEP_CHECK_RECIPES = ('procedural-world', 'earth-climate', 'tectonics', 'social')
 TAG = re.compile(r'[a-z][a-z0-9]*(-[a-z0-9]+)*')
-VERSION_SUFFIX = re.compile(r'-v?[0-9]+')
+VERSION_SUFFIX = re.compile(r'-v?[0-9]+$')
 TAG_LENGTH = 40
 NUMBERED = re.compile(r'([0-9]+)(?:-|$)')
 LOCK = 'out/scratch/naming.lock'
@@ -81,7 +82,7 @@ def check_tag(tag):
         raise ValueError(f'Tag {tag!r}: lower-case words of letters and digits joined by "-", starting with a letter, '
                          f'at most {TAG_LENGTH} characters')
     match = VERSION_SUFFIX.search(tag)
-    if match and match.end() == len(tag):
+    if match:
         raise ValueError(f'Tag {tag!r} ends in a version ({match.group(0)}); the id is the version, drop the suffix')
     return tag
 
@@ -104,14 +105,15 @@ def _under(path, store):
 
 
 def _storage():
-    store = storage.storage_root()
+    """The storage root named by the main tree's runs/storage.json (a worktree's copy is not read)."""
+    store = storage.storage_root(main_root() / 'runs/storage.json')
     if store is None:
         raise SystemExit('runs/storage.json names no storage root: named directories are written to the storage drive')
     return store
 
 
 def _storage_parent(parent, root, store):
-    """parent created inside the routed out/scratch or out/evaluation of the main tree."""
+    """parent created inside the routed out/scratch, out/evaluation or runs/<module> of the main tree."""
     top = root.joinpath(*parent.relative_to(root).parts[:2])
     if not _under(top, store):
         if Path(os.path.abspath(storage.ROOT)) != Path(os.path.abspath(root)):
@@ -128,7 +130,8 @@ def _code_state():
     def git(*arguments):
         return subprocess.run(['git', *arguments], cwd=paths.ROOT, capture_output=True, text=True)
     revision = git('rev-parse', 'HEAD')
-    diff = git('diff', 'HEAD', '--quiet')
+    # The registries change with every named run; they do not make the code dirty.
+    diff = git('diff', 'HEAD', '--quiet', '--', '.', ':!runs/registry')
     return {'revision': revision.stdout.strip() if revision.returncode == 0 else None, 'dirty': diff.returncode != 0}
 
 
@@ -144,15 +147,13 @@ def _numbered(directory):
 
 
 def next_id(root):
-    """One more than the scratch registry's highest id and every numeric prefix under the kinds' parents."""
+    """One more than the scratch registry's highest id and every numeric prefix under the kinds' parents
+    (under out/evaluation: the folders of the modules configs/evaluation/*.json names)."""
     used = [entry['id'] for entry in runs.registry(REGISTRY, root=root)['runs']]
     for kind in ('sandbox', 'step-check', 'geology', 'page'):
         used += _numbered(_parent(kind, None, root))
-    evaluation = root / 'out/evaluation'
-    if evaluation.is_dir():
-        for module in evaluation.iterdir():
-            if module.is_dir() and not NUMBERED.match(module.name):
-                used += _numbered(module)
+    for profile in sorted((root / 'configs/evaluation').glob('*.json')):
+        used += _numbered(_parent('experiment', profile.stem, root))
     return max(used, default=0) + 1
 
 
@@ -197,13 +198,14 @@ def new_directory(kind, tag, *, module=None, label=''):
     _check_kind(kind, module)
     check_tag(tag)
     store = _storage()
-    if kind == 'run':
-        identifier = runs.next_id(module)
-        path = storage.run_directory(module, identifier)
-        if not _under(path, store):
-            raise SystemExit(f'{path} does not resolve under the storage root {store}')
-        return Named(identifier, kind, tag, module, str(identifier), path)
     root = main_root()
+    if kind == 'run':
+        # runs/<module>/<id> of the main tree, numbered by its registry (storage.run_directory, from any checkout).
+        parent = _storage_parent(root / 'runs' / module, root, store)
+        identifier = runs.next_id(module, root=root)
+        path = parent / str(identifier)
+        path.mkdir(exist_ok=False)
+        return Named(identifier, kind, tag, module, str(identifier), path)
     parent = _storage_parent(_parent(kind, module, root), root, store)
     with _Lock(root):
         identifier = next_id(root)
@@ -246,14 +248,16 @@ def find(kind, ref, module=None):
     if Path(ref).is_absolute():
         return Path(ref)
     _check_kind(kind, module)
+    root = main_root()
     if kind == 'run':
         if not ref.isdigit():
             raise FileNotFoundError(f'A registered {module} run is named by its id, not {ref!r}')
-        path = runs.directory(module, int(ref))
-        if path is None:
+        entry = next((entry for entry in runs.registry(module, root=root)['runs'] if entry['id'] == int(ref)), None)
+        if entry is None:
+            raise FileNotFoundError(f'{module} run {ref} is not in the main tree\'s runs/registry/{module}.json')
+        if not entry.get('run'):
             raise FileNotFoundError(f'{module} run {ref} is sealed under runs/archive')
-        return path
-    root = main_root()
+        return root / entry['run']
     parent = _parent(kind, module, root)
     if ref.isdigit():
         for entry in records(kind, module if kind == 'experiment' else None, root):
@@ -275,7 +279,7 @@ def find(kind, ref, module=None):
 def previous(named):
     """The newest earlier record of named's topic (kind, module, tag), or None."""
     if named.kind == 'run':
-        earlier = [entry for entry in runs.registry(named.module)['runs']
+        earlier = [entry for entry in runs.registry(named.module, root=main_root())['runs']
                    if entry.get('tag') == named.tag and entry['id'] < named.id]
     else:
         earlier = [entry for entry in records(named.kind)

@@ -56,7 +56,8 @@ def code_state():
         completed = subprocess.run(['git', *arguments], cwd=ROOT, capture_output=True)
         return completed.stdout if completed.returncode == 0 else None
     revision = git('rev-parse', 'HEAD')
-    diff = git('diff', 'HEAD', '--binary')
+    # The run registries change with every registered or named run; they are not code (naming.py).
+    diff = git('diff', 'HEAD', '--binary', '--', '.', ':!runs/registry')
     return {'revision': revision.decode().strip() if revision else None,
             'dirty': bool(diff), 'diff_sha256': sha256_bytes(diff) if diff else None}
 

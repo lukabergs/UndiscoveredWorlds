@@ -63,10 +63,10 @@ def derived(module, identifier, name):
     return next((path for path in candidates if path.is_file()), None)
 
 
-def next_id(module):
-    """One more than every registered id and every run directory of the module."""
-    used = [entry['id'] for entry in registry(module)['runs']]
-    parent = ROOT / 'runs' / module
+def next_id(module, root=None):
+    """One more than every registered id and every run directory of the module (in root, default this checkout)."""
+    used = [entry['id'] for entry in registry(module, root)['runs']]
+    parent = (root or ROOT) / 'runs' / module
     used += [int(path.name) for path in parent.iterdir() if path.name.isdigit()] if parent.is_dir() else []
     return max(used, default=0) + 1
 

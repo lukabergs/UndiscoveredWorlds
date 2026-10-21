@@ -30,13 +30,16 @@ ROUTABLE = re.compile(r'runs/(reports/[^/]+|work/[^/]+|[a-z][a-z0-9_-]*)|out/(sc
 RESERVED = {'archive', 'registry', 'ledger', 'reports', 'work'}
 
 
-def storage_root():
-    """The storage root of runs/storage.json, or None when storage is not configured."""
-    if not CONFIG.is_file():
+def storage_root(config=None):
+    """The storage root of a runs/storage.json (default this checkout's CONFIG; naming.py passes the main
+    tree's), or None when storage is not configured."""
+    config = Path(CONFIG if config is None else config)
+    if not config.is_file():
         return None
-    root = Path(json.loads(CONFIG.read_text(encoding='utf-8-sig'))['storage_root']).resolve()
-    if root == ROOT or ROOT in root.parents:
-        raise ValueError('Storage must be outside the code workspace')
+    root = Path(json.loads(config.read_text(encoding='utf-8-sig'))['storage_root']).resolve()
+    for workspace in (ROOT, config.resolve().parents[1]):
+        if root == workspace or workspace in root.parents:
+            raise ValueError('Storage must be outside the code workspace')
     if not Path(root.anchor).exists():
         raise OSError(f'Storage drive is unavailable: {root}')
     return root

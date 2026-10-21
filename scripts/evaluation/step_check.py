@@ -11,13 +11,15 @@ bundle, then runs parameters.py --check, check_layout.py, check_structure.py, ch
 process_access.py --check on the stored report sets. --social adds a procedural world with society (<directory>/social).
 The directory is the main tree's out/scratch/step-check/<id>-<TAG> (scripts/uwtools/naming.py: a new id
 each time, recorded in runs/registry/scratch.json; TAG names the topic, without a version suffix). Build
-and run output goes to <directory>/*.log; <directory>/result.json records passed, grid, social and the
-reference. Exit status: 0 when every build, run and check passed and every comparison was identical.
+and run output goes to <directory>/*.log; <directory>/result.json records passed, compared (every bundle
+compared with the reference's), grid, social and the reference. Exit status: 0 when every build, run and check passed and every comparison was identical.
 
 REF is an id, an <id>-<tag> name, a label of the earlier layout (flat <label>-<recipe> bundles in
 out/scratch/step-check, out/scratch/sphere/step-check or out/scratch/phase5) or an absolute path.
-Without --reference the newest step check with the same grid and --social setting that passed is the
-reference; without one, nothing is compared.
+Without --reference the newest step check with the same grid and --social setting that passed and was
+compared is the reference; without one the check stops before building and names the earlier layout's
+labels (t8-cube4 / a15b-cube, with --grid latlon t8-ll4 / a15b-ll). An explicit reference whose result.json
+names another grid or --social setting stops it too.
 
 From a git worktree (.claude/worktrees/<name>, no refs/ or runs/) the worktree is built and
 checked as above, but the recipes run with the main tree as working directory (so refs/
@@ -70,16 +72,41 @@ def reference_bundle(reference, name):
 
 
 def default_reference(grid, social):
-    """The newest step check with the same grid and --social setting whose result.json says it passed, or None."""
+    """The newest step check with the same grid and --social setting whose result.json says it passed and
+    compared its bundles with a reference, or None."""
     root = naming.main_root()
     for entry in reversed(naming.records('step-check')):
         result_path = root / entry['run'] / 'result.json'
         if not result_path.is_file():
             continue
         result = json.loads(result_path.read_text(encoding='utf-8'))
-        if result.get('passed') and result.get('grid') == grid and bool(result.get('social')) == social:
+        if result.get('passed') and result.get('compared') and result.get('grid') == grid \
+                and bool(result.get('social')) == social:
             return root / entry['run']
     return None
+
+
+def reference_mismatch(reference, grid, social):
+    """Why an explicit reference does not fit (its result.json names another grid or --social setting), or None.
+    A step check of the earlier layout has no result.json and is taken as given."""
+    result_path = reference / 'result.json'
+    if not reference.is_dir() or not result_path.is_file():
+        return None
+    result = json.loads(result_path.read_text(encoding='utf-8'))
+    if result.get('grid') != grid or bool(result.get('social')) != social:
+        return (f'the reference {reference.name} ran with --grid {result.get("grid")}'
+                f'{" --social" if result.get("social") else ""}, this check with --grid {grid}{" --social" if social else ""}')
+    return None
+
+
+def no_reference(grid, social):
+    """The message when no new-layout step check can be the reference: name the earlier layout's newest."""
+    if grid == 'latlon':
+        labels = '--reference t8-ll4 (with the social world) or a15b-ll (the newest flat lat-lon check)'
+    else:
+        labels = '--reference t8-cube4 (with the social world) or a15b-cube (the newest flat cube check)'
+    return (f'no passing, compared step check with --grid {grid}{" --social" if social else ""} in '
+            f'runs/registry/scratch.json: pass {labels}, labels of out/scratch/sphere/step-check')
 
 
 def shown(path):
@@ -141,7 +168,8 @@ def main():
     parser.add_argument('tag', help='the topic of the check (naming.py tag rule); the directory is <id>-<tag>')
     parser.add_argument('--reference', metavar='REF',
                         help='an id, <id>-<tag>, a label of the earlier layout or an absolute path '
-                             '(default: the newest passing step check with the same --grid and --social)')
+                             '(default: the newest passing, compared step check with the same --grid and --social; '
+                             'without one the check stops and names the earlier layout\'s labels)')
     parser.add_argument('--desktop', action='store_true')
     parser.add_argument('--social', action='store_true')
     parser.add_argument('--grid', choices=('cube', 'latlon'), default='cube',
@@ -153,18 +181,25 @@ def main():
             default_reference(arguments.grid, arguments.social)
     except (ValueError, FileNotFoundError) as error:
         parser.error(str(error))
+    if reference is None:
+        parser.error(no_reference(arguments.grid, arguments.social))
+    mismatch = reference_mismatch(reference, arguments.grid, arguments.social)
+    if mismatch:
+        parser.error(mismatch)
     named = naming.new_directory('step-check', arguments.tag,
                                  label=f"{arguments.grid}{', social' if arguments.social else ''}")
     directory = named.path
     print(f'Step check {named.name}: {directory}')
-    print(f'Reference: {shown(reference) if reference is not None else "none (nothing compared)"}')
+    print(f'Reference: {shown(reference)}')
+    recipes = list(RECIPES) + (list(SOCIAL) if arguments.social else [])
     result = {'schema': 'uw-step-check/v1', 'id': named.id, 'tag': named.tag, 'name': named.name,
               'grid': arguments.grid, 'social': arguments.social, 'desktop': arguments.desktop,
-              'reference': shown(reference) if reference is not None else None,
-              'passed': False, 'runs': {}, 'comparisons': {}}
+              'reference': shown(reference), 'passed': False, 'compared': False, 'runs': {}, 'comparisons': {}}
     try:
         result['passed'] = checks(arguments, directory, reference, result)
     finally:
+        # compared: every recipe's bundle was compared with the reference's (a later default reference needs it).
+        result['compared'] = sorted(result['comparisons']) == sorted(recipes)
         (directory / 'result.json').write_text(json.dumps(result, indent=2) + '\n', encoding='utf-8')
     return 0 if result['passed'] else 1
 

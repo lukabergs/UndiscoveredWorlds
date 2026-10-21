@@ -331,14 +331,16 @@ def main():
         if args.register:
             # Every registered id gets its record, so it is never reused; only a run evaluated to the end is complete.
             complete = succeeded and document is not None and 'error' not in record
-            entry = {'id': identifier, 'status': 'complete' if complete else 'failed', 'run': relative(directory),
+            # The main tree's registry and runs/<module>/<id> (naming.py), also from a worktree.
+            main = naming.main_root()
+            entry = {'id': identifier, 'status': 'complete' if complete else 'failed',
+                     'run': directory.relative_to(main).as_posix(),
                      'date': record['started'], 'label': args.label or '', 'tag': tag}
             score = document['validation']['scores'].get('run', {}).get('score') if complete else None
             if score is not None:
                 entry['score'] = round(score, 4)
-            runs.append_record(args.module, entry)
-            print(f"Registered {args.module} run {identifier} ({entry['status']}) in "
-                  f"{runs.registry_path(args.module).relative_to(ROOT).as_posix()}")
+            runs.append_record(args.module, entry, root=main)
+            print(f"Registered {args.module} run {identifier} ({entry['status']}) in {runs.registry_path(args.module, main)}")
     print(f'Run directory: {directory}')
     if not succeeded:
         raise SystemExit(f"Tool failed; see {directory / record['runs'][-1]['log']}")

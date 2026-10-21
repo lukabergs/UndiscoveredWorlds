@@ -29,20 +29,30 @@ class NamingTests(unittest.TestCase):
         (self.root / "runs/registry").mkdir(parents=True)
         (self.root / "runs/registry/scratch.json").write_text(
             json.dumps({"schema": "scratch-run-registry/v1", "runs": []}, indent=2) + "\n", encoding="utf-8")
+        self.name_storage(self.store)
+        (self.root / "configs/evaluation").mkdir(parents=True)
+        (self.root / "configs/evaluation/climate.json").write_text("{}", encoding="utf-8")
+        # A worktree: this checkout's runs/ and storage.json are not the main tree's and are never used.
+        self.worktree = self.store / "worktree"
+        self.worktree.mkdir()
         for patcher in (patch.object(naming, "_main_root", self.root),
                         patch.object(naming, "_code_state", return_value=CODE),
-                        patch.object(storage, "storage_root", return_value=self.store),
-                        patch.object(runs, "ROOT", self.root)):
+                        patch.object(storage, "CONFIG", self.worktree / "runs/storage.json"),
+                        patch.object(runs, "ROOT", self.worktree)):
             patcher.start()
             self.addCleanup(patcher.stop)
+
+    def name_storage(self, store):
+        """The main tree's runs/storage.json names store."""
+        (self.root / "runs/storage.json").write_text(json.dumps({"storage_root": str(store)}), encoding="utf-8")
 
     def registry(self):
         return json.loads((self.root / "runs/registry/scratch.json").read_text(encoding="utf-8"))["runs"]
 
     def test_tag_rule(self):
-        for tag in ("base", "seed1-w128", "t8-acceptance", "parity", "a" * 40):
+        for tag in ("base", "seed1-w128", "t8-acceptance", "parity", "step-1-try", "a" * 40):
             self.assertEqual(naming.check_tag(tag), tag)
-        for tag in ("Base", "base-v10", "try-2", "1abc", "a_b", "a--b", "-a", "a-", "", "a" * 41, "base v"):
+        for tag in ("Base", "base-v10", "try-2", "step-1-try-2", "1abc", "a_b", "a--b", "-a", "a-", "", "a" * 41, "base v"):
             with self.assertRaises(ValueError, msg=tag):
                 naming.check_tag(tag)
 
@@ -71,9 +81,9 @@ class NamingTests(unittest.TestCase):
     def test_next_id_counts_numbered_folders_only(self):
         for folder in ("out/scratch/sandbox/7-old", "out/scratch/sandbox/v9", "out/evaluation/climate/9-x",
                        "out/evaluation/climate/20261005T141419Z-seed1-128", "out/scratch/geology/3-seed1",
-                       "out/evaluation/2-page"):
+                       "out/evaluation/2-page", "out/evaluation/notamodule/50-x"):
             (self.root / folder).mkdir(parents=True)
-        self.assertEqual(naming.new_directory("geology", "seed1").id, 10)
+        self.assertEqual(naming.new_directory("geology", "seed1").id, 10)  # only configs/evaluation modules count
 
     def test_invalid_requests_create_nothing(self):
         with self.assertRaises(ValueError):
@@ -86,12 +96,26 @@ class NamingTests(unittest.TestCase):
         self.assertEqual(self.registry(), [])
 
     def test_refuses_a_parent_outside_the_storage_root(self):
-        with tempfile.TemporaryDirectory() as other, \
-                patch.object(storage, "storage_root", return_value=Path(other)):
+        with tempfile.TemporaryDirectory() as other:
+            self.name_storage(Path(other))
             with self.assertRaises(SystemExit):
                 naming.new_directory("sandbox", "base")
+            with self.assertRaises(SystemExit):
+                naming.new_directory("run", "world", module="world")
         self.assertFalse((self.root / "out/scratch/sandbox").exists())
+        self.assertFalse((self.root / "runs/world").exists())
         self.assertEqual(self.registry(), [])
+
+    def test_storage_root_is_read_from_the_main_tree(self):
+        # A main tree without runs/storage.json; the worktree's copy names a valid store but is not read.
+        bare = self.store / "bare"
+        (bare / "runs/registry").mkdir(parents=True)
+        (self.worktree / "runs").mkdir()
+        (self.worktree / "runs/storage.json").write_text(json.dumps({"storage_root": str(self.store)}), encoding="utf-8")
+        with patch.object(naming, "_main_root", bare):
+            with self.assertRaises(SystemExit):
+                naming.new_directory("sandbox", "base")
+        self.assertFalse((bare / "out").exists())
 
     def test_find(self):
         named = naming.new_directory("sandbox", "base")
@@ -124,22 +148,19 @@ class NamingTests(unittest.TestCase):
         self.assertIsNone(naming.previous(first))
         self.assertEqual(naming.previous(third)["id"], first.id)
 
-    def test_registered_run_keeps_its_module_sequence(self):
+    def test_registered_run_uses_the_main_tree_from_a_worktree(self):
         (self.root / "runs/registry/world.json").write_text(json.dumps(
             {"schema": "world-run-registry/v1", "runs": [{"id": 1, "run": "runs/world/1", "tag": "world"},
                                                           {"id": 2, "run": "runs/world/2", "tag": "other"}]}),
             encoding="utf-8")
-
-        def run_directory(module, identifier):
-            path = self.root / "runs" / module / str(identifier)
-            path.mkdir(parents=True)
-            return path
-
-        with patch.object(storage, "run_directory", side_effect=run_directory):
-            named = naming.new_directory("run", "world", module="world")
-        self.assertEqual((named.id, named.name, named.path), (3, "3", self.root / "runs/world/3"))
+        (self.root / "runs/world/4").mkdir(parents=True)  # a directory without a record still takes its id
+        named = naming.new_directory("run", "world", module="world")
+        self.assertEqual((named.id, named.name, named.path), (5, "5", self.root / "runs/world/5"))
+        self.assertTrue(named.path.is_dir())
+        self.assertEqual(list(self.worktree.iterdir()), [])  # nothing in the worktree
         self.assertEqual(self.registry(), [])
         self.assertEqual(naming.previous(named)["id"], 1)
+        self.assertEqual(naming.find("run", "2", module="world"), self.root / "runs/world/2")
 
     def test_lock_file_stays_and_a_held_lock_times_out(self):
         lock = self.root / naming.LOCK
