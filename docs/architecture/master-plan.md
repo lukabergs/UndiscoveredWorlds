@@ -336,7 +336,7 @@ One row per step as it closes. Duration is measured from the previous step's com
 |---|---|---|---|
 | 1.1 | done: base-v10 adopted by the user (2026-10-20) | this plan's commit | |
 | 1.6 | done: 14 items to the trash (`D:/dev/undiscovered-worlds/trash/20261020T190214Z-0`); the 30 T8 branches dropped after a verified bundle (`worktree-archive/branches-20261020-210153-0.bundle`) | (docs only) | |
-| 2.5 (part) | the backup folder is already gone (deleted by the user); what is left: `storage.py` marking its receipt complete | | |
+| 2.5 | done: the backup was already gone (deleted by the user); `storage.py finish` now handles an absent backup (junction verified, receipt marked complete, nothing removed); `receipts/out__scratch.json` complete | (this commit) | 15 h 47 min from d3c2d61 (session idle until 18:41; orch 3 min) |
 | protection (new) | `protect.py lock` applied 2026-10-20 to refs/ (C and D sides), D:/dev/bak, worktree-archive and the trash; every place locked and the permission reaches the existing files (`protect.py status`). The refs writers were converted to copy-based writes (`72a6dd8`, `protected_io.staged`, staging on D) and only compiled: the first reference-data step that runs them (10.2, 11.1) checks them | d333d3d, 72a6dd8, 43debdf | |
 | 1.2 | done: run 79 (cube N 64, baseline v6, 400 Myr) registered and the tectonics baseline; `experiment.py` read the cube recipe wrong (KeyError since baseline v5); tectonics-0021 | 5fea750 | worker 26 min (incl. run 79); 72 min from 78272f0 |
 | 1.3 | done: done-when already met (export endorheic 0.065, native 0.080); mouths equal; IoU gap two thirds the cube world's (11.6); acceptance page refreshed; world-0088 | efbeb7f | worker 7 min + runs; 57 min from 78272f0 |

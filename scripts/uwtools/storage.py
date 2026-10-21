@@ -260,7 +260,19 @@ def finish(path, accept_newer=False):
     A swap whose clean-up stopped (an open handle, 2026-10-17) leaves the junction in place and the
     old tree beside it. Refuses unless every file is unchanged since the receipt's copy and the storage
     copy matches its digest; a storage copy rewritten since by a later run passes only with accept_newer.
+    A backup already gone (removed by hand) only marks the receipt complete, once the junction is verified.
     """
+    path = Path(os.path.abspath(path))
+    receipt_path = storage_root() / 'receipts' / (relative_path(path).replace('/', '__') + '.json')
+    if not path.with_name(path.name + '.storage-migration-backup').exists():
+        receipt = json.loads(receipt_path.read_text(encoding='utf-8'))
+        if junction_target(path) != Path(receipt['destination']).resolve():
+            raise OSError(f'{path} is not the junction to {receipt["destination"]}')
+        receipt['status'] = 'complete'
+        receipt['completed_utc'] = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')
+        receipt['backup_check'] = 'backup already absent; nothing removed'
+        receipt_path.write_text(json.dumps(receipt, indent=2) + '\n', encoding='utf-8')
+        return receipt['backup_check']
     backup, receipt, counts, examples = check_backup(path)
     blocking = [kind for kind in ('not_in_receipt', 'changed_since_copy', 'missing_on_storage', 'links') if counts[kind]]
     if not accept_newer and counts['newer_on_storage']:
@@ -273,7 +285,6 @@ def finish(path, accept_newer=False):
     receipt['status'] = 'complete'
     receipt['completed_utc'] = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')
     receipt['backup_check'] = counts
-    receipt_path = storage_root() / 'receipts' / (relative_path(path).replace('/', '__') + '.json')
     receipt_path.write_text(json.dumps(receipt, indent=2) + '\n', encoding='utf-8')
     return counts
 
