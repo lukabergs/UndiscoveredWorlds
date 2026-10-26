@@ -89,6 +89,10 @@ fill noise): the trap's fill slopes up from the lake's exits at that gradient, s
 (the ice cut straight grooves along a flat's routing lines). relief.fill_depressions: before the physics, every
 closed depression not joined to the sea is filled from its spill, sloped at relief.fill_gradient with
 relief.fill_noise (amplitude_m on an fBm) on it (sloped_fill): the procedural pits as sediment-filled basins.
+relief.fill_metric and physics.lake_fill_metric (--lake-fill-metric; master plan 5.3): "chamfer" (default) sums
+the rise along 8-neighbour paths (octagonal cones); "euclid" takes it from the true distance to the spill.
+physics.slope_limit_neighbours (--slope-limit-neighbours): 8 (default) or 16, the threshold-slope limiter's
+moves (16: the eight knight moves too, so its cones' distance error falls from 8.2 % to about 2.7 %).
 The physics' input surface is saved as <domain>-elevation-procedural.npy.
 filter.fill_pits (roadmap T1.6, default off): the closed pits the post-physics filter digs (at the foot of slopes,
 where its strength falls with the slope: slope_fade) are filled as the relief's (sloped_fill) from the sea and the physics'
@@ -685,7 +689,8 @@ def nested_start(domain, world, config, parent, seed):
 
     # The new pits filled (sloped, as relief.fill_depressions), the parent's lakes kept.
     started = time.perf_counter()
-    filled = sloped_fill(domain, surface, sea, relief['fill_gradient'], fields['fill_noise'])
+    filled = sloped_fill(domain, surface, sea, relief['fill_gradient'], fields['fill_noise'],
+                         relief.get('fill_metric', 'chamfer'))
     labels, count = ndimage.label(filled - surface > 1e-3, structure=np.ones((3, 3)))
     under_lake = np.isfinite(nesting.nearest(parent['lakes'], f, pr, pc, prow, pcol))
     # The parent's own closed depressions (its Priority-Flood raises them by more than 1 m; the box's edge drains)
@@ -797,7 +802,8 @@ def refill_pits(domain, surface, sea, keep, pinned, pinned_values, config, fill_
     """The closed pits a projection left, filled with the sloped fill (relief.fill_gradient and its noise) from the
     sea, except the depressions overlapping `keep` (the parent's lakes, the physics' lakes); the pinned ring back at
     its values. Returns the surface and counts."""
-    filled = sloped_fill(domain, surface, sea, config['relief']['fill_gradient'], fill_noise)
+    filled = sloped_fill(domain, surface, sea, config['relief']['fill_gradient'], fill_noise,
+                         config['relief'].get('fill_metric', 'chamfer'))
     labels, count = ndimage.label(filled - surface > 1e-3, structure=np.ones((3, 3)))
     kept = np.unique(labels[keep & (labels > 0)])
     out = np.where(np.isin(labels, kept[kept > 0]), surface, filled)
@@ -1361,7 +1367,8 @@ def procedural(domain, world, config, seed):
     if relief_spec.get('fill_depressions', False):
         started = time.perf_counter()
         unfilled = filtered
-        filtered = sloped_fill(domain, filtered, sea, relief_spec['fill_gradient'], fill_noise)
+        filtered = sloped_fill(domain, filtered, sea, relief_spec['fill_gradient'], fill_noise,
+                               relief_spec.get('fill_metric', 'chamfer'))
         fill_stats = fill_statistics(domain, unfilled, filtered, sea)
         timings['fill'] = time.perf_counter() - started
     stages['fill'] = filtered
@@ -2188,12 +2195,16 @@ def run_physics(domain, fields, config, directory):
         command += ['--north', str(domain.north_deg), '--pixel-deg', str(domain.pixel_deg)]
     if spec.get('path_routing', False):  # path-corrected receivers (D8-LTD); --random-routing 0 above
         command += ['--path-routing', '1', '--path-damping', str(spec.get('path_damping', 1.0))]
+    if int(spec.get('slope_limit_neighbours', 8)) != 8:  # the landslide limiter's knight moves too (master plan 5.3)
+        command += ['--slope-limit-neighbours', str(int(spec['slope_limit_neighbours']))]
     if spec.get('lake_trap', False):  # lakes keep the sediment reaching them (filled up to their spill)
         command += ['--lake-trap', '1']
         if spec.get('lake_trap_ice_share') is not None:  # lakes under ice stay open (fjords; T1.7)
             command += ['--lake-trap-ice-share', str(spec['lake_trap_ice_share'])]
         if spec.get('lake_fill_gradient', 0.0) > 0.0:  # the fill sloped up from the spill, with the fill noise
             command += ['--lake-fill-gradient', str(spec['lake_fill_gradient'])]
+            if spec.get('lake_fill_metric', 'chamfer') != 'chamfer':  # the rise from the true distance to the exit
+                command += ['--lake-fill-metric', str(spec['lake_fill_metric'])]
             if spec.get('lake_fill_noise', False) and fields.get('fill_noise') is not None:
                 files['fill_noise'] = stem.with_name(f'{domain.name}-fill-noise.f32')
                 np.asarray(fields['fill_noise'], dtype='<f4').tofile(files['fill_noise'])
@@ -2285,7 +2296,7 @@ def priority_flood(elevation, sea, wrap):
     return np.where(sea, elevation, filled)
 
 
-def sloped_fill(domain, elevation, sea, gradient, noise=None):
+def sloped_fill(domain, elevation, sea, gradient, noise=None, metric='chamfer'):
     """The procedural surface with its closed depressions filled as sediment-filled basins (relief.fill_depressions,
     roadmap T1 v18): a Priority-Flood from the sea (as priority_flood) in which a cell lower than the cell that
     reaches it is raised to that cell's level plus max(0.1 g d, g d + n_j - n_i) (g the gradient, d the centre
@@ -2294,9 +2305,15 @@ def sloped_fill(domain, elevation, sea, gradient, noise=None):
     of the flood's straight lines; every raised cell has a lower neighbour (its parent), so no closed depression
     is left. The rising fill also buries low ground just above the flat spill level (the fill laps onto the
     basin's margins). Returns the filled surface (the sea and every cell that was not raised unchanged). On a cube
-    over the slots (CubeGrid.sloped_fill, d the great-circle distance)."""
+    over the slots (CubeGrid.sloped_fill, d the great-circle distance). metric (relief.fill_metric): 'chamfer'
+    (the default) sums g d along the 8-neighbour path (octagonal cones, up to 8.2 % long); 'euclid' replaces the
+    step's g d by g (D_j - D_i), D the great-circle distance between a cell's centre and the centre of the cell
+    that started its chain (the spill: the last cell not raised, inherited from the cell reaching it), the 0.1 g d
+    floor and the noise unchanged (master plan 5.3)."""
+    if metric not in ('chamfer', 'euclid'):
+        raise ValueError(f'sloped_fill: metric {metric!r} is not chamfer or euclid')
     if domain.kind == 'cube':
-        return domain.grid.sloped_fill(elevation, sea, gradient, noise)
+        return domain.grid.sloped_fill(elevation, sea, gradient, noise, metric)
     rows, columns = elevation.shape
     wrap = domain.whole
     pad = columns // 8 if wrap else 0
@@ -2321,6 +2338,24 @@ def sloped_fill(domain, elevation, sea, gradient, noise=None):
     closed = done.ravel().tolist()
     heap = [(height[i], i) for i in np.flatnonzero(shore.ravel()).tolist()]
     heapq.heapify(heap)
+    euclid = metric == 'euclid'
+    if euclid:
+        # The padded cells' unit vectors: rows at the domain's latitudes (the frame rows repeat the edge rows: they
+        # are closed), columns at the domain's spacing (wrapped copies at their own longitudes).
+        latitude = np.radians(np.pad(domain.latitude_deg, (1, 1), mode='edge'))
+        step_deg = 360.0 / (domain.world_columns * domain.k)
+        longitude = np.radians(domain.longitude_deg[0] + (np.arange(width) - pad - 1) * step_deg)
+        cl = np.cos(latitude)[:, None]
+        centre = np.stack([cl * np.cos(longitude)[None, :], cl * np.sin(longitude)[None, :],
+                           np.sin(latitude)[:, None] * np.ones((1, width))], axis=-1).reshape(-1, 3).tolist()
+        origin = list(range(len(height)))
+        reached = [0.0] * len(height)  # g D of each cell to its origin (0 on a cell not raised)
+        scale = 2.0 * domain.radius_km * 1000.0 * gradient
+
+        def reach(j, o):  # g D (m): D the great-circle distance between the centres, 2 R asin(chord / 2)
+            p, q = centre[j], centre[o]
+            chord = math.sqrt((p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2 + (p[2] - q[2]) ** 2)
+            return scale * math.asin(min(chord / 2.0, 1.0))
     while heap:
         level, cell = heapq.heappop(heap)
         run = rises[cell // width]
@@ -2330,8 +2365,14 @@ def sloped_fill(domain, elevation, sea, gradient, noise=None):
                 continue
             closed[j] = True
             if height[j] <= level:
-                step = run[k] + lift[j] - lift[cell]
-                filled[j] = level + max(0.1 * run[k], step)
+                if euclid:
+                    o = origin[cell]
+                    far = reach(j, o)
+                    filled[j] = level + max(0.1 * run[k], far - reached[cell] + lift[j] - lift[cell])
+                    origin[j], reached[j] = o, far
+                else:
+                    step = run[k] + lift[j] - lift[cell]
+                    filled[j] = level + max(0.1 * run[k], step)
                 heapq.heappush(heap, (filled[j], j))
             else:
                 heapq.heappush(heap, (height[j], j))
@@ -2920,7 +2961,8 @@ def finish_physics(domain, fields, config, run_config, directory, band, nest_inf
             # the filter.
             water = sea | lake
             outlets = elevation if levels is None else np.where(lake, levels, elevation)
-            filled = sloped_fill(domain, outlets, water, config['relief']['fill_gradient'], fields['fill_noise'])
+            filled = sloped_fill(domain, outlets, water, config['relief']['fill_gradient'], fields['fill_noise'],
+                                 config['relief'].get('fill_metric', 'chamfer'))
             raised = crop(domain, np.where(water, 0.0, filled - outlets))
             timing['filter_pits_land_pct'] = round(100.0 * float((raised > 1.0).sum()) /
                                                    max(float((~crop(domain, water)).sum()), 1.0), 2)

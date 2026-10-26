@@ -86,14 +86,56 @@ landscape::SphereMetric windowmetric(int columns, int rows, double north_deg, do
     return metric;
 }
 
+// The unit vector of a cell's centre: the grid's, or on a gridless window of rows its row's latitude and its column
+// at the row's spacing (no torus: callers refuse wrapsrows).
+mesh::Vec3 cellcentre(const landscape::SphereMetric& metric, std::size_t cell)
+{
+    if (metric.grid)
+        return metric.grid->centre(static_cast<mesh::CellId>(cell));
+    // A gridless window of rows: the row's latitude and the column at the row's spacing.
+    const std::size_t row = static_cast<std::size_t>(metric.row(cell));
+    const double latitude = metric.rowlatitude_rad[row];
+    const double step = metric.rowdx_m[row] / (metric.radius_m * std::cos(latitude));
+    return mesh::unitvector(latitude, metric.column(cell) * step);
+}
+
+// The great-circle distance (m) between two cells' centres.
+double centredistance_m(const landscape::SphereMetric& metric, std::size_t a, std::size_t b)
+{
+    const mesh::Vec3 p = cellcentre(metric, a), q = cellcentre(metric, b);
+    return metric.radius_m * std::atan2(mesh::length(mesh::cross(p, q)), mesh::dot(p, q));
+}
+
+// A knight move (the 16-neighbour stencil's other eight): one step in the cardinal slot `cardinal`, then the slot
+// turned by `turn` (-1 or 1) from straight on in that cell's frame (straight on: the opposite of the reverse slot, so
+// the move stays a knight move across a cube face edge). The cell itself where either step has no neighbour.
+std::size_t knightneighbour(const landscape::SphereMetric& metric, std::size_t cell, int cardinal, int turn)
+{
+    const std::size_t first = metric.neighbour(cell, cardinal);
+    const int back = first == cell ? 0 : metric.reverse(cell, cardinal);
+    if (back == 0)
+        return cell;
+    const int ahead = (back + 3) % landscape::directioncount + 1;
+    const int slot = (ahead - 1 + turn + landscape::directioncount) % landscape::directioncount + 1;
+    const std::size_t second = metric.neighbour(first, slot);
+    return second == first ? cell : second;
+}
+
 // Threshold hillslopes: no land cell stands more than `slope` x distance above any neighbour, the sea
 // counting at the sea level (0 m). A Dijkstra pass from the lowest cells up: each cell, once final, caps its
 // land neighbours at its height plus slope x distance, so valley walls retreat as the rivers cut instead of
 // leaving one-cell slots. Returns the volume removed (km^3); it leaves the system as landslide debris.
 // `cut_m`, when given, is assigned each cell's lowering (m, 0 where none); the result does not depend on it.
+// `neighbours` 16 (--slope-limit-neighbours 16; master plan 5.3): each final cell also caps the cells a knight move
+// away at slope x the great-circle distance between the centres, so the threshold cones' distance error falls from
+// the 8-neighbour paths' 8.2 % to about 2.7 % (the octagonal slopes' aspect bias). 8: as before.
 double limitslopes(const landscape::SphereMetric& metric, const std::vector<uint8_t>& sea, double slope,
-                   std::vector<float>& elevation, std::vector<float>* cut_m = nullptr)
+                   std::vector<float>& elevation, std::vector<float>* cut_m = nullptr, int neighbours = 8)
 {
+    if (neighbours != 8 && neighbours != 16)
+        throw std::invalid_argument("--slope-limit-neighbours must be 8 or 16");
+    if (neighbours == 16 && metric.wrapsrows)
+        throw std::invalid_argument("--slope-limit-neighbours 16 needs a sphere, not a torus");
     if (cut_m)
         cut_m->assign(elevation.size(), 0.0f);
     using entry = std::pair<float, std::size_t>;
@@ -126,6 +168,21 @@ double limitslopes(const landscape::SphereMetric& metric, const std::vector<uint
                 queue.emplace(cap, next);
             }
         }
+        if (neighbours == 16)
+            for (int cardinal = 1; cardinal <= landscape::directioncount; cardinal += 2)
+                for (int turn = -1; turn <= 1; turn += 2)
+                {
+                    const std::size_t next = knightneighbour(metric, cell, cardinal, turn);
+                    if (next == cell || done[next] || sea[next])
+                        continue;
+                    const float cap = static_cast<float>(value + slope * centredistance_m(metric, cell, next));
+                    if (cap < height[next])
+                    {
+                        removed += (height[next] - cap) * metric.area_m2(next) * 1e-9;
+                        height[next] = cap;
+                        queue.emplace(cap, next);
+                    }
+                }
     }
     // The cones of successive channel cells leave a rib per cell down a steep wall (the bed drops in steps):
     // the cut depth is averaged over 3 x 3 neighbourhoods twice, on the cells the limiter cut only, so the
@@ -378,17 +435,27 @@ void releaselakes(landscape::FlowGraph& graph, const LakeTrap& trap)
 // its spill level plus an offset that rises from its exits: a Dijkstra pass within each lake from its exits, each move
 // adding max(0.1 G d, G d + n_next - n_cell) (d the centre distance, n the noise in m, as the sandbox's sloped_fill
 // of the procedural pits), so every filled cell has a lower neighbour towards an exit. Cells the pass does not reach
-// keep offset 0.
+// keep offset 0. `euclidean` (--lake-fill-metric euclid; master plan 5.3): a move's G d is replaced by
+// G (D_next - D_cell), D the great-circle distance from a cell's centre to the exit its path started from (carried
+// with the offset), the 0.1 G d floor and the noise unchanged: round fills instead of the 8-neighbour paths' octagons
+// (up to 8.2 % long).
 std::vector<double> filloffsets(const landscape::SphereMetric& metric, const std::vector<int32_t>& id,
-                                const std::vector<std::size_t>& exits, double gradient, const std::vector<float>& noise)
+                                const std::vector<std::size_t>& exits, double gradient, const std::vector<float>& noise,
+                                bool euclidean = false)
 {
+    if (euclidean && metric.wrapsrows)
+        throw std::invalid_argument("--lake-fill-metric euclid needs a sphere, not a torus");
     std::vector<double> offset(id.size(), std::numeric_limits<double>::infinity());
+    std::vector<std::size_t> source(euclidean ? id.size() : 0);
+    std::vector<double> reached(euclidean ? id.size() : 0, 0.0);  // G D to the source exit
     using Entry = std::pair<double, std::size_t>;
     std::priority_queue<Entry, std::vector<Entry>, std::greater<Entry>> queue;
     for (std::size_t exit : exits)
     {
         offset[exit] = 0.0;
         queue.emplace(0.0, exit);
+        if (euclidean)
+            source[exit] = exit;
     }
     while (!queue.empty())
     {
@@ -402,6 +469,22 @@ std::vector<double> filloffsets(const landscape::SphereMetric& metric, const std
             if (next == cell || id[next] != id[cell])
                 continue;
             const double run = gradient * metric.distance_m(cell, direction);
+            if (euclidean)
+            {
+                const std::size_t exit = source[cell];
+                const double far = gradient * centredistance_m(metric, next, exit);
+                const double rise = far - reached[cell]
+                    + (noise.empty() ? 0.0 : static_cast<double>(noise[next]) - static_cast<double>(noise[cell]));
+                const double candidate = value + std::max(0.1 * run, rise);
+                if (candidate < offset[next])
+                {
+                    offset[next] = candidate;
+                    source[next] = exit;
+                    reached[next] = far;
+                    queue.emplace(candidate, next);
+                }
+                continue;
+            }
             const double rise = noise.empty() ? run
                 : run + static_cast<double>(noise[next]) - static_cast<double>(noise[cell]);
             const double candidate = value + std::max(0.1 * run, rise);
@@ -423,13 +506,13 @@ std::vector<double> filloffsets(const landscape::SphereMetric& metric, const std
 void filllakes(const landscape::SphereMetric& metric, const landscape::FlowGraph& graph,
                const landscape::Depressions& depressions, const std::vector<float>& thickness, LakeTrap& trap,
                std::vector<float>& elevation, std::vector<float>& deposition, double gradient,
-               const std::vector<float>& noise)
+               const std::vector<float>& noise, bool euclidean)
 {
     const std::vector<int32_t>& id = depressions.depressionid;
     const std::size_t lakes = depressions.depressions.size();
     if (trap.exits.empty())
         return;
-    const std::vector<double> offset = gradient > 0.0 ? filloffsets(metric, id, trap.exits, gradient, noise)
+    const std::vector<double> offset = gradient > 0.0 ? filloffsets(metric, id, trap.exits, gradient, noise, euclidean)
                                                        : std::vector<double>();
     // Per lake: its cells, its main spill (the spill of its exit with the most water) and its place in the order.
     std::vector<std::vector<std::size_t>> cells(lakes + 1);
@@ -1071,12 +1154,14 @@ void usage()
                  "  [--erodibility FILE] (relative K per cell, default 1) [--uplift FILE] (m/Myr per cell, default 0)\n"
                  "  [--runoff M_PER_YR 0.3 | --runoff-file FILE] [--duration MYR 10] [--step MYR 0.5] [--k 750] [--m 0.5]\n"
                  "  [--deposition G 1] [--diffusivity KM2_PER_MYR 1] [--delta-top M 0] [--threshold-slope S 0: off]\n"
+                 "  [--slope-limit-neighbours 8|16 8] (the threshold-slope limiter's moves; 16 adds the knight moves)\n"
                  "  [--ela FILE] (m per cell: glaciers) [--glacial-ratio 2] [--ice-full-range M 500] [--ice-accumulation 1]\n"
                  "  [--out-ice FILE] [--pinned FILE] (cells held at their starting height) [--sea-cap M 0]\n"
                  "  [--sea-history \"t:level,...\"] (Myr, m: the sea level in time, piecewise linear; default 0)\n"
                  "  [--no-infill-after MYR] (from then on no deposition inside closed depressions of the bed)\n"
                  "  [--lake-trap 0|1] (lakes keep the sediment reaching them, filled up to their spill; not in no-infill steps)\n"
                  "  [--lake-fill-gradient G 0] [--lake-fill-noise FILE] (m per cell) (the trap's fill sloped up from the exits)\n"
+                 "  [--lake-fill-metric chamfer|euclid chamfer] (the fill's rise along 8-neighbour paths or from the true distance)\n"
                  "  [--lake-trap-ice-share S 2] (a lake with that share of its cells under ice does not trap; above 1: all trap)\n"
                  "  [--ice-history \"t:ela_offset_m:ratio,...\"] (Myr, m added to the ELA, glacial ratio: piecewise constant)\n"
                  "  [--step-after \"T:STEP,...\"] (from T Myr on, steps of STEP Myr)\n"
@@ -1333,10 +1418,17 @@ int main(int argc, char** argv)
         const double lakefillgradient = number("--lake-fill-gradient", 0.0);
         const std::vector<float> lakefillnoise = options.count("--lake-fill-noise")
             ? readraster(text("--lake-fill-noise", ""), count) : std::vector<float>();
+        const std::string lakefillmetric = text("--lake-fill-metric", "chamfer");
+        if (lakefillmetric != "chamfer" && lakefillmetric != "euclid")
+            throw std::invalid_argument("--lake-fill-metric must be chamfer or euclid, not " + lakefillmetric);
+        const bool lakefilleuclid = lakefillmetric == "euclid";
         double laketrapped = 0.0, lakeoverflow = 0.0;
         const std::vector<float> noerosion(laketrap ? count : 0, 0.0f), nouplift(laketrap ? count : 0, 0.0f);
         std::vector<float> erosionafter(laketrap ? count : 0), depositionafter(laketrap ? count : 0);
         const double thresholdslope = number("--threshold-slope", 0.0);
+        const int slopelimitneighbours = static_cast<int>(number("--slope-limit-neighbours", 8.0));
+        if (slopelimitneighbours != 8 && slopelimitneighbours != 16)
+            throw std::invalid_argument("--slope-limit-neighbours must be 8 or 16");
         const float seacap = static_cast<float>(number("--sea-cap", 0.0));
         double eroded = 0.0, deposited = 0.0, marine = 0.0, landslides = 0.0;
         // A final glacial pulse (--no-infill-after, roadmap T1.3): from that time on, the land cells inside a closed
@@ -1490,7 +1582,7 @@ int main(int argc, char** argv)
                     glacial ? &ice : nullptr);
                 releaselakes(graph, trap);
                 filllakes(metric, graph, routeddepressions, thickness, trap, elevation, deposition, lakefillgradient,
-                          lakefillnoise);
+                          lakefillnoise, lakefilleuclid);
                 const landscape::StreamPowerBudget slopes = landscape::stepstreampower(
                     metric, graph, noerosion, nouplift, parameters, elevation, erosionafter, depositionafter);
                 for (std::size_t i = 0; i < count; i++)
@@ -1521,7 +1613,8 @@ int main(int argc, char** argv)
                     infillremoved += static_cast<double>(deposition[i]) * metric.area_m2(i) * 1e-9;
                 }
             if (thresholdslope > 0.0)
-                landslides += limitslopes(metric, sea, thresholdslope, elevation, fields ? &cut : nullptr);
+                landslides += limitslopes(metric, sea, thresholdslope, elevation, fields ? &cut : nullptr,
+                                          slopelimitneighbours);
             // No sea cell is filled above --sea-cap (m, default the sea level): with the delta top lifted (its
             // fill-and-spill search went quadratic), marine deposits otherwise stacked whole loads on one cell,
             // towers up to 12 km in glacially cut troughs the sea had flooded (F-troughs, G-coast at k 256).

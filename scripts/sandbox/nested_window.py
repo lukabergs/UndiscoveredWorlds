@@ -307,7 +307,8 @@ def main():
     fill_stats = {}
     if nest.get('fill_depressions', True):
         started = time.perf_counter()
-        filled = ts.sloped_fill(child, surface, sea, config['relief']['fill_gradient'], fields['fill_noise'])
+        filled = ts.sloped_fill(child, surface, sea, config['relief']['fill_gradient'], fields['fill_noise'],
+                                config['relief'].get('fill_metric', 'chamfer'))
         labels, count = ndimage.label(filled - surface > 1e-3, structure=EIGHT)
         under_lake = np.isfinite(nearest(parent_lakes, f, pr, pc, prow, pcol))
         kept = np.unique(labels[under_lake & (labels > 0)])

@@ -96,6 +96,7 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 - `erosion-0107`: measuring cube rivers on the lat-lon export
 - `erosion-0108`: a cube-native nest through terrain_sandbox window (it builds the whole base table: makecubegrid at N k = 16384 is not feasible)
 - `erosion-0109`: ordering the path pass by height and index alone
+- `erosion-0110`: the 16-neighbour slope limiter as a fix for land-aspect A8
 - `tectonics-0010`: Bilinear semi-Lagrangian sampling of the elevation for the uplift rate (spurious uplift at moving summits).
 - `tectonics-0011`: carrying the strain into new crust at divergent boundaries: young ocean floor showed 8 km of shortening
 - `tectonics-0012`: measuring continental area with crust_class (plate rasters): use the columns or continental_crust thickness
@@ -260,6 +261,7 @@ Lessons:
 | `erosion-0107` | 2026-10-21 | baseline complete | keep | master plan 5.1: river grid-bias measures on base-v10 before any routing code |
 | `erosion-0108` | 2026-10-21 | tool works on cube bases | keep | master plan 4.2: nested_window.py on cube bases |
 | `erosion-0109` | 2026-10-21 | kernel ready, off | keep | master plan 5.2: path-corrected single receiver (D8-LTD) in flow_graph, off by default |
+| `erosion-0110` | 2026-10-26 | fills ready, off; slope limit no effect on aspect | keep | master plan 5.3: Euclidean fills in the sandbox (Python sloped_fill, exe filloffsets) and the slope limiter |
 
 Lessons:
 
@@ -442,6 +444,9 @@ Lessons:
 - `erosion-0108`: A cube window's saved arrays are its lat-lon export at k pixels per base pixel, so a lat-lon tool can read them as a parent grid without exe changes.
 - `erosion-0109`: A pass that walks a flow graph by descending filled height must order equal-height chains too: Priority-Flood raises flooded cells to exactly their spill's height whatever minimumdepth is, so lake and flat donors share their receiver's height.
 - `erosion-0109`: A plan decision that judges a sandbox feature on a pipeline measure (5.1b) needs the pipeline key in the same step.
+- `erosion-0110`: 26196f1's subject says 'and slope limit' although that commit left limitslopes alone; c379e46 added it.
+- `erosion-0110`: The legacy fill's max(0.1 g d, g d + dn) clips downward noise steps (a ratchet): measured in 5.4.
+- `erosion-0110`: The land-aspect bias is already in the procedural input (A8 0.0285): its source is 5.6.
 
 ## tectonics
 

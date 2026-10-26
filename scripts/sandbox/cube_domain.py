@@ -365,9 +365,16 @@ class CubeGrid:
                     heapq.heappush(heap, (height[j], j))
         return np.where(sea, elevation, np.asarray(filled))
 
-    def sloped_fill(self, elevation, sea, gradient, noise=None):
+    def sloped_fill(self, elevation, sea, gradient, noise=None, metric='chamfer'):
         """The raster code's sloped_fill on the slots: a cell lower than the cell reaching it is raised to that level
-        plus max(0.1 g d, g d + n_j - n_i) (d the great-circle distance, m) and goes back into the heap."""
+        plus max(0.1 g d, g d + n_j - n_i) (d the great-circle distance, m) and goes back into the heap. metric
+        'chamfer' (the default) sums g d along the slot path; 'euclid' replaces the step's g d by g (D_j - D_i), D
+        the great-circle distance between a cell's centre and the centre of the cell that started its chain (the
+        spill: the last cell not raised, inherited from the cell reaching it), the 0.1 g d floor and the noise
+        unchanged: round cones instead of octagonal ones, continuous across face edges."""
+        if metric not in ('chamfer', 'euclid'):
+            raise ValueError(f'sloped_fill: metric {metric!r} is not chamfer or euclid')
+        euclid = metric == 'euclid'
         elevation = np.asarray(elevation, dtype=np.float64)
         sea = np.asarray(sea, dtype=bool)
         neighbours = self.neighbours.tolist()
@@ -379,6 +386,16 @@ class CubeGrid:
         shore = sea & ~self.minimum(sea, 1)
         heap = [(height[i], i) for i in np.flatnonzero(shore).tolist()]
         heapq.heapify(heap)
+        if euclid:
+            centre = self.centre.tolist()
+            origin = list(range(self.n))
+            reached = [0.0] * self.n  # g D of each cell to its origin (0 on a cell not raised)
+            scale = 2.0 * self.radius_km * 1000.0 * gradient
+
+            def reach(j, o):  # g D (m): D the great-circle distance between the centres, 2 R asin(chord / 2)
+                p, q = centre[j], centre[o]
+                chord = math.sqrt((p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2 + (p[2] - q[2]) ** 2)
+                return scale * math.asin(min(chord / 2.0, 1.0))
         while heap:
             level, cell = heapq.heappop(heap)
             run = rises[cell]
@@ -387,7 +404,13 @@ class CubeGrid:
                     continue
                 closed[j] = True
                 if height[j] <= level:
-                    filled[j] = level + max(0.1 * run[k], run[k] + lift[j] - lift[cell])
+                    if euclid:
+                        o = origin[cell]
+                        far = reach(j, o)
+                        filled[j] = level + max(0.1 * run[k], far - reached[cell] + lift[j] - lift[cell])
+                        origin[j], reached[j] = o, far
+                    else:
+                        filled[j] = level + max(0.1 * run[k], run[k] + lift[j] - lift[cell])
                     heapq.heappush(heap, (filled[j], j))
                 else:
                     heapq.heappush(heap, (height[j], j))

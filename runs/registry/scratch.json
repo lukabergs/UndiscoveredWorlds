@@ -208,6 +208,71 @@
         "revision": "18d0233843d71957822d8b51909fd774abc14414",
         "dirty": true
       }
+    },
+    {
+      "id": 17,
+      "kind": "page",
+      "tag": "compare-t25-sea-grid",
+      "run": "out/evaluation/17-compare-t25-sea-grid",
+      "date": "2026-10-26T13:17:07+00:00",
+      "label": "",
+      "tool": "compare_runs",
+      "code": {
+        "revision": "18d0233843d71957822d8b51909fd774abc14414",
+        "dirty": true
+      }
+    },
+    {
+      "id": 18,
+      "kind": "sandbox",
+      "tag": "w2-merged-defaults",
+      "run": "out/scratch/sandbox/18-w2-merged-defaults",
+      "date": "2026-10-26T13:27:56+00:00",
+      "label": "",
+      "tool": "terrain_sandbox",
+      "code": {
+        "revision": "ee79c184f82e5068451c75cdc6c8d99282ddbbd7",
+        "dirty": true
+      }
+    },
+    {
+      "id": 19,
+      "kind": "sandbox",
+      "tag": "t25-sea-identity",
+      "run": "out/scratch/sandbox/19-t25-sea-identity",
+      "date": "2026-10-26T13:28:04+00:00",
+      "label": "",
+      "tool": "terrain_sandbox",
+      "code": {
+        "revision": "db86ca3b289e695c44fb9d0417815d17a63d633e",
+        "dirty": false
+      }
+    },
+    {
+      "id": 20,
+      "kind": "sandbox",
+      "tag": "t25-sea-m2",
+      "run": "out/scratch/sandbox/20-t25-sea-m2",
+      "date": "2026-10-26T13:28:07+00:00",
+      "label": "",
+      "tool": "terrain_sandbox",
+      "code": {
+        "revision": "db86ca3b289e695c44fb9d0417815d17a63d633e",
+        "dirty": false
+      }
+    },
+    {
+      "id": 21,
+      "kind": "sandbox",
+      "tag": "t25-sea-m2-column",
+      "run": "out/scratch/sandbox/21-t25-sea-m2-column",
+      "date": "2026-10-26T13:28:23+00:00",
+      "label": "",
+      "tool": "terrain_sandbox",
+      "code": {
+        "revision": "db86ca3b289e695c44fb9d0417815d17a63d633e",
+        "dirty": false
+      }
     }
   ]
 }
