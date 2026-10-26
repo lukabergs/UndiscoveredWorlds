@@ -156,6 +156,58 @@
         "revision": "18d0233843d71957822d8b51909fd774abc14414",
         "dirty": true
       }
+    },
+    {
+      "id": 13,
+      "kind": "sandbox",
+      "tag": "t25-sea-m1",
+      "run": "out/scratch/sandbox/13-t25-sea-m1",
+      "date": "2026-10-21T19:36:34+00:00",
+      "label": "",
+      "tool": "terrain_sandbox",
+      "code": {
+        "revision": "18d0233843d71957822d8b51909fd774abc14414",
+        "dirty": true
+      }
+    },
+    {
+      "id": 14,
+      "kind": "step-check",
+      "tag": "w2-routing",
+      "run": "out/scratch/step-check/14-w2-routing",
+      "date": "2026-10-21T19:36:34+00:00",
+      "label": "cube",
+      "tool": "step_check",
+      "code": {
+        "revision": "c7e74e5260bdf51225b0eb56c17bbc188d0e8dca",
+        "dirty": true
+      }
+    },
+    {
+      "id": 15,
+      "kind": "step-check",
+      "tag": "w2-routing-ll",
+      "run": "out/scratch/step-check/15-w2-routing-ll",
+      "date": "2026-10-21T19:38:49+00:00",
+      "label": "latlon",
+      "tool": "step_check",
+      "code": {
+        "revision": "c7e74e5260bdf51225b0eb56c17bbc188d0e8dca",
+        "dirty": true
+      }
+    },
+    {
+      "id": 16,
+      "kind": "sandbox",
+      "tag": "t25-sea-all",
+      "run": "out/scratch/sandbox/16-t25-sea-all",
+      "date": "2026-10-21T19:41:15+00:00",
+      "label": "",
+      "tool": "terrain_sandbox",
+      "code": {
+        "revision": "18d0233843d71957822d8b51909fd774abc14414",
+        "dirty": true
+      }
     }
   ]
 }

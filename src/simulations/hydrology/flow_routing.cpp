@@ -38,7 +38,10 @@ Inputs gatherinputs(const planet& world)
     inputs.sea.resize(size);
     inputs.runoff_m_yr.resize(size);
     inputs.sealevel = static_cast<float>(world.sealevel());
-    inputs.routingoptions.randomised = tuning::landscape::routing::randomised;
+    // Path-corrected receivers (D8-LTD) replace the randomised ones: the two are exclusive.
+    inputs.routingoptions.pathcorrected = tuning::landscape::routing::pathCorrected;
+    inputs.routingoptions.pathdamping = static_cast<double>(tuning::landscape::routing::pathDamping);
+    inputs.routingoptions.randomised = !inputs.routingoptions.pathcorrected && tuning::landscape::routing::randomised;
     inputs.routingoptions.resolveflats = tuning::landscape::routing::resolveFlats;
     if (inputs.routingoptions.randomised)  // the seed is read only when a draw needs it
         inputs.routingoptions.seed = deterministiccontextseed(world.seed(), routingseedsalt);

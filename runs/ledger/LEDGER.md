@@ -95,6 +95,7 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 - `erosion-0107`: resuming the pipeline with --from-bundle base-v10 --steps 19.. (geosphere.mineral_deposits is not in the bundle)
 - `erosion-0107`: measuring cube rivers on the lat-lon export
 - `erosion-0108`: a cube-native nest through terrain_sandbox window (it builds the whole base table: makecubegrid at N k = 16384 is not feasible)
+- `erosion-0109`: ordering the path pass by height and index alone
 - `tectonics-0010`: Bilinear semi-Lagrangian sampling of the elevation for the uplift rate (spurious uplift at moving summits).
 - `tectonics-0011`: carrying the strain into new crust at divergent boundaries: young ocean floor showed 8 km of shortening
 - `tectonics-0012`: measuring continental area with crust_class (plate rasters): use the columns or continental_crust thickness
@@ -258,6 +259,7 @@ Lessons:
 | `erosion-0106` | 2026-10-18 | the user's look (recorded above) with the numbers deciding where the user deferred | keep | terrain roadmap T1: the user's verdicts of 2026-10-18 on the step-1 pages and the decisions taken from them by the numbers |
 | `erosion-0107` | 2026-10-21 | baseline complete | keep | master plan 5.1: river grid-bias measures on base-v10 before any routing code |
 | `erosion-0108` | 2026-10-21 | tool works on cube bases | keep | master plan 4.2: nested_window.py on cube bases |
+| `erosion-0109` | 2026-10-21 | kernel ready, off | keep | master plan 5.2: path-corrected single receiver (D8-LTD) in flow_graph, off by default |
 
 Lessons:
 
@@ -438,6 +440,8 @@ Lessons:
 - `erosion-0107`: Pipeline base bundles stop at terrain.roughness and carry no flow directions: d8_axis needs the full recipe.
 - `erosion-0107`: Check the headless executables' build time against recent src/cli commits before a sandbox render (the main tree's terrain_sandbox.exe predated e0658f9).
 - `erosion-0108`: A cube window's saved arrays are its lat-lon export at k pixels per base pixel, so a lat-lon tool can read them as a parent grid without exe changes.
+- `erosion-0109`: A pass that walks a flow graph by descending filled height must order equal-height chains too: Priority-Flood raises flooded cells to exactly their spill's height whatever minimumdepth is, so lake and flat donors share their receiver's height.
+- `erosion-0109`: A plan decision that judges a sandbox feature on a pipeline measure (5.1b) needs the pipeline key in the same step.
 
 ## tectonics
 

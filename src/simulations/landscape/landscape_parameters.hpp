@@ -107,6 +107,8 @@ namespace routing
 {
 inline bool randomised = true;
 inline bool resolveFlats = true;
+inline bool pathCorrected = false;
+inline float pathDamping = 1.0f;
 inline float oceanMinimumAreaFraction = 0.002f;
 }
 
@@ -287,6 +289,8 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "landscape.noise.rotate_octaves", &noise::rotateOctaves },
         { "landscape.routing.randomised", &routing::randomised },
         { "landscape.routing.resolve_flats", &routing::resolveFlats },
+        { "landscape.routing.path_corrected", &routing::pathCorrected },
+        { "landscape.routing.path_damping", &routing::pathDamping },
         { "landscape.routing.ocean_minimum_area_fraction", &routing::oceanMinimumAreaFraction },
         { "landscape.glacial.enabled", &glacial::enabled },
         { "landscape.glacial.erodibility_ratio", &glacial::erodibilityRatio },

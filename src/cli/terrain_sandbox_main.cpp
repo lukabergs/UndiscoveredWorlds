@@ -1085,6 +1085,8 @@ void usage()
                  "   -ice_time_myr, -ice_max_m, -landslide_m, -last_eroded_m; -basin_fill_m with --aggrade-subsidence 1)\n"
                  "  [--ice-threshold M 10]\n"
                  "  [--random-routing 0|1] [--seed N 1] [--radius-km 6371]\n"
+                 "  [--path-routing 0|1] [--path-damping L 1] (path-corrected receivers, D8-LTD; replaces\n"
+                 "   --random-routing; L in [0, 1])\n"
                  "terrain_sandbox grid --face-cells N [--radius-km R] --out DIR (the cube's cell table as .npy)\n"
                  "terrain_sandbox export --face-cells N --columns W --input FILE --rules bilinear|mean|nearest,...\n"
                  "  --output FILE [--radius-km R] [--depth D 4] (F stacked cube fields to F stacked lat-lon rasters)\n"
@@ -1291,7 +1293,13 @@ int main(int argc, char** argv)
 
         std::vector<float> erosion(count), deposition(count);
         landscape::FlowGraph graph;
-        const bool randomrouting = number("--random-routing", 0.0) > 0.5;
+        // Path-corrected receivers (flow_graph.hpp, D8-LTD) replace the randomised ones: the two are exclusive.
+        const bool pathrouting = number("--path-routing", 0.0) > 0.5;
+        const double pathdamping = number("--path-damping", 1.0);
+        const bool randomrequested = number("--random-routing", 0.0) > 0.5;
+        if (pathrouting && randomrequested)
+            std::cerr << "terrain_sandbox: --path-routing 1 overrides --random-routing 1 (the two are exclusive)\n";
+        const bool randomrouting = !pathrouting && randomrequested;
         const long long routingseed = static_cast<long long>(number("--seed", 1.0)) * 1000003LL;
         int steps = 0;
         landscape::Depressions routeddepressions;  // the last routing's, for --lake-trap
@@ -1308,6 +1316,8 @@ int main(int argc, char** argv)
             // axes and diagonals; a new draw every step (the seed plus the step), deterministic.
             routing.randomised = randomrouting;
             routing.seed = static_cast<std::uint64_t>(routingseed + steps);
+            routing.pathcorrected = pathrouting;
+            routing.pathdamping = pathdamping;
             graph = landscape::buildflowgraph(metric, terrain, sea, 0.0f, depressions, routing);
             landscape::accumulateflow(metric, runoff, graph);
             routeddepressions = std::move(depressions);

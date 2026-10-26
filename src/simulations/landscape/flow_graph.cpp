@@ -27,27 +27,32 @@ int directionto(const SphereMetric& metric, std::size_t cell, std::size_t target
 // A uniform number in [0, 1) from a hash.
 double unitdraw(std::uint64_t hash) { return static_cast<double>(hash >> 11) * (1.0 / 9007199254740992.0); }
 
-// The randomised receiver direction of a land cell that drains to a lower
-// neighbour (`steepest` is the D8 choice, the fallback). D-infinity (Tarboton
-// 1997) on the metric: each of the eight triangular facets formed by a cardinal
-// neighbour, the adjacent diagonal one and the cell gives a plane through the
-// three heights; its descent direction, when it lies between the facet's two
-// edges, has the plane's slope, otherwise the facet's slope is that of its
-// steeper edge. In the steepest facet, with p1 and p2 the offsets to the two edge
-// neighbours (metres) and g the descent direction, the second edge's neighbour is
-// drawn with probability |p1 x g| / (|p1 x g| + |p2 x g|), so the expected
-// displacement (1 - f) p1 + f p2 is parallel to g (a river's heading is its mean
-// displacement). A drawn neighbour that is neither lower nor sea gives way to the
-// other edge's, then to `steepest`.
-int randomiseddirection(const SphereMetric& metric, std::size_t cell, const std::vector<float>& filled,
-                        const std::vector<uint8_t>& sea, float sealevel, std::uint64_t seed, int steepest)
+// The steepest D-infinity facet of a land cell (Tarboton 1997) on the metric: each
+// of the eight triangular facets formed by a cardinal neighbour, the adjacent
+// diagonal one and the cell gives a plane through the three heights; its descent
+// direction, when it lies between the facet's two edges, has the plane's slope,
+// otherwise the facet's slope is that of its steeper edge. `first` and `second` are
+// the facet's two edge directions (0 when no facet descends); with p1 and p2 the
+// offsets to their neighbours (metres) and g the descent direction, `fraction` is
+// |p1 x g| / (|p1 x g| + |p2 x g|), so (1 - fraction) p1 + fraction p2 is parallel
+// to g; `flow` is g (the plane's descent vector, or the steeper edge's offset when
+// the descent falls outside the facet), not normalised.
+struct Facet
+{
+    int first = 0, second = 0;
+    double fraction = 0.0;
+    TangentOffset p1, p2, flow;
+};
+
+Facet steepestfacet(const SphereMetric& metric, std::size_t cell, const std::vector<float>& filled,
+                    const std::vector<uint8_t>& sea, float sealevel)
 {
     const double centre = static_cast<double>(filled[cell]);
     const auto height = [&](std::size_t next) {
         return sea[next] != 0 ? static_cast<double>(sealevel) : static_cast<double>(filled[next]);
     };
-    double best = 0.0, fraction = 0.0;
-    int first = 0, second = 0;
+    Facet facet;
+    double best = 0.0;
     for (int direction = 1; direction <= directioncount; direction++)
     {
         const int other = direction % directioncount + 1;
@@ -64,12 +69,14 @@ int randomiseddirection(const SphereMetric& metric, std::size_t cell, const std:
         const double cross1 = p1.east * vn - p1.north * ve;  // p1 x v
         const double cross2 = ve * p2.north - vn * p2.east;  // v x p2
         double slope, share;
+        TangentOffset flow;
         if ((ve != 0.0 || vn != 0.0) && cross1 * det >= 0.0 && cross2 * det >= 0.0)
         {
             // (1 - share) p1 + share p2 is parallel to v: the mean displacement
             // follows the gradient.
             slope = std::hypot(ve, vn);
             share = std::clamp(std::fabs(cross1) / (std::fabs(cross1) + std::fabs(cross2)), 0.0, 1.0);
+            flow = { ve, vn };
         }
         else
         {
@@ -77,15 +84,34 @@ int randomiseddirection(const SphereMetric& metric, std::size_t cell, const std:
             const double slope2 = drop2 / std::hypot(p2.east, p2.north);
             slope = std::max(slope1, slope2);
             share = slope2 > slope1 ? 1.0 : 0.0;
+            flow = slope2 > slope1 ? p2 : p1;
         }
         if (slope > best)
         {
             best = slope;
-            first = direction;
-            second = other;
-            fraction = share;
+            facet.first = direction;
+            facet.second = other;
+            facet.fraction = share;
+            facet.p1 = p1;
+            facet.p2 = p2;
+            facet.flow = flow;
         }
     }
+    return facet;
+}
+
+// The randomised receiver direction of a land cell that drains to a lower
+// neighbour (`steepest` is the D8 choice, the fallback): in the steepest facet
+// (steepestfacet), the second edge's neighbour is drawn with probability
+// `fraction`, so the expected displacement (1 - f) p1 + f p2 is parallel to g (a
+// river's heading is its mean displacement). A drawn neighbour that is neither
+// lower nor sea gives way to the other edge's, then to `steepest`.
+int randomiseddirection(const SphereMetric& metric, std::size_t cell, const std::vector<float>& filled,
+                        const std::vector<uint8_t>& sea, float sealevel, std::uint64_t seed, int steepest)
+{
+    const Facet facet = steepestfacet(metric, cell, filled, sea, sealevel);
+    const int first = facet.first, second = facet.second;
+    const double fraction = facet.fraction;
     if (first == 0)
         return steepest;
 
@@ -357,6 +383,64 @@ void resolveflatcells(const SphereMetric& metric, const std::vector<float>& elev
             setreceiver(metric, sea, cell, best, graph);
     }
 }
+
+// The path-corrected receivers (D8-LTD, Orlandini et al. 2003; RoutingOptions::
+// pathcorrected). Land cells in pathcorrectionorder (every donor before its
+// receiver); `area` accumulates the drainage area over the cells visited so far
+// (each cell's complete when it is visited) and `incoming` keeps the deviation of
+// the donor with the largest of it (the first on a tie). A cell routed to a lower
+// neighbour or the sea chooses, between its steepest facet's two neighbours that
+// are lower or sea, the one with the smallest |damping x incoming + d_k|; the
+// others keep their receiver and pass 0. A new receiver is strictly lower or the
+// sea, so no cycle forms and the order stays valid.
+void pathcorrectcells(const SphereMetric& metric, const std::vector<float>& filled, const std::vector<uint8_t>& sea,
+                      float sealevel, double damping, const std::vector<uint8_t>& routed, FlowGraph& graph)
+{
+    const std::size_t count = metric.size();
+    const std::vector<int32_t> cells = pathcorrectionorder(graph, filled);
+
+    std::vector<double> area(count, 0.0), largest(count, -1.0), incoming(count, 0.0);
+    for (int32_t member : cells)
+        area[static_cast<std::size_t>(member)] = metric.area_m2(static_cast<std::size_t>(member));
+    const auto accepted = [&](std::size_t cell, int direction) {
+        const std::size_t next = static_cast<std::size_t>(metric.neighbourid(cell, direction));  // a facet neighbour
+        return sea[next] != 0 || filled[next] < filled[cell];
+    };
+    for (int32_t member : cells)
+    {
+        const std::size_t cell = static_cast<std::size_t>(member);
+        double deviation = 0.0;
+        if (routed[cell] == routedsteepest)
+        {
+            const Facet facet = steepestfacet(metric, cell, filled, sea, sealevel);
+            const double length = std::hypot(facet.flow.east, facet.flow.north);
+            if (facet.first != 0 && length > 0.0)
+            {
+                const double ge = facet.flow.east / length, gn = facet.flow.north / length;
+                // The signed sideways offsets g x p of the two neighbours from the flow line.
+                const double d1 = ge * facet.p1.north - gn * facet.p1.east;
+                const double d2 = ge * facet.p2.north - gn * facet.p2.east;
+                const double carried = damping * incoming[cell];
+                const bool one = accepted(cell, facet.first), two = accepted(cell, facet.second);
+                if (one || two)
+                {
+                    const bool takefirst = one && (!two || std::fabs(carried + d1) <= std::fabs(carried + d2));
+                    deviation = carried + (takefirst ? d1 : d2);
+                    setreceiver(metric, sea, cell, takefirst ? facet.first : facet.second, graph);
+                }
+            }
+        }
+        const std::size_t receiver = static_cast<std::size_t>(graph.receiver[cell]);
+        if (receiver == cell)
+            continue;
+        area[receiver] += area[cell];
+        if (area[cell] > largest[receiver])
+        {
+            largest[receiver] = area[cell];
+            incoming[receiver] = deviation;
+        }
+    }
+}
 }
 
 FlowGraph buildflowgraph(const SphereMetric& metric, const std::vector<float>& elevation,
@@ -367,6 +451,10 @@ FlowGraph buildflowgraph(const SphereMetric& metric, const std::vector<float>& e
     if (elevation.size() != count || sea.size() != count || depressions.filledelevation.size() != count
         || depressions.depressionid.size() != count || depressions.floodreceiver.size() != count)
         throw std::invalid_argument("buildflowgraph: input sizes differ from the metric");
+    if (options.pathcorrected && options.randomised)
+        throw std::invalid_argument("buildflowgraph: pathcorrected and randomised are exclusive");
+    if (options.pathcorrected && !(options.pathdamping >= 0.0 && options.pathdamping <= 1.0))
+        throw std::invalid_argument("buildflowgraph: pathdamping lies outside [0, 1]");
 
     FlowGraph graph;
     graph.receiver.resize(count);
@@ -378,8 +466,9 @@ FlowGraph buildflowgraph(const SphereMetric& metric, const std::vector<float>& e
     graph.discharge_m3_yr.assign(count, 0.0);
 
     const std::vector<float>& filled = depressions.filledelevation;
-    std::vector<uint8_t> routed;  // how each land cell was routed, for resolveflats
-    if (options.resolveflats)
+    std::vector<uint8_t> routed;  // how each land cell was routed, for resolveflats and pathcorrected
+    const bool track = options.resolveflats || options.pathcorrected;
+    if (track)
         routed.assign(count, routednone);
     for (std::size_t cell = 0; cell < count; cell++)
     {
@@ -437,14 +526,14 @@ FlowGraph buildflowgraph(const SphereMetric& metric, const std::vector<float>& e
             if (options.randomised)
                 best = randomiseddirection(metric, cell, filled, sea, sealevel, options.seed, best);
             target = static_cast<std::size_t>(metric.neighbourid(cell, best));
-            if (options.resolveflats)
+            if (track)
                 routed[cell] = routedsteepest;
         }
         else if (depressions.floodreceiver[cell] >= 0)
         {
             target = static_cast<std::size_t>(depressions.floodreceiver[cell]);
             best = directionto(metric, cell, target);
-            if (options.resolveflats)
+            if (track)
                 routed[cell] = routedflood;
         }
         else
@@ -461,6 +550,8 @@ FlowGraph buildflowgraph(const SphereMetric& metric, const std::vector<float>& e
     }
     if (options.resolveflats)
         resolveflatcells(metric, elevation, sea, depressions, routed, graph);
+    if (options.pathcorrected)
+        pathcorrectcells(metric, filled, sea, sealevel, options.pathdamping, routed, graph);
 
     // The order: donor lists of the land cells (increasing index), then a
     // breadth-first walk (not Braun and Willett's depth-first stack) from each root
@@ -527,5 +618,50 @@ void accumulateflow(const SphereMetric& metric, const std::vector<float>& runoff
         graph.area_m2[receiver] += graph.area_m2[cell];
         graph.discharge_m3_yr[receiver] += graph.discharge_m3_yr[cell];
     }
+}
+
+std::vector<int32_t> pathcorrectionorder(const FlowGraph& graph, const std::vector<float>& filled)
+{
+    const std::size_t count = graph.size();
+    if (filled.size() != count)
+        throw std::invalid_argument("pathcorrectionorder: input sizes differ from the graph");
+    // steps: the receiver steps at one filled elevation down to a cell that is a root
+    // or drains to a strictly lower one (0 there).
+    std::vector<int32_t> steps(count, -1), cells;
+    std::vector<std::size_t> path;
+    cells.reserve(count);
+    for (std::size_t cell = 0; cell < count; cell++)
+    {
+        if (graph.land[cell] == 0)
+            continue;
+        cells.push_back(static_cast<int32_t>(cell));
+        path.clear();
+        std::size_t current = cell;
+        while (steps[current] < 0)
+        {
+            const std::size_t receiver = static_cast<std::size_t>(graph.receiver[current]);
+            if (receiver == current || filled[receiver] < filled[current])
+            {
+                steps[current] = 0;
+                break;
+            }
+            path.push_back(current);
+            if (path.size() > count)
+                throw std::logic_error("pathcorrectionorder: the receivers form a cycle");
+            current = receiver;
+        }
+        int32_t value = steps[current];
+        for (auto it = path.rbegin(); it != path.rend(); ++it)
+            steps[*it] = ++value;
+    }
+    std::sort(cells.begin(), cells.end(), [&](int32_t a, int32_t b) {
+        const std::size_t i = static_cast<std::size_t>(a), j = static_cast<std::size_t>(b);
+        if (filled[i] != filled[j])
+            return filled[i] > filled[j];
+        if (steps[i] != steps[j])
+            return steps[i] > steps[j];
+        return a < b;
+    });
+    return cells;
 }
 }

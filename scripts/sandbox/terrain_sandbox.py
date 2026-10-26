@@ -79,6 +79,11 @@ from its floor up to at most its spill level, and only the excess passes on (not
 physics.lake_trap_ice_share (--lake-trap-ice-share): a depression with at least that share of its cells under ice
 does not trap (the ice carries its sediment on, so glacial troughs stay deep and drown as fjords); absent: every
 lake traps (the trap alone filled G's troughs and removed its fjords, 2026-10-16).
+physics.random_routing (--random-routing): randomised receivers (Rho8 on the metric, a new draw each step).
+physics.path_routing (--path-routing, master plan 5.2): path-corrected single receivers (D8-LTD, Orlandini et al.
+2003; flow_graph.hpp) instead: a path keeps the gradient's heading by carrying its sideways deviation; true sends
+--random-routing 0 (the two are exclusive). physics.path_damping (--path-damping, in [0, 1], default 1): the share
+of the carried deviation kept per step (0: the locally nearest facet neighbour). Absent keys: off and 1.
 physics.lake_fill_gradient (--lake-fill-gradient, with physics.lake_fill_noise: --lake-fill-noise, the relief's
 fill noise): the trap's fill slopes up from the lake's exits at that gradient, so a filled lake floor is no flat
 (the ice cut straight grooves along a flat's routing lines). relief.fill_depressions: before the physics, every
@@ -2174,11 +2179,15 @@ def run_physics(domain, fields, config, directory):
                '--deposition', str(spec['deposition']), '--diffusivity', str(spec['diffusivity_km2_myr']),
                '--delta-top', str(spec['delta_top_m']), '--threshold-slope', str(spec['threshold_slope']),
                '--pinned', str(files['pinned']), '--radius-km', str(domain.radius_km),
-               '--random-routing', '1' if spec.get('random_routing', False) else '0', '--seed', str(config['seed']),
+               '--random-routing',
+               '1' if spec.get('random_routing', False) and not spec.get('path_routing', False) else '0',
+               '--seed', str(config['seed']),
                '--out-elevation', str(out_elevation), '--out-discharge', str(out_discharge),
                '--out-fields', str(totals_prefix)]
     if not domain.whole and domain.kind != 'cube':
         command += ['--north', str(domain.north_deg), '--pixel-deg', str(domain.pixel_deg)]
+    if spec.get('path_routing', False):  # path-corrected receivers (D8-LTD); --random-routing 0 above
+        command += ['--path-routing', '1', '--path-damping', str(spec.get('path_damping', 1.0))]
     if spec.get('lake_trap', False):  # lakes keep the sediment reaching them (filled up to their spill)
         command += ['--lake-trap', '1']
         if spec.get('lake_trap_ice_share') is not None:  # lakes under ice stay open (fjords; T1.7)

@@ -75,11 +75,32 @@ struct FlowGraph
 //   one filled elevation is a flat whose low edges are the adjacent land cells at
 //   that elevation that drain downhill (a region without one keeps the flood
 //   order). Depressions are not changed.
+// - pathcorrected: a land cell that drains to a lower neighbour or the sea takes the
+//   path-corrected single receiver (D8-LTD, least transverse deviation; Orlandini et
+//   al. 2003): in the steepest D-infinity facet (the same search as `randomised`),
+//   with g the unit descent direction (the facet's edge when the plane's descent
+//   falls outside it) and d_k = g x p_k the signed sideways offset of the facet's
+//   neighbour k from the flow line, the neighbour with the smallest
+//   |pathdamping x d_in + d_k| is chosen and passes d_out = pathdamping x d_in + d_k
+//   on, so a path at 22.5 degrees alternates its two neighbours (E, NE, E, NE)
+//   instead of locking onto one. A pass after the flat resolution visits the land
+//   cells in pathcorrectionorder (below: every donor before its receiver); d_in is
+//   the d_out of the donor with the largest drainage area (0 without a donor);
+//   cells that follow their flood receiver or a flat's resolution keep their
+//   receiver and pass 0. Only a neighbour lower on the filled
+//   surface or a sea neighbour is taken; when neither facet neighbour is, or no facet
+//   exists, the D8 choice stays and passes 0. Deterministic, a tree, single
+//   receivers. pathdamping lies in [0, 1] (1 full correction, 0 the locally nearest
+//   neighbour); exclusive with `randomised` (buildflowgraph throws
+//   std::invalid_argument on both, or on a damping outside [0, 1]). Off by default:
+//   pathdamping has no effect when pathcorrected is false.
 struct RoutingOptions
 {
     bool randomised = false;
     std::uint64_t seed = 0;
     bool resolveflats = false;
+    bool pathcorrected = false;
+    double pathdamping = 1.0;
 };
 
 // Receivers, directions, distances, outlets and the order; area and discharge are
@@ -96,4 +117,16 @@ FlowGraph buildflowgraph(const SphereMetric& metric, const std::vector<float>& e
 // runoff depth per cell per year (sea cells ignored): discharge = sum over the
 // cell and its upstream cells of runoff x area. Serial, so bit-identical for any thread count.
 void accumulateflow(const SphereMetric& metric, const std::vector<float>& runoff_m_yr, FlowGraph& graph);
+
+// The land cells in the order the path-corrected pass visits them (RoutingOptions::
+// pathcorrected): descending `filled` (the depressions' filled elevation the graph
+// was built on), then, at one filled elevation, descending number of receiver steps
+// at that elevation down to a cell that is a root or drains to a strictly lower one,
+// then increasing index. Every donor comes before its receiver, also a flood or flat
+// donor at its receiver's filled elevation (the fill raises a flooded cell to
+// exactly its spill's level), so an area summed along it is complete at each cell.
+// Valid on the graph before and after the pass (the pass changes only receivers
+// that drain strictly lower). Throws
+// std::invalid_argument on a size mismatch, std::logic_error on a cycle.
+std::vector<int32_t> pathcorrectionorder(const FlowGraph& graph, const std::vector<float>& filled);
 }
