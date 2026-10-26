@@ -233,7 +233,9 @@
       "code": {
         "revision": "ee79c184f82e5068451c75cdc6c8d99282ddbbd7",
         "dirty": true
-      }
+      },
+      "superseded_by": "25-w2-merged-defaults",
+      "superseded_utc": "2026-10-26T13:44:47+00:00"
     },
     {
       "id": 19,
@@ -269,6 +271,71 @@
       "date": "2026-10-26T13:28:23+00:00",
       "label": "",
       "tool": "terrain_sandbox",
+      "code": {
+        "revision": "db86ca3b289e695c44fb9d0417815d17a63d633e",
+        "dirty": false
+      }
+    },
+    {
+      "id": 22,
+      "kind": "sandbox",
+      "tag": "t25-sea-all",
+      "run": "out/scratch/sandbox/22-t25-sea-all",
+      "date": "2026-10-26T13:34:06+00:00",
+      "label": "",
+      "tool": "terrain_sandbox",
+      "code": {
+        "revision": "db86ca3b289e695c44fb9d0417815d17a63d633e",
+        "dirty": false
+      }
+    },
+    {
+      "id": 23,
+      "kind": "page",
+      "tag": "compare-t25-sea-grid",
+      "run": "out/evaluation/23-compare-t25-sea-grid",
+      "date": "2026-10-26T13:38:54+00:00",
+      "label": "",
+      "tool": "compare_runs",
+      "code": {
+        "revision": "db86ca3b289e695c44fb9d0417815d17a63d633e",
+        "dirty": false
+      }
+    },
+    {
+      "id": 24,
+      "kind": "sandbox",
+      "tag": "t25-sea-m2-wide",
+      "run": "out/scratch/sandbox/24-t25-sea-m2-wide",
+      "date": "2026-10-26T13:39:38+00:00",
+      "label": "",
+      "tool": "terrain_sandbox",
+      "code": {
+        "revision": "db86ca3b289e695c44fb9d0417815d17a63d633e",
+        "dirty": false
+      }
+    },
+    {
+      "id": 25,
+      "kind": "sandbox",
+      "tag": "w2-merged-defaults",
+      "run": "out/scratch/sandbox/25-w2-merged-defaults",
+      "date": "2026-10-26T13:40:51+00:00",
+      "label": "",
+      "tool": "terrain_sandbox",
+      "code": {
+        "revision": "0fb407e7fb1e7604c33ea0ecd279efde8c9d6299",
+        "dirty": true
+      }
+    },
+    {
+      "id": 26,
+      "kind": "page",
+      "tag": "compare-t25-sea-grid",
+      "run": "out/evaluation/26-compare-t25-sea-grid",
+      "date": "2026-10-26T13:44:54+00:00",
+      "label": "",
+      "tool": "compare_runs",
       "code": {
         "revision": "db86ca3b289e695c44fb9d0417815d17a63d633e",
         "dirty": false

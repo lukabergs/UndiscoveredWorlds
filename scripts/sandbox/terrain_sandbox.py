@@ -951,6 +951,14 @@ def world_fields(bundle, native=False):
              'boundary_type': load('geosphere.boundary_type'),
              'accumulated_strain': optional('accumulated_strain', float),
              'deforming_region_type': optional('deforming_region_type', np.uint8), 'grid': None}
+    # What the volcano term adds to each cell's elevation (relief.volcano_cones, master plan 6.1b: a cone on the fine
+    # grid instead): the volcano at sea, its excess over the mountain height on land; the oceanic crust's thickness
+    # (seafloor.oceanic_weight mode column).
+    volcano = np.abs(load('geosphere.volcano').astype(float))
+    mountain = load('geosphere.mountain_height').astype(float)
+    world['volcano'] = np.where(sea, volcano, np.maximum(volcano, mountain) - mountain)
+    world['oceanic_crust'] = load('geosphere.oceanic_crust').astype(float) if bundle.has('geosphere.oceanic_crust') \
+        else None
     if native:
         world['grid'] = cube_domain.CubeGrid.from_bundle(bundle)
     return world
@@ -1222,7 +1230,11 @@ def procedural(domain, world, config, seed):
     timings = {}
     started = time.perf_counter()
     sampler = make_sampler(domain, world)
-    base = sampler(world['elevation'])
+    cones = config['relief'].get('volcano_cones', {})
+    if cones.get('enabled', False):  # the volcanoes as cones at their cells' centres, not whole-cell heights
+        base = sampler(world['elevation'] - world['volcano']) + volcano_cones(domain, world, cones)
+    else:
+        base = sampler(world['elevation'])
     strain = sampler(world['shortening'])
     doubled = world['shortening'] * np.exp(2j * world['direction'])
     doubled = sampler(doubled.real) + 1j * sampler(doubled.imag)
@@ -1235,10 +1247,18 @@ def procedural(domain, world, config, seed):
     sea_seed = sampler(world['sea'].astype(float)) > 0.5
     plain_base = base
     ocean_age, spreading = None, None
-    if config['seafloor'].get('shelf', {}).get('enabled', False):
-        base = shelf_profile(base, np.clip(sampler(world['ocean']['oceanic']), 0.0, 1.0), config['seafloor']['shelf'])
+    weighting = config['seafloor'].get('oceanic_weight', {})
+    oceanic = oceanic_weight(domain, world, sampler, weighting) if weighting.get('mode', 'cell') != 'cell' else None
+    shelf = config['seafloor'].get('shelf', {})
+    if shelf.get('enabled', False):
+        warp = shelf.get('warp', {})
+        depth_base = shelf_warp(domain, base, warp, shelf['break_m'], seed) if warp.get('amplitude_cells', 0.0) > 0.0 \
+            else None
+        base = shelf_profile(base, np.clip(sampler(world['ocean']['oceanic']), 0.0, 1.0) if oceanic is None else oceanic,
+                             shelf, depth_base)
     if config['seafloor']['enabled']:
-        base, ocean_age, spreading = seafloor(domain, world, world['ocean'], base, sampler, seafloor_spec(config), seed)
+        base, ocean_age, spreading = seafloor(domain, world, world['ocean'], base, sampler, seafloor_spec(config), seed,
+                                              oceanic)
     timings['base'] = time.perf_counter() - started
 
     started = time.perf_counter()
@@ -1750,11 +1770,12 @@ def damp_abyss(world, spec):
     return elevation - deep * (damped - depth)
 
 
-def shelf_profile(base, oceanic, spec):
+def shelf_profile(base, oceanic, spec, depth_base=None):
     """A shelf break on the sea off oceanic crust (sea-v4): the base's depth d (m) maps to shelf_m x d /
     break_m down to break_m, then steepens to the base's own depth over slope_m of it, so the shelf stays
-    near shelf_m deep and the slope beyond its edge is several times steeper than the base's broad ramp."""
-    depth = -base
+    near shelf_m deep and the slope beyond its edge is several times steeper than the base's broad ramp.
+    With depth_base (shelf_warp) the depth mapped is read from it; which cells are sea stays the base's."""
+    depth = -(base if depth_base is None else depth_base)
     shelf, edge, slope = spec['shelf_m'], spec['break_m'], spec['slope_m']
     profile = np.where(depth <= edge, shelf * np.clip(depth / edge, 0.0, 1.0),
                        shelf + (depth - shelf) * smoothstep(depth, edge, edge + slope))
@@ -1769,6 +1790,97 @@ def shelf_profile(base, oceanic, spec):
         profile = np.where(depth <= edge, profile, np.where(depth <= end, steep, np.maximum(deep, depth * 0 + foot)))
     weight = (base < 0.0) * (1.0 - oceanic)
     return base + weight * (-profile - base)
+
+
+def shelf_warp(domain, base, spec, taper_m, seed):
+    """The base read through a sub-cell domain warp (seafloor.shelf.warp, master plan 6.1b M1): the base's one-cell
+    sea-floor steps keep the shelf break's contour on the base cells' boundaries after G; read at the cells moved by
+    amplitude_cells world cells x (n1, n2) east and north (fbm of the group's octaves, seeds + 150 and + 151), the
+    contour leaves them. The warped value replaces the base's by smoothstep(depth, 0, taper_m) of the base's depth
+    (taper_m the shelf's break_m), so the coast (depth 0) and the land keep the base's own values, and no cell is
+    read shallower than its own depth or taper_m, whichever is less: a deep cell read from the land beside it stays
+    below the shelf edge (a first version lifted straits to sea level, joined or cut off inland seas and changed the
+    land's fill), a shelf cell only deepens."""
+    points = domain.points()
+    scale = spec['amplitude_cells'] * domain.cell_km / domain.fine_km  # fine cells
+    east = scale * fbm(points, spec, seed + 150, domain)
+    north = scale * fbm(points, spec, seed + 151, domain)
+    if domain.kind == 'cube':
+        moved = displaced(domain, base, points, east, -north)
+    else:  # lat-lon: rows clamped (displaced wraps them across the poles on the whole world), columns wrapped
+        rows, columns = np.indices(base.shape, dtype=float)
+        rows = np.clip(rows - north, 0.0, base.shape[0] - 1.0)
+        if domain.whole:
+            columns = np.mod(columns + east, base.shape[1])
+        moved = ndimage.map_coordinates(base, [rows, columns if domain.whole else columns + east], order=1,
+                                        mode='grid-wrap' if domain.whole else 'nearest')
+    warped = base + smoothstep(-base, 0.0, taper_m) * (moved - base)
+    return np.minimum(warped, np.maximum(base, -taper_m))
+
+
+def signed_distance_km(domain, inside, cutoff_km):
+    """The signed distance (km) of each cell's centre to the boundary of `inside`: the distance to the nearest cell
+    of the other side less half a fine cell (the boundary runs between the two centres), positive inside, negative
+    outside, +-half a fine cell on the two sides of the boundary; clipped to +-cutoff_km. On lat-lon the pixel
+    distance times fine_km (the equator's: east-west distances are not scaled by cos latitude)."""
+    if domain.kind == 'cube':
+        to_outside = domain.grid.distance_km(~inside, cutoff_km=cutoff_km)
+        to_inside = domain.grid.distance_km(inside, cutoff_km=cutoff_km)
+    else:
+        to_outside = ndimage.distance_transform_edt(inside) * domain.fine_km
+        to_inside = ndimage.distance_transform_edt(~inside) * domain.fine_km
+    half = 0.5 * domain.fine_km
+    distance = np.where(inside, np.minimum(to_outside, cutoff_km) - half, half - np.minimum(to_inside, cutoff_km))
+    return np.clip(distance, -cutoff_km, cutoff_km)
+
+
+def oceanic_weight(domain, world, sampler, spec):
+    """The oceanic blend weight of shelf_profile and seafloor on the domain (seafloor.oceanic_weight, master plan
+    6.1b M2), instead of the G-sampled crust_class == 1 flag (mode cell): the indicator (mode distance: crust class 1;
+    mode column: the oceanic share of the crust, oceanic / (oceanic + continental), above column_share) sampled to the
+    domain and cut at 0.5, its signed distance (km) smoothed by a Gaussian of smooth_km, through a smoothstep from
+    -ramp_km / 2 to ramp_km / 2. The 0.5 contour no longer follows the base cells' staircase."""
+    mode = spec['mode']
+    if mode == 'distance':
+        indicator = (world['crust_class'] == 1).astype(float)
+    elif mode == 'column':
+        if world.get('oceanic_crust') is None:
+            raise ValueError('seafloor.oceanic_weight.mode column needs geosphere.oceanic_crust in the base bundle')
+        crust = world['oceanic_crust'] + world['continental_crust']
+        indicator = (world['oceanic_crust'] > spec['column_share'] * np.maximum(crust, 1e-9)).astype(float)
+    else:
+        raise ValueError(f'seafloor.oceanic_weight.mode {mode!r}: cell, distance or column')
+    ramp, smooth = spec['ramp_km'], spec['smooth_km']
+    distance = signed_distance_km(domain, sampler(indicator) > 0.5, 0.5 * ramp + 3.0 * smooth)
+    if smooth > 0.0:
+        distance = domain_smooth(domain, distance, smooth / domain.fine_km)
+    return smoothstep(distance, -0.5 * ramp, 0.5 * ramp)
+
+
+def world_centres(world):
+    """Unit vectors (3, cells) of the world cells' centres in the flattened order of a world field."""
+    if world.get('grid') is not None:
+        return world['grid'].centre.T
+    rows, columns = np.shape(world['elevation'])
+    latitude = np.radians(90.0 - (np.arange(rows) + 0.5) * 180.0 / rows)[:, None]
+    longitude = np.radians(-180.0 + (np.arange(columns) + 0.5) * 360.0 / columns)[None, :]
+    cl = np.cos(latitude)
+    return np.stack([cl * np.cos(longitude), cl * np.sin(longitude), np.sin(latitude) * np.ones_like(longitude)]
+                    ).reshape(3, -1)
+
+
+def volcano_cones(domain, world, spec):
+    """The volcanoes as cones on the domain (relief.volcano_cones, master plan 6.1b M3): each world cell's volcano
+    term (world['volcano']) as a cone at the cell's centre, height h (1 - r / radius_km)^profile with r the chord to
+    the centre (km), the tallest cone where two overlap (as seamounts)."""
+    heights = np.asarray(world['volcano'], dtype=np.float64).reshape(-1)
+    centres = world_centres(world) * domain.radius_km
+    points = domain.points()
+    out = np.zeros(points.shape[1:])
+    for cell in np.flatnonzero(heights > 0.0):
+        chord = np.linalg.norm(points - centres[:, cell].reshape((3,) + (1,) * (points.ndim - 1)), axis=0)
+        out = np.maximum(out, heights[cell] * np.clip(1.0 - chord / spec['radius_km'], 0.0, 1.0) ** spec['profile'])
+    return out
 
 
 def latlon_at(field, points, order=3):
@@ -1933,7 +2045,7 @@ class CellView:
         return self._frame
 
 
-def seafloor(domain, world, ocean, base, sampler, spec, seed):
+def seafloor(domain, world, ocean, base, sampler, spec, seed, oceanic=None):
     """The sea floor on oceanic crust (the user's 2026-10-13 request): depth from the crust age (GDH1),
     with the age read through ridge-transform segments (segment_shift: the ridge steps at each transform and
     the age step carries on across the plate as a fracture zone), an axial valley on the youngest crust,
@@ -1941,10 +2053,12 @@ def seafloor(domain, world, ocean, base, sampler, spec, seed):
     and trenches on the ocean side of convergent boundaries. Blended into the base where the crust is
     oceanic and the base is deeper than shallow_m. Returns (the new base, the age read, the spreading axis).
     With the ridge distance (half_rate_km_myr) the floor is evaluated only on the cells it blends into (blend
-    weight above 0: elsewhere base + 0 x (floor - base) is the base), the age read NaN elsewhere."""
+    weight above 0: elsewhere base + 0 x (floor - base) is the base), the age read NaN elsewhere. oceanic: the
+    oceanic share on the domain (oceanic_weight), by default the G-sampled crust class 1 flag."""
     points = domain.points()
     shape = points.shape[1:]
-    oceanic = np.clip(sampler(ocean['oceanic']), 0.0, 1.0)
+    if oceanic is None:
+        oceanic = np.clip(sampler(ocean['oceanic']), 0.0, 1.0)
     doubled = sampler(ocean['doubled'].real) + 1j * sampler(ocean['doubled'].imag)
     theta = 0.5 * np.angle(doubled)  # the spreading axis
     weight = oceanic * smoothstep(-base, spec['shallow_m'], 2.0 * spec['shallow_m']) * spec['blend']

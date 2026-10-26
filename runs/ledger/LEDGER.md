@@ -97,6 +97,7 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 - `erosion-0108`: a cube-native nest through terrain_sandbox window (it builds the whole base table: makecubegrid at N k = 16384 is not feasible)
 - `erosion-0109`: ordering the path pass by height and index alone
 - `erosion-0110`: the 16-neighbour slope limiter as a fix for land-aspect A8
+- `erosion-0111`: M2 column mode before the engine's crust class is read from the columns (9.1)
 - `tectonics-0010`: Bilinear semi-Lagrangian sampling of the elevation for the uplift rate (spurious uplift at moving summits).
 - `tectonics-0011`: carrying the strain into new crust at divergent boundaries: young ocean floor showed 8 km of shortening
 - `tectonics-0012`: measuring continental area with crust_class (plate rasters): use the columns or continental_crust thickness
@@ -262,6 +263,7 @@ Lessons:
 | `erosion-0108` | 2026-10-21 | tool works on cube bases | keep | master plan 4.2: nested_window.py on cube bases |
 | `erosion-0109` | 2026-10-21 | kernel ready, off | keep | master plan 5.2: path-corrected single receiver (D8-LTD) in flow_graph, off by default |
 | `erosion-0110` | 2026-10-26 | fills ready, off; slope limit no effect on aspect | keep | master plan 5.3: Euclidean fills in the sandbox (Python sloped_fill, exe filloffsets) and the slope limiter |
+| `erosion-0111` | 2026-10-26 | keys ready for the look | keep | master plan 6.1b: the grid imprint at sea in the sandbox, without redesigning the sea floor |
 
 Lessons:
 
@@ -447,6 +449,8 @@ Lessons:
 - `erosion-0110`: 26196f1's subject says 'and slope limit' although that commit left limitslopes alone; c379e46 added it.
 - `erosion-0110`: The legacy fill's max(0.1 g d, g d + dn) clips downward noise steps (a ratchet): measured in 5.4.
 - `erosion-0110`: The land-aspect bias is already in the procedural input (A8 0.0285): its source is 5.6.
+- `erosion-0111`: A worker's identity run must postdate its last source edit; the reviewer checks file times against run times.
+- `erosion-0111`: A distance helper built from two distance transforms (to_outside - to_inside) halved: test a known offset, not only range and reach.
 
 ## tectonics
 
