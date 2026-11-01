@@ -23,7 +23,8 @@ closed: an error inside the guard, or a check running past DEADLINE, blocks (onl
 so an uncaught exception or the hook's own timeout would let the command pass). guard_catastrophe.py runs before
 it in every project and refuses drive-level and protected-tree deletes whatever git says.
 The guard sees the command line only: a tracked, unmodified program that deletes internally passes (the
-repository's are listed above).
+repository's are listed above). Delete words in text (a commit message, an echo, a comment, a heredoc of file
+content) do not count when nothing in the command can run text (guard_text.py, since 2026-11-01).
 """
 import glob
 import json
@@ -34,6 +35,9 @@ import subprocess
 import sys
 import tempfile
 import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import guard_text  # noqa: E402  (beside this file; hook_runner.py turns an import failure into a block)
 
 DELETERS = {'rm', 'rmdir', 'unlink', 'shred', 'del', 'erase', 'rd', 'ri', 'remove-item', 'rmdir.exe', 'rm.exe'}
 CODE_DELETE = re.compile(r'rmtree|os\.remove\b|os\.unlink|\.unlink\(|os\.rmdir|\.rmdir\(|removedirs|send2trash|'
@@ -363,10 +367,10 @@ def backstop(command, cwd):
             check_target(path)
 
 
-def heads(command):
+def heads(segments):
     """The command word of each segment, after the common wrappers."""
     found = []
-    for part in SEPARATORS.split(command)[::2]:
+    for part, _ in segments:
         words = [w.strip('"\'') for w in part.split() if w.strip('"\'')]
         while words and (words[0].lower() in WRAPPERS or re.fullmatch(r'\w+=\S*', words[0])):
             words = words[1:]
@@ -379,24 +383,33 @@ def check(payload):
     global CREATES
     command = (payload.get('tool_input') or {}).get('command') or ''
     cwd = to_native(payload.get('cwd') or os.getcwd(), os.getcwd())  # also a Git Bash /c/... form
-    CREATES = bool(CREATORS.search(command))
+    # Since 2026-11-01 (the user) delete words count only outside text: where nothing in the command can run text,
+    # its quoted strings, comments and heredoc bodies are text (guard_text.py), and the command is split on
+    # separators outside quotes; otherwise it is read whole and split on every separator, as before.
+    powershell = payload.get('tool_name') == 'PowerShell'
+    command, inert = guard_text.readable(command, powershell)
+    active = guard_text.blank(command, powershell) if inert else command
+    if inert:
+        segments = [(part, separator) for part, separator, _ in guard_text.split_command(command)]
+    else:
+        parts = SEPARATORS.split(command)
+        segments = [(parts[i].strip(), parts[i - 1] if i else '') for i in range(0, len(parts), 2) if parts[i].strip()]
+    CREATES = bool(CREATORS.search(active))
     # The backstop runs unless every command is a read-only tool with no unquoted ( (PowerShell runs a grouped
     # command inside echo (...)).
     unquoted = re.sub(r'"[^"]*"|\'[^\']*\'', '', command)
-    if DELETE_TEXT.search(command) and not (all(head in READ_ONLY for head in heads(command)) and '(' not in unquoted):
+    searching = all(head in READ_ONLY for head in heads(segments))
+    if DELETE_TEXT.search(active) and not (searching and '(' not in unquoted):
         backstop(command, cwd)
-    lowered = ' ' + command.lower() + ' '
-    searching = all(head in READ_ONLY for head in heads(command))
-    if INLINE.search(command) and CODE_DELETE.search(command) and not searching:
+    lowered = ' ' + active.lower() + ' '
+    if INLINE.search(command) and CODE_DELETE.search(active) and not searching:
         block('inline code or a heredoc deletes files; its targets cannot be checked.')
     if re.search(r'\[(system\.)?io\.(file|directory)\]::delete|\.delete\s*\(|deletefolder', lowered) and not searching:
         block('.NET or COM Delete targets cannot be checked.')
-    if re.search(r'(?<![\w-])git(\.exe)?\s.*\s-c\s', command) and DELETE_TEXT.search(command):  # -c, not -C
+    if re.search(r'(?<![\w-])git(\.exe)?\s.*\s-c\s', command) and DELETE_TEXT.search(active):  # -c, not -C
         block('git -c with a delete (an alias or a hook command can run it).')
-    parts = SEPARATORS.split(command)
-    for position in range(0, len(parts), 2):
-        if parts[position].strip():
-            cwd = check_segment(parts[position].strip(), cwd, position > 0 and parts[position - 1] == '|')
+    for segment, separator in segments:
+        cwd = check_segment(segment, cwd, separator == '|')
 
 
 if __name__ == '__main__':

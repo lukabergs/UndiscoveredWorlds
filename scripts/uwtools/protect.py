@@ -3,7 +3,7 @@
     uv run python scripts/uwtools/protect.py status
     uv run python scripts/uwtools/protect.py lock            (agents may run it)
     uv run python scripts/uwtools/protect.py harden          (the user, from an elevated terminal: owner = Administrators)
-    uv run python scripts/uwtools/protect.py unlock PLACE    (the user only; the guards refuse it for agents)
+    uv run python scripts/uwtools/protect.py unlock PLACE... (the user only; the guards refuse it for agents)
 
 The user's request (2026-10-20): a safeguard that makes accidental deletes physically impossible. `lock` adds one
 explicit, inheritable ACE to each place in PLACES: Everyone (S-1-1-0) denied DELETE and DELETE_CHILD, for the folder,
@@ -17,8 +17,13 @@ ACE; the guards refuse icacls, cacls, takeown, Set-Acl and `protect.py unlock` f
 it makes BUILTIN\\Administrators the owner, so that changing the permissions needs an elevated process (a UAC prompt,
 which agents never get). Removing the protection, for the user: `unlock PLACE` from an elevated terminal once
 hardened (from a normal one before).
+
+Since 2026-11-01 (the user could not delete D:/dev/bak or empty the trash by hand) only refs/ is locked: D:/dev/bak,
+worktree-archive and the trash are RELEASED, `lock` no longer takes them and `unlock` lifts what is left on them.
+The guards still refuse agents' deletes there (guard_catastrophe.py PROTECTED_TREES).
 """
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -27,6 +32,8 @@ from pathlib import Path
 PLACES = [
     Path(r'C:\dev\undiscovered-worlds\refs'),
     Path(r'D:\dev\undiscovered-worlds\refs'),  # the storage side of refs/processed/physical and refs/source/physical
+]
+RELEASED = [  # locked until 2026-11-01; `unlock` lifts them, `status` shows them
     Path(r'D:\dev\bak'),
     Path(r'D:\dev\undiscovered-worlds\worktree-archive'),
     Path(r'D:\dev\undiscovered-worlds\trash'),
@@ -41,10 +48,16 @@ def icacls(*args):
     return result.returncode, result.stdout + result.stderr
 
 
-def sddl(place):
-    result = subprocess.run(['powershell', '-NoProfile', '-Command', f"(Get-Acl -LiteralPath '{place}').Sddl"],
-                            capture_output=True, text=True)
+def powershell(command):
+    # Windows PowerShell cannot load Get-Acl with the module path PowerShell 7 hands down (status read every place
+    # as unlocked when run from pwsh): drop it.
+    env = {key: value for key, value in os.environ.items() if key.upper() != 'PSMODULEPATH'}
+    result = subprocess.run(['powershell', '-NoProfile', '-Command', command], capture_output=True, text=True, env=env)
     return result.stdout.strip()
+
+
+def sddl(place):
+    return powershell(f"(Get-Acl -LiteralPath '{place}').Sddl")
 
 
 def denies(text, inherited):
@@ -72,9 +85,7 @@ def covered(path):
 
 
 def owner(place):
-    result = subprocess.run(['powershell', '-NoProfile', '-Command', f"(Get-Acl -LiteralPath '{place}').Owner"],
-                            capture_output=True, text=True)
-    return result.stdout.strip()
+    return powershell(f"(Get-Acl -LiteralPath '{place}').Owner")
 
 
 def main():
@@ -85,15 +96,20 @@ def main():
     lock.add_argument('places', nargs='*', help='some of PLACES (default: all)')
     commands.add_parser('harden', allow_abbrev=False)
     unlock = commands.add_parser('unlock', allow_abbrev=False)
-    unlock.add_argument('place')
+    unlock.add_argument('places', nargs='+')
     args = parser.parse_args()
     if args.command == 'status':
-        for place in PLACES:
+        for place in PLACES + RELEASED:
             state = 'missing' if not place.exists() else 'locked' if locked(place) else 'NOT locked'
             # One file deep inside shows whether the protection reached the existing tree.
             sample = next((item for item in place.rglob('*') if item.is_file()), None) if state == 'locked' else None
             reach = '' if sample is None else ('  (reaches ' if covered(sample) else '  (NOT on ') + str(sample) + ')'
-            print(f'{state:10}  owner {owner(place) if place.exists() else "-":36}  {place}{reach}')
+            if place.exists() and not sddl(place):
+                state = 'UNKNOWN'  # the permissions could not be read (do not report it as unlocked)
+            elif place in RELEASED and state == 'NOT locked':
+                state = 'released'
+            note = '  (released: run unlock)' if place in RELEASED and state == 'locked' else ''
+            print(f'{state:10}  owner {owner(place) if place.exists() else "-":36}  {place}{reach}{note}')
         return
     if args.command == 'lock':
         chosen = [Path(item).resolve() for item in args.places] or PLACES
@@ -121,12 +137,16 @@ def main():
                 print(('owner set   ' if code == 0 else 'FAILED      ') + str(place) +
                       ('' if code == 0 else f' ({out.strip()}; run from an elevated terminal)'))
         return
-    place = Path(args.place).resolve()
-    if place not in PLACES:
-        sys.exit(f'{place} is not one of the protected places')
-    code, out = icacls(str(place), '/remove:d', EVERYONE)
-    print(out.strip())
-    sys.exit(0 if code == 0 and not locked(place) else 1)
+    chosen = [Path(item).resolve() for item in args.places]
+    unknown = [str(place) for place in chosen if place not in PLACES + RELEASED]
+    if unknown:
+        sys.exit(f'not protected or released places: {unknown}')
+    failed = False
+    for place in chosen:
+        code, out = icacls(str(place), '/remove:d', EVERYONE)
+        print(out.strip())
+        failed = failed or code != 0 or not sddl(place) or locked(place)  # unreadable is not verified
+    sys.exit(1 if failed else 0)
 
 
 if __name__ == '__main__':

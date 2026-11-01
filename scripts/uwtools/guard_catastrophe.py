@@ -13,17 +13,22 @@ The rule is that a delete must be simple enough to check:
    robocopy /MIR, rsync --delete, git clean) whose targets are literal paths on its own command line: not fed by a
    pipeline, no variables, braces, command substitution or line continuation, wildcards only in the last path
    component, and no relative path after a `cd` the guard could not follow. Deletes inside inline code (python -c,
-   node -e, heredoc lines), loops and script blocks are refused: write a literal command or a script file.
-3. Every delete target, move source and mirror place is checked against the protected places: a drive root or any
-   path within two levels of one, the home folder, its direct children and its ancestors, Windows, Program Files,
-   ProgramData, any .git, PROTECTED_TREES (whole subtrees) and ROOT_ONLY folders (the folder itself; its children
-   may go). Literal destinations of copies, moves, writers and redirections may not lie in DESTINATION_TREES.
-4. Backstop, independent of the parser: a command holding a delete word anywhere may not name a protected place
-   anywhere (rule `mentioned`), nor pipe into a shell; encoded PowerShell is refused.
-Commands are split on ; && || | & outside quotes and on every newline (inside quotes too: more segments is the
-safe side). Read-only commands (rg, grep, cat, ls, echo, git log, ...) are not checked for delete words unless they
-hold command substitution or an unbalanced quote. A commit message that mentions deletes is read like any other
-text: write it to a file and use `git commit -F FILE`.
+   node -e, heredoc lines fed to a shell or interpreter), loops and script blocks are refused: write a literal
+   command or a script file. A heredoc of plain text (a file's content, a commit message) is text, not commands.
+3. Every delete target, move source and mirror place is checked against the protected places: a drive root or a
+   top folder (C:\\dev; since 2026-11-01 a folder two levels down, such as a repository in C:\\dev, may go, at the
+   user's request), a user profile or system folder two levels down (SYSTEM_TOPS), the home folder, its direct
+   children and its ancestors, Windows, Program Files, ProgramData, any .git, PROTECTED_TREES (whole subtrees) and
+   ROOT_ONLY folders (the folder itself; its children may go). Literal destinations of copies, moves, writers and
+   redirections may not lie in DESTINATION_TREES.
+4. Backstop, independent of the parser: a command holding a delete word may not name a protected place anywhere
+   (rule `mentioned`), nor pipe into a shell; encoded PowerShell is refused.
+Commands are split on ; && || | & outside quotes and on every newline. Read-only commands (rg, grep, cat, ls, echo,
+git log, ...) are not checked for delete words unless they hold command substitution or an unbalanced quote. Delete
+words count only outside text (since 2026-11-01, guard_text.py): in a command made only of commands that cannot run
+text (git commit, echo, rg, gh, the file commands, python x.py, ...), quoted strings, comments, heredoc and
+here-string bodies are text, so a commit message, an echo or a search pattern that mentions deletes passes.
+Redirections are never looked for inside quoted text or comments.
 """
 import json
 import os
@@ -32,6 +37,10 @@ import shlex
 import sys
 import tempfile
 import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import guard_text  # noqa: E402  (beside this file; hook_runner.py turns an import failure into a block)
+from guard_text import split_command  # noqa: E402
 
 DEADLINE = time.monotonic() + 15  # the hook's timeout is 30 s; past it Claude Code would run the command
 
@@ -52,6 +61,7 @@ PROTECTED_TREES = [
     r'C:\dev\undiscovered-worlds\scripts\uwtools\hook_runner.py',
     r'C:\dev\undiscovered-worlds\scripts\uwtools\guard_catastrophe.py',
     r'C:\dev\undiscovered-worlds\scripts\uwtools\delete_guard.py',
+    r'C:\dev\undiscovered-worlds\scripts\uwtools\guard_text.py',
     r'C:\dev\undiscovered-worlds\meta',
 ]
 # Folders that may not be deleted or moved whole (nor any folder above them); their children may be.
@@ -63,6 +73,8 @@ ROOT_ONLY = [
 ]
 SYSTEM_TREES = [r'C:\Windows', r'C:\Program Files', r'C:\Program Files (x86)', r'C:\ProgramData', r'C:\Users\Public',
                 r'C:\Users\Default']
+# Top folders (any drive) whose children are never deleted whole: user profiles and system places.
+SYSTEM_TOPS = {'users', 'system volume information', '$recycle.bin', 'recovery', 'boot', 'efi', 'config.msi'}
 # Destinations no copy, move, writer or redirection may write into (refs/ is left out: data scripts write there).
 DESTINATION_TREES = SYSTEM_TREES + PROTECTED_TREES[1:]
 
@@ -83,6 +95,8 @@ ENCODED = re.compile(r'(?<![\w-])-(encodedcommand|enc|ec|e)(?![\w-])', re.IGNORE
 PIPED_SHELL = re.compile(r'\|\s*(bash|sh|zsh|pwsh|powershell|cmd|iex|invoke-expression)(\.exe)?(?![\w-])', re.IGNORECASE)
 TOKEN_SPLIT = re.compile(r'''[\s;|&<>(){}\[\],="'`]+''')
 SUBSTITUTION = re.compile(r'\$\(|`|<\(|>\(')
+SUBSTITUTION_POWERSHELL = re.compile(r'\$\(')  # PowerShell's backtick is an escape, not a substitution
+PLACEHOLDER = re.compile(r'(?<=/)<[\w.:-]+>|<[\w.:-]+>(?=/)')  # runs/<id>/x in text: its > is not a redirection
 DELETERS = {'rm', 'rmdir', 'rd', 'del', 'erase', 'unlink', 'shred', 'rimraf', 'remove-item', 'ri'}
 CMD_STYLE = {'rd', 'del', 'erase', 'rmdir'}  # their /s /q /f are switches; rm's /c is a path
 MOVERS = {'mv', 'move', 'move-item', 'mi', 'ren', 'rename', 'rename-item', 'rni'}
@@ -111,45 +125,6 @@ def block(reason):
                      'move untracked data with scripts/uwtools/trash.py where it exists, or tell the user what you '
                      'wanted to do and why.\n')
     sys.exit(2)
-
-
-def split_command(command):
-    """[(segment, separator before it, quote left open)] on ; && || | outside quotes and on every newline.
-
-    Backslash and backtick are not taken as escapes (PowerShell's "C:\\" ends a string, bash's \\" does not): a
-    quote may close early, which only splits more. A newline always ends a segment and resets the quote.
-    """
-    segments, current, before, quote, index = [], [], '', None, 0
-
-    def close(separator):
-        nonlocal current, before
-        segments.append((''.join(current).strip(), before, quote is not None))
-        current, before = [], separator
-
-    while index < len(command):
-        char = command[index]
-        if char in '\r\n':
-            close('\n')
-            quote = None
-        elif quote:
-            if char == quote:
-                quote = None
-            current.append(char)
-        elif char in '"\'':
-            quote = char
-            current.append(char)
-        elif command[index:index + 2] in ('&&', '||'):
-            close(command[index:index + 2])
-            index += 1
-        elif char in ';|':
-            close(char)
-        elif char == '&' and command[index - 1:index] not in ('>', '<') and command[index + 1:index + 2] != '>':
-            close('&')  # cmd's and bash's lone & runs the next command too (2>&1, &> and >& are redirections)
-        else:
-            current.append(char)
-        index += 1
-    close('')
-    return [item for item in segments if item[0]]
 
 
 def clean_components(path):
@@ -215,8 +190,10 @@ def protected(path):
     for item in forms(path):
         if item.startswith('\\\\') and depth(item) <= 3:
             return f'{item} is a network share or device root'
-        if depth(item) <= 2:
-            return f'{item} is a drive root or within two levels of one'
+        if depth(item) <= 1:
+            return f'{item} is a drive root or a top folder'
+        if depth(item) == 2 and re.split(r'[\\/]', os.path.splitdrive(item)[1].strip('\\/'))[0] in SYSTEM_TOPS:
+            return f'{item} is a user profile or a system folder'
         if item == HOME or os.path.dirname(item) == HOME or within(HOME, item):
             return f'{item} is the home folder, one of its direct children or above it'
         if '.git' in re.split(r'[\\/]', item):
@@ -378,12 +355,15 @@ def check_segment(segment, cwd, piped, unbalanced=False, level=0):
     lowered = [w.lower() for w in words]
     if head == 'git' and len(lowered) > 1 and lowered[1] in ('log', 'show', 'diff', 'grep', 'status', 'blame'):
         head = 'git-read'
-    for match in REDIRECT.finditer(segment):
+    # Redirections: not inside quoted text or comments, not the > of a <placeholder>, not to a device or a bare drive
+    # letter (a > b: in inline code).
+    for match in REDIRECT.finditer(PLACEHOLDER.sub('_', guard_text.blank(segment, POWERSHELL, redirects=True))):
         target = match.group(1)
-        if target.lower() not in ('/dev/null', '$null', 'nul') and not target.startswith('&'):
+        if not re.fullmatch(r'/dev/\S*|\$null|nul|&.*|[a-z]:', target, re.IGNORECASE):
             literal(target, cwd, 'redirection', protected_destination, strict=False)
-    deleting = bool(DELETE_WORDS.search(segment))
-    if deleting and SUBSTITUTION.search(segment):
+    active = guard_text.blank(segment, POWERSHELL) if TEXT_INERT else segment  # without text (guard_text.py)
+    deleting = bool(DELETE_WORDS.search(active))
+    if deleting and (SUBSTITUTION_POWERSHELL if POWERSHELL else SUBSTITUTION).search(active):
         block('a delete together with command substitution or backticks: the guard cannot see what runs.')
     if deleting and unbalanced:
         block('a delete in a command whose quotes the guard cannot pair (escaped quotes): write it more simply.')
@@ -507,10 +487,17 @@ def check_segment(segment, cwd, piped, unbalanced=False, level=0):
     return cwd
 
 
-def check(command, cwd):
+TEXT_INERT = False  # set per command: its quoted strings and comments are text (guard_text.readable)
+POWERSHELL = False  # set per command: the PowerShell tool, else Git Bash
+
+
+def check(command, cwd, powershell=False):
+    global TEXT_INERT, POWERSHELL
     if re.search(r'(?<![\w-])(pwsh|powershell)(\.exe)?(?![\w-])', command, re.IGNORECASE) and ENCODED.search(command):
         block('an encoded PowerShell command cannot be read.')
-    if DELETE_WORDS.search(command):
+    POWERSHELL = powershell
+    command, TEXT_INERT = guard_text.readable(command, powershell)
+    if DELETE_WORDS.search(guard_text.blank(command, powershell) if TEXT_INERT else command):
         if PIPED_SHELL.search(command):
             block('a delete piped into a shell (| bash, | iex): the guard cannot see what runs.')
         backstop(command, cwd)
@@ -526,7 +513,7 @@ def main():
         match = re.match(r'^/([a-zA-Z])(/.*)?$', start)
         if match:  # a Git Bash /c/... form
             start = match.group(1).upper() + ':' + (match.group(2) or '/')
-        check(command, os.path.normcase(os.path.normpath(start)))
+        check(command, os.path.normcase(os.path.normpath(start)), payload.get('tool_name') == 'PowerShell')
     except SystemExit:
         raise
     except BaseException as error:  # fail closed: a guard that cannot decide blocks

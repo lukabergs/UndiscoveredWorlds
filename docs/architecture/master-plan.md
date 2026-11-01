@@ -371,8 +371,9 @@ One row per step as it closes. Duration is measured from the previous step's com
 What an agent cannot or may not do alone. The delete guard's refusals land here with path and reason.
 
 - Done 2026-10-20: the user retired the 30 T8 worktrees. Since then agents retire landed worktrees, drop bundled branches and trash scratch themselves (AGENTS.md "Autonomy"; the two guards, `guard_catastrophe.py` and `delete_guard.py`).
-- **Emptying the trash** (`D:/dev/undiscovered-worlds/trash`; `trash.py list` shows the entries): the user's only. The trash is delete-protected, so first `uv run python scripts/uwtools/protect.py unlock D:\dev\undiscovered-worlds\trash`, delete, then `protect.py lock`. The same applies to deleting anything by hand in `refs/`, `D:/dev/bak` or `worktree-archive`.
-- **Harden the protection (one elevated step):** from a terminal opened with "Run as administrator", in the repository: `uv run python scripts/uwtools/protect.py harden`. That makes Administrators the owner of the protected folders, so removing the deny-delete permission needs an elevated terminal, which agents never get. Before it, only the guards stop an agent from removing the permission.
+- **Release the lock on `D:/dev/bak`, `worktree-archive` and the trash (one elevated step, decided 2026-11-01):** from a terminal opened with "Run as administrator", in the repository: `uv run python scripts/uwtools/protect.py unlock D:\dev\bak D:\dev\undiscovered-worlds\worktree-archive D:\dev\undiscovered-worlds\trash`; `protect.py status` then shows only `refs/` (both sides) locked. Afterwards the user deletes in those three by hand; the guards still refuse agents' deletes there.
+- **Emptying the trash** (`D:/dev/undiscovered-worlds/trash`; `trash.py list` shows the entries): the user's only, by hand once released. Deleting by hand in `refs/` still needs `protect.py unlock` (elevated: the protection is hardened), then `protect.py lock`.
+- Done (found 2026-11-01): the protection is hardened (owner Administrators on every place).
 - `C:/Users/Luka/.claude/hooks/guard_catastrophe.py` is a two-line stub left by the move into the repository; the user may delete it.
 - Decisions carried from the old plans (each has a recommendation; nothing blocks on them):
   - the verdict on climate baseline 388 (CP §10);
