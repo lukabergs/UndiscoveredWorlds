@@ -50,7 +50,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from uwtools import ledger, naming, paths, runs
+from uwtools import ledger, naming, paths, runs, storage
 
 # `uv run` exports its own path; subprocesses may not find uv on PATH.
 UV = os.environ.get('UV', 'uv')
@@ -99,8 +99,8 @@ def evaluation(args, extra):
         # A run of the world or erosion series is compared with the run before it, so its page and its
         # review request carry the parent's maps and the footprint of the change.
         complete = [entry for entry in runs.registry(args.module)['runs'] if entry.get('status') == 'complete' and entry.get('run')]
-        if complete and (ROOT / complete[-1]['run'] / 'bundle/manifest.json').is_file():
-            options += ['--baseline', ROOT / complete[-1]['run'] / 'bundle']
+        if complete and (storage.data_path(complete[-1]['run']) / 'bundle/manifest.json').is_file():
+            options += ['--baseline', storage.data_path(complete[-1]['run']) / 'bundle']
     call([UV, 'run', '--offline', EVALUATION / 'experiment.py', args.module, *options, *extra])
 
 
@@ -130,12 +130,12 @@ def pages(args, extra):
         raise SystemExit('--earth: a run page shows the Earth window chosen when it was evaluated (evaluate --earth NAME; '
                          'evaluations are never overwritten); --earth belongs to a comparison of several evaluations')
     if args.command == 'dashboard':
-        output = args.output or naming.main_root() / 'out/evaluation' / args.module / 'dashboard'  # routed (D)
+        output = args.output or storage.data_path('out/evaluation') / args.module / 'dashboard'  # on storage (D)
         call([UV, 'run', '--offline', script, 'dashboard', args.module, '--output', output])
     elif len(args.evaluation) == 1:
         call([UV, 'run', '--offline', script, 'run', args.evaluation[0]])
     else:
-        output = args.output or naming.main_root() / 'out/evaluation' / args.module / 'comparison'  # routed (D)
+        output = args.output or storage.data_path('out/evaluation') / args.module / 'comparison'  # on storage (D)
         earth = ['--earth', args.earth] if args.earth else []
         call([UV, 'run', '--offline', script, 'compare', *args.evaluation, '--output', output, *earth])
 
@@ -172,7 +172,7 @@ def tectonics(args, extra):
     directories = []
     for identifier in args.runs:
         run = runs.directory('tectonics', identifier)
-        directory = run / 'evaluation' if run else ROOT / 'runs/reports/tectonics' / str(identifier) / 'evaluation'
+        directory = run / 'evaluation' if run else storage.data_path('runs/reports/tectonics') / str(identifier) / 'evaluation'
         if not (directory / 'evaluation.json').is_file():
             if run:
                 raise SystemExit(f'Run {identifier} has no evaluation: {directory}')
@@ -186,7 +186,7 @@ def tectonics(args, extra):
     if len(directories) == 1:
         call([UV, 'run', '--offline', EVALUATION / 'report.py', 'run', directories[0]])
         return
-    output = args.output or ROOT / 'runs/reports/tectonics' / ('-'.join(map(str, args.runs)) + '-comparison')
+    output = args.output or storage.data_path('runs/reports/tectonics') / ('-'.join(map(str, args.runs)) + '-comparison')
     call([UV, 'run', '--offline', EVALUATION / 'report.py', 'compare', *directories, '--output', output])
 
 

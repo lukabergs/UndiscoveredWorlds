@@ -73,7 +73,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / 'scripts'
 sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(SCRIPTS / 'evaluation'))
-from uwtools import grid, naming  # noqa: E402
+from uwtools import grid, naming, storage  # noqa: E402
 from uwtools.tectonics_earth_reference import load_earth_reference, reference_inputs  # noqa: E402
 
 TAG_PREFIX = 'metrics-'  # the page's tag: metrics-<name>
@@ -288,7 +288,7 @@ def earth_global():
     area = dy_km * dy_km * np.cos(np.radians(lat))[:, None] * np.ones((1, columns))
     sea = sea_from(z)
     out, _ = land_metrics(z, ~sea & (z > 0), sea, area, lat, dy_km, True, grid.area_weights(rows, columns))
-    out['source'] = path.relative_to(ROOT).as_posix()
+    out['source'] = storage.logical(path) or path.as_posix()
     out['shape'] = [rows, columns]
     return out
 

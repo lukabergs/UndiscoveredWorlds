@@ -31,9 +31,9 @@ from scipy import ndimage
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'scripts'))
 from uwtools.bundle import Bundle  # noqa: E402
-from uwtools.paths import main_root  # noqa: E402
+from uwtools import storage  # noqa: E402
 
-SANDBOX = main_root() / 'out' / 'scratch' / 'sandbox'
+SANDBOX = storage.data_path('out/scratch/sandbox')
 
 
 def block_means(field, cell):
@@ -50,7 +50,7 @@ def world_size(run):
     """The base bundle's lat-lon columns and rows (the label's config.json)."""
     config = json.loads((run / 'config.json').read_text(encoding='utf-8'))
     base = Path(config['base_bundle'])
-    for candidate in (base, main_root() / base, ROOT / base):
+    for candidate in (base, storage.data_path(base), ROOT / base):
         if (candidate / 'manifest.json').is_file():
             bundle = Bundle.open(candidate)
             return bundle.columns, bundle.rows

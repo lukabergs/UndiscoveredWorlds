@@ -26,7 +26,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from uwtools.bundle import SCHEMAS as BUNDLE_SCHEMAS, Bundle, read_manifest
 from uwtools.hashing import sha256_bytes
-from uwtools import runs
+from uwtools import runs, storage
 from checks import hierarchy_levels, run_checks
 from references import References
 from validation import run_validation
@@ -148,7 +148,7 @@ def evaluate_into(profile, profile_path, bundle, output, baseline, repeat, input
     document = {
         'schema': SCHEMA,
         'evaluated': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),
-        'profile': {'module': profile['module'], 'path': profile_path.relative_to(ROOT).as_posix() if profile_path.is_relative_to(ROOT) else str(profile_path),
+        'profile': {'module': profile['module'], 'path': storage.logical(profile_path) or (profile_path.relative_to(ROOT).as_posix() if profile_path.is_relative_to(ROOT) else str(profile_path)),
                     'sha256': sha256_bytes(profile_path.read_bytes())},
         'evidence': profile['evidence'], 'run': describe(bundle), 'baseline': describe(baseline),
         'repeat': describe(repeat), 'explicit': describe(explicit), 'input': describe(input_bundle),

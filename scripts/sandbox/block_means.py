@@ -6,11 +6,15 @@ standard deviation of the filter's change for scale.
   uv run python scripts/sandbox/block_means.py --labels fine-filter-3,fine-filter-3m --domains B-core,G-coast --k 256
 """
 import argparse
+import sys
 from pathlib import Path
 
 import numpy as np
 
-SANDBOX = Path(__file__).resolve().parents[2] / 'out' / 'scratch' / 'sandbox'
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools import storage  # noqa: E402
+
+SANDBOX = storage.data_path('out/scratch/sandbox')
 
 
 def main():

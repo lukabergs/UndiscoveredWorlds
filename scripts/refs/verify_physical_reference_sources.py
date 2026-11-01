@@ -16,6 +16,7 @@ from pyhdf.SD import SD, SDC
 import rasterio
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools import storage
 from uwtools.hashing import sha256
 
 REPO = Path(__file__).resolve().parents[2]
@@ -128,7 +129,7 @@ def inspect(path, kind):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output', type=Path, default=REPO / 'refs/source/physical')
+    parser.add_argument('--output', type=Path, default=storage.data_path('refs/source/physical'))
     parser.add_argument('--dataset', action='append')
     args = parser.parse_args()
     entries = json.loads((REPO / 'configs/physical-reference-sources.json').read_text())['files']

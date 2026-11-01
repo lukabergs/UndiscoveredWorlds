@@ -37,7 +37,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from uwtools import naming, paths  # noqa: E402
+from uwtools import naming, storage  # noqa: E402
 import report  # noqa: E402
 
 SCHEMA = 'uw-t8-acceptance/v1'
@@ -56,7 +56,7 @@ RELIEF_EXAGGERATION = 100.0                # the maps' hillshade: about 300 km p
 
 def default_scratch():
     try:
-        return paths.main_root(ROOT) / 'out/scratch/sphere'
+        return storage.data_path('out/scratch/sphere')
     except (OSError, subprocess.CalledProcessError):
         return ROOT / 'out/scratch/sphere'
 

@@ -32,7 +32,8 @@ def receipt(dropped=2, size=2_000_000):
 
 
 class Tree(unittest.TestCase):
-    """A temporary main tree inside a temporary storage root; finish's output captured."""
+    """A temporary main tree inside a temporary storage root (named directories on the storage root at their logical
+    path); finish's output captured."""
 
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -46,6 +47,7 @@ class Tree(unittest.TestCase):
         self.worktree = self.store / "worktree"
         self.worktree.mkdir()
         for patcher in (patch.object(naming, "_main_root", self.root),
+                        patch.object(storage, "_main", return_value=self.root),
                         patch.object(naming, "_code_state", return_value=CODE),
                         patch.object(storage, "CONFIG", self.worktree / "runs/storage.json"),
                         patch.object(runs, "ROOT", self.worktree),
@@ -170,7 +172,7 @@ class FinishTests(Tree):
         # The baseline of a module registry.
         write(self.root / "runs/registry/world.json", json.dumps(
             {"schema": "world-run-registry/v1", "baseline": 1, "runs": [{"id": 1, "run": "runs/world/1", "tag": "world"}]}))
-        write(self.root / "runs/world/1/ledger-entry.json", "{}")
+        write(self.store / "runs/world/1/ledger-entry.json", "{}")
         outcome = only(naming.finish(self.new("run", "world", module="world"), True))
         self.assertEqual(outcome["action"], "pinned")
         self.assertIn("baseline", outcome["reason"])
@@ -246,7 +248,7 @@ class FinishTests(Tree):
         self.stub(side_effect=archive.NotARun("no evaluation.json"))
         write(self.root / "runs/registry/world.json", json.dumps(
             {"schema": "world-run-registry/v1", "runs": [{"id": 1, "run": "runs/world/1", "tag": "world"}]}))
-        write(self.root / "runs/world/1/ledger-entry.json", "{}")
+        write(self.store / "runs/world/1/ledger-entry.json", "{}")
         registry =(self.root / "runs/registry/world.json").read_bytes()
         outcome = only(naming.finish(self.new("run", "world", module="world"), True))
         self.assertEqual(outcome["action"], "not-a-run")
@@ -254,7 +256,7 @@ class FinishTests(Tree):
         self.assertEqual(self.registry(), [])
 
     def test_tool_environment_points_below_the_directory_on_the_storage_drive(self):
-        directory = self.root / "out/scratch/step-check/1-parity"
+        directory = self.store / "out/scratch/step-check/1-parity"
         environment = naming.tool_environment(directory, {"PATH": "x"})
         self.assertEqual(environment["PATH"], "x")
         self.assertEqual(environment["UW_CLIMATE_DIAGNOSTICS_DIR"], str(directory / "diagnostics"))
@@ -267,7 +269,7 @@ class FinishTests(Tree):
     def test_page_directory_is_named_like_the_run(self):
         named = self.new("sandbox", "base")
         page = naming.page_directory(named)
-        self.assertEqual(page, self.root / "out/evaluation/1-base")
+        self.assertEqual(page, self.store / "out/evaluation/1-base")
         self.assertTrue(page.is_dir())
         self.assertEqual(self.new("page", "t8-acceptance").id, 2)  # the id is not drawn twice
 

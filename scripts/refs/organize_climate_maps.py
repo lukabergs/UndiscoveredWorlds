@@ -3,18 +3,21 @@
 Dry run by default. --apply journals and stages file renames so January/April
 folders cannot overwrite each other. Re-running resumes an interrupted move.
 
-A one-off migration built on renames: on a tree under the deny-delete permission of
-scripts/uwtools/protect.py (refs/) --apply fails until the user lifts it with `protect.py unlock`.
+A one-off migration built on renames.
 """
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 from reference_map_layout import product_path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools import storage  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[2]
-JOURNAL = ROOT / "runs/manifests/climate-map-layout.json"
+JOURNAL = storage.data_path("runs/manifests/climate-map-layout.json")
 
 
 def legacy_run_directory(parts):
@@ -42,8 +45,8 @@ def legacy_run_directory(parts):
 
 
 def checked(relative):
-    path = (ROOT / relative).resolve()
-    if not path.is_relative_to(ROOT) or path == ROOT:
+    path = storage.data_path(relative).resolve()
+    if storage.logical(path) in (None, "."):
         raise ValueError(f"Path escaped workspace: {path}")
     return path
 
@@ -63,22 +66,22 @@ def plan():
                 if old != new:
                     moves["refs/processed/" + old] = "refs/processed/" + new
     for kind in ("maps", "fields"):
-        base = ROOT / "runs" / kind / "climate"
+        base = storage.data_path(f"runs/{kind}/climate")
         for source in base.rglob("*"):
             if not source.is_file():
                 continue
             parts = source.relative_to(base).parts
             if source.suffix == ".txt":
-                destination = ROOT / "runs/work/legacy-map-notes" / kind / Path(*parts)
+                destination = storage.data_path("runs/work/legacy-map-notes") / kind / Path(*parts)
             elif "unregistered" in parts:
-                destination = ROOT / "runs/work/legacy-maps" / kind / Path(*parts)
+                destination = storage.data_path("runs/work/legacy-maps") / kind / Path(*parts)
             else:
                 if not source.stem.isdigit():
                     raise ValueError(f"Unknown run identity: {source}")
                 directory = legacy_run_directory(list(parts[:-1]))
                 destination = base / directory / source.name
             if source != destination:
-                moves[source.relative_to(ROOT).as_posix()] = destination.relative_to(ROOT).as_posix()
+                moves[storage.logical(source)] = storage.logical(destination)
     if len(set(moves.values())) != len(moves):
         raise ValueError("Two source files map to the same destination")
     for source, destination in moves.items():
@@ -91,7 +94,7 @@ def plan():
 
 def apply(journal):
     moves = journal["moves"]
-    staging = ROOT / "runs/work/map-layout-staging"
+    staging = storage.data_path("runs/work/map-layout-staging")
     # Stage every source before writing destinations: 0 -> 1 -> 2 is a cycle.
     if journal["phase"] == "staging":
         for index, (source, destination) in enumerate(moves.items()):
@@ -128,7 +131,7 @@ def apply(journal):
     manifest["map_layout_version"] = 1
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     # Remove only now-empty, explicitly checked directories under migrated roots.
-    for root in (ROOT / "runs/maps/climate", ROOT / "runs/fields/climate", staging):
+    for root in (storage.data_path("runs/maps/climate"), storage.data_path("runs/fields/climate"), staging):
         for directory in sorted(root.rglob("*"), key=lambda p: len(p.parts), reverse=True):
             if directory.is_dir() and not any(directory.iterdir()):
                 checked(directory).rmdir()

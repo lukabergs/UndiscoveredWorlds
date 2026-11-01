@@ -23,11 +23,11 @@ recorded.
 Kept: .npy, bundles, checkpoints, run.json, evaluation.json, review and metrics JSON, maps/palette.json, CSV, logs,
 any PNG evaluation.json does not list (sandbox images, analysis maps) and every PNG of a run without its bundle.
 
-Files are deleted in place, never moved to the trash (the trash is deny-delete: moving there frees nothing).
+Files are deleted in place, never moved to the trash (moving there frees nothing).
 Refused, with nothing dropped: a path that is or holds a link, lies in runs/archive, is or holds a protected place
-or a junction target of the main tree (or lies in a sealed place), holds tracked files (checked in the main tree,
-the path mapped back through its junctions), is not one run-level folder, or does not resolve under the storage
-root (nothing on C is dropped). The receipt <dir>/archive-receipt.json (status 'dropping', every file with its bytes
+or a storage-side root tools open directly (trash.storage_places; or lies in a sealed place), holds tracked files
+(checked in the main tree at its logical path, storage.logical), is not one run-level folder, or does not resolve
+under the storage root (nothing on C is dropped). The receipt <dir>/archive-receipt.json (status 'dropping', every file with its bytes
 and SHA-256) is written before the first file goes, with a copy in <storage root>/receipts/archive/; naming the
 same path again finishes a stopped job. Every file is re-hashed just before its removal; a changed file stops the
 job. With several paths, every path is checked (receipt states included) before the first file goes.
@@ -90,25 +90,13 @@ def main_tree():
         raise Refused(f'The main tree is unknown ({error})') from None
 
 
-def junctions(tree):
-    """(junction, resolved target) of every routed folder of a tree."""
-    found = []
-    for parent in (tree / 'runs', tree / 'runs' / 'reports', tree / 'runs' / 'work', tree / 'out'):
-        for item in parent.iterdir() if parent.is_dir() else []:
-            target = storage.junction_target(item)
-            if target is not None:
-                found.append((item, real_path(target)))
-    return found
-
-
 def protected_places(trees, root):
-    """trash.protected_places, built from the main tree (and the tree this runs in), plus every junction target."""
-    places = [root, root / 'worktree-archive', root / 'receipts', root / 'trash', root / 'refs', root / 'out',
-              root / 'out' / 'scratch', root / 'out' / 'evaluation', root / 'runs']
+    """trash.protected_places, built from the main tree (and the tree this runs in) and the storage root: its
+    fixed storage-side roots (trash.storage_places; no junctions since 2026-11-01)."""
+    places = trash.storage_places(root)
     for tree in trees:
         places += [tree, tree / '.git', tree / 'refs', tree / 'meta', tree / 'runs' / 'registry',
                    tree / 'runs' / 'ledger', tree / 'runs' / 'archive', tree / 'out', tree / 'runs']
-        places += [target for _, target in junctions(tree)]
     return [real_path(place) for place in places]
 
 
@@ -127,13 +115,14 @@ def tracked_files(tree, relative):
 
 def logical_paths(given, real, main, root):
     """(tree, path inside it) of every repository path that may name real: the given path when it lies in this tree,
-    and real mapped back through the main tree's junctions (else by its path below the storage root)."""
+    and real (below the storage root) at its logical path in the main tree (storage.logical)."""
     found = []
     if trash.inside(given, ROOT):
         found.append((ROOT, given))
-    mapped = [(main, junction / real.relative_to(target)) for junction, target in junctions(main)
-              if trash.inside(real, target)]
-    found += mapped or [(main, main / real.relative_to(root))]
+    relative = storage.logical(real) if trash.inside(real, root) else None
+    if relative is None:
+        raise Refused(f'{real}: no logical repository path below the storage root {root}')
+    found.append((main, main / relative))
     return found
 
 

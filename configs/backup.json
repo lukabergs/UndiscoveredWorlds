@@ -1,11 +1,14 @@
 {
   "schema": "uw-backup/v1",
-  "description": "Untracked data copied to the backup by scripts/uwtools/backup.py. Additive: nothing is ever deleted in the destination, and a file that would be overwritten is first moved to <destination>/.versions/<timestamp>/. out/ is not backed up (builds and scratch).",
+  "description": "Untracked data copied to the backup by scripts/uwtools/backup.py. Additive: nothing is ever deleted in the destination, and a file that would be overwritten is first moved to <destination>/.versions/<timestamp>/. A source is a path (copied to <destination>/<name>) or {path, into} (copied to <destination>/<into>): since 2026-11-01 there are no junctions, so the storage-side trees on D (runs/, refs/processed/physical, refs/source/physical) are sources of their own, landing where they did through the junctions. out/ is not backed up (builds and scratch).",
   "destination": "D:/dev/bak/undiscovered-worlds",
   "sources": {
     "refs": "refs",
+    "refs-processed-physical": {"path": "D:/dev/undiscovered-worlds/refs/processed/physical", "into": "refs/processed/physical"},
+    "refs-source-physical": {"path": "D:/dev/undiscovered-worlds/refs/source/physical", "into": "refs/source/physical"},
     "meta": "meta",
     "runs": "runs",
+    "runs-storage": {"path": "D:/dev/undiscovered-worlds/runs", "into": "runs"},
     "memory": "~/.claude/projects/c--dev-undiscovered-worlds/memory"
   }
 }

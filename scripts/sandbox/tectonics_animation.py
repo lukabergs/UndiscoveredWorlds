@@ -16,6 +16,7 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 ROOT = SCRIPTS.parent
 sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(SCRIPTS / 'evaluation'))
+from uwtools import storage  # noqa: E402
 from uwtools.bundle import Bundle  # noqa: E402
 from maps import animations  # noqa: E402
 
@@ -24,7 +25,7 @@ PROFILE = ROOT / 'configs' / 'evaluation' / 'tectonics.json'
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--run', type=Path, default=ROOT / 'out' / 'scratch' / 'sandbox' / 'tectonics')
+    parser.add_argument('--run', type=Path, default=storage.data_path('out/scratch/sandbox/tectonics'))
     parser.add_argument('--maps', default='plates,elevation')
     arguments = parser.parse_args()
 

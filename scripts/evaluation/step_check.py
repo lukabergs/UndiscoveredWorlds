@@ -38,7 +38,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from uwtools import naming, paths
+from uwtools import naming, paths, storage
 
 ROOT = paths.ROOT
 # The main tree: ROOT itself, or the main checkout when ROOT is a worktree; refs/ and runs/ live there.
@@ -77,15 +77,14 @@ def reference_bundle(reference, name):
 def default_reference(grid, social):
     """The newest step check with the same grid and --social setting whose result.json says it passed and
     compared its bundles with a reference, or None."""
-    root = naming.main_root()
     for entry in reversed(naming.records('step-check')):
-        result_path = root / entry['run'] / 'result.json'
+        result_path = storage.data_path(entry['run']) / 'result.json'
         if not result_path.is_file():
             continue
         result = json.loads(result_path.read_text(encoding='utf-8'))
         if result.get('passed') and result.get('compared') and result.get('grid') == grid \
                 and bool(result.get('social')) == social:
-            return root / entry['run']
+            return storage.data_path(entry['run'])
     return None
 
 
@@ -116,7 +115,7 @@ def shown(path):
     """A path relative to the main tree when it lies there, else as given."""
     root = naming.main_root()
     path = Path(os.path.abspath(path))
-    return path.relative_to(root).as_posix() if path.is_relative_to(root) else str(path)
+    return storage.logical(path) or (path.relative_to(root).as_posix() if path.is_relative_to(root) else str(path))
 
 
 def checks(arguments, directory, reference, result):
@@ -162,7 +161,7 @@ def checks(arguments, directory, reference, result):
     status = subprocess.run([sys.executable, 'scripts/check_records.py'], cwd=ROOT).returncode
     print(f'check_records exit {status}')
     passed = passed and status == 0
-    reports = [str(path) for name in ACCESS_SETS for path in sorted((DATA_ROOT / 'runs/reports' / name).glob('*.json'))]
+    reports = [str(path) for name in ACCESS_SETS for path in sorted((storage.data_path('runs/reports') / name).glob('*.json'))]
     status = subprocess.run([sys.executable, 'scripts/evaluation/process_access.py', '--check'] + reports, cwd=ROOT).returncode
     print(f'process_access exit {status}')
     return passed and status == 0

@@ -456,8 +456,8 @@ def drop_branches(names):
         number += 1
     bundle = archive_root() / f'branches-{stamp}-{number}.bundle'  # never overwrites an earlier bundle
     bundle.parent.mkdir(parents=True, exist_ok=True)
-    # git writes a bundle through a lock file it then renames; the archive is delete-protected (protect.py), so
-    # the bundle is made in the temp folder and copied in.
+    # The bundle is made in the temp folder and copied in (written when the archive was delete-protected; a copy
+    # still leaves no half-written bundle in the archive).
     with tempfile.TemporaryDirectory() as scratch:
         made = Path(scratch) / bundle.name
         code, out = git('bundle', 'create', str(made), *(f'refs/heads/{name}' for name in heads))

@@ -232,9 +232,9 @@ def cube_grid(d, domain, config):
     """(CubeGrid, kept mask) of a cube domain's saved arrays in label directory d."""
     import cube_domain
     sys.path.insert(0, str(ROOT / 'scripts'))
+    from uwtools import storage
     from uwtools.bundle import Bundle
-    path = Path(config['base_bundle'])
-    base = Bundle.open(path if path.is_absolute() else ROOT / path)
+    base = Bundle.open(storage.data_path(config['base_bundle']))
     radius = float(base.radius_km or 6371.0)
     if domain == 'global':
         n = np.load(d / 'global-elevation-physics-native.npy', mmap_mode='r').shape[-1]

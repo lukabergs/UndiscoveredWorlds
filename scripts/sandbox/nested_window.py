@@ -94,7 +94,7 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 ROOT = SCRIPTS.parent
 sys.path.insert(0, str(SCRIPTS / 'sandbox'))
 import terrain_sandbox as ts  # noqa: E402  (puts scripts/ and scripts/evaluation on the path)
-from uwtools import naming  # noqa: E402
+from uwtools import naming, storage  # noqa: E402
 from uwtools.bundle import Bundle  # noqa: E402
 
 DEFAULT_CONFIG = ROOT / 'configs' / 'sandbox' / 'nested.json'
@@ -124,7 +124,7 @@ def load_config(parent_directory, path, overrides):
 
 def prepare_world(config):
     """The sandbox's world fields, as terrain_sandbox.main prepares them."""
-    bundle = Bundle.open(ROOT / config['base_bundle'])
+    bundle = Bundle.open(storage.data_path(config['base_bundle']))
     world = ts.world_fields(bundle)
     radius_m = float(bundle.manifest.get('parameters', {}).get('world.body.radius_km', 6371.0)) * 1000.0
     world['precipitation'] = ts.precipitation(world, config['precipitation'], radius_m)

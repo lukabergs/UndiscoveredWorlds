@@ -18,7 +18,7 @@ from score import DEFINITION as PALETTE, VERSION as SCORE_VERSION, WEIGHTS, eval
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'scripts'))
-from uwtools import grid, regions  # noqa: E402
+from uwtools import grid, regions, storage  # noqa: E402
 from uwtools.hashing import sha256  # noqa: E402
 from uwtools.paths import DATA_ROOT  # noqa: E402
 
@@ -307,7 +307,7 @@ def compare_river_mouths(bundle, spec, baseline=None):
     top, match_km = int(spec.get('top', 20)), float(spec.get('match_km', 500))
     result = {'reference': f"{path.name}: {len(table['rivers'])} authored river mouths, top {top} outlets, "
                            f"match within {match_km:g} km",
-              'table': path.relative_to(ROOT).as_posix() if path.is_relative_to(ROOT) else path.as_posix(),
+              'table': storage.logical(path) or (path.relative_to(ROOT).as_posix() if path.is_relative_to(ROOT) else path.as_posix()),
               'table_sha256': sha256(path), 'note': table.get('description', '')}
     for key, source in (('run', bundle), ('baseline', baseline)):
         if source is not None:

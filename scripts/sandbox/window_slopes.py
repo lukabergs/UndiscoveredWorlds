@@ -22,7 +22,9 @@ from scipy import ndimage
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts" / "sandbox"))
+sys.path.insert(0, str(ROOT / "scripts"))
 import terrain_metrics as tm  # noqa: E402
+from uwtools import storage  # noqa: E402
 from fjord_metrics import domain_geometry  # noqa: E402
 
 
@@ -48,7 +50,7 @@ def load(item: str) -> tuple[np.ndarray, np.ndarray, float, float]:
             ns, ew = ns * factor, ew * factor
         return elevation, sea, ns, ew
     label, domain = item.split("/")
-    elevation = np.load(ROOT / "out/scratch/sandbox" / label / f"{domain}-elevation.npy").astype(np.float64)
+    elevation = np.load(storage.data_path("out/scratch/sandbox") / label / f"{domain}-elevation.npy").astype(np.float64)
     sea = tm.sea_from(elevation)
     ns, latitude = domain_geometry(label, domain)
     return elevation, sea, ns, ns * math.cos(math.radians(latitude))

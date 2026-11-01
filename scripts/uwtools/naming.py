@@ -14,12 +14,13 @@ recorded in runs/registry/scratch.json:
     experiment   out/evaluation/<module>         experiment.py without --register or --archive
     page         out/evaluation                  acceptance.py without --output
 
-The registry and the directories are always the main tree's (paths.main_root()), never a worktree's
-copy, so parallel workers share one sequence; an OS byte-range lock on out/scratch/naming.lock (a file
-that stays; the system releases the lock when its process ends, so a lock is never stale) serialises the
-appends. A new directory must resolve under the storage
-root of runs/storage.json (D). The next id is one more than the registry's highest and every numeric
-prefix under the kinds' parent folders. A tag is lower case, `^[a-z][a-z0-9]*(-[a-z0-9]+)*$`, at most
+The registry is always the main tree's (paths.main_root()), never a worktree's copy, so parallel workers
+share one sequence; the directories are on the storage drive at their logical path (storage.data_path:
+<storage root of the main tree's runs/storage.json>/out/scratch/..., /runs/<module>/...; no junctions since
+2026-11-01), and the registry records the logical path. An OS byte-range lock on out/scratch/naming.lock (on
+storage; a file that stays; the system releases the lock when its process ends, so a lock is never stale)
+serialises the appends. A new directory must resolve under the storage root. The next id is one more than
+the registry's highest and every numeric prefix under the kinds' parent folders. A tag is lower case, `^[a-z][a-z0-9]*(-[a-z0-9]+)*$`, at most
 40 characters, and does not end in `-<digits>` or `-v<digits>` (the id is the version). Labels written
 before the scheme start with a letter and are not renamed; find() still resolves them. The topic of a
 directory is (kind, module, tag); previous() gives the topic's newest earlier record.
@@ -43,7 +44,7 @@ cannot be archived is reported and left as it is: the finished run never fails b
 
 tool_environment(directory) is the environment of a headless tool whose own outputs (climate diagnostics, images,
 worlds; the UW_*_DIR variables) go to directory on the storage drive instead of the pipeline's defaults under out/
-on C. page_directory(named) is out/evaluation/<name> of the main tree, where a scratch run's HTML page goes.
+on C. page_directory(named) is out/evaluation/<name> on storage, where a scratch run's HTML page goes.
 """
 import argparse
 import copy
@@ -121,8 +122,9 @@ def _check_kind(kind, module):
         raise ValueError(f'Kind {kind} needs a module')
 
 
-def _parent(kind, module, root):
-    return root / PARENTS[kind].format(module=module)
+def _parent(kind, module):
+    """The kind's parent folder on disk (on storage: storage.data_path of its logical path)."""
+    return storage.data_path(PARENTS[kind].format(module=module))
 
 
 def _under(path, store):
@@ -139,17 +141,14 @@ def _storage():
     return store
 
 
-def _storage_parent(parent, root, store):
-    """parent created inside the routed out/scratch, out/evaluation or runs/<module> of the main tree."""
-    top = root.joinpath(*parent.relative_to(root).parts[:2])
-    if not _under(top, store):
-        if Path(os.path.abspath(storage.ROOT)) != Path(os.path.abspath(root)):
-            raise SystemExit(f'{top} is not routed to the storage drive; route it from the main tree '
-                             '(scripts/uwtools/storage.py route)')
-        storage.route(top)
-    parent.mkdir(parents=True, exist_ok=True)
+def _storage_parent(relative):
+    """The folder of a logical path (out/scratch/..., out/evaluation/..., runs/<module>) on the storage drive,
+    created when missing; SystemExit when it does not resolve under the storage root."""
+    store = _storage()
+    parent = storage.data_path(relative)
     if not _under(parent, store):
         raise SystemExit(f'{parent} does not resolve under the storage root {store}')
+    parent.mkdir(parents=True, exist_ok=True)
     return parent
 
 
@@ -178,19 +177,19 @@ def next_id(root):
     (under out/evaluation: the folders of the modules configs/evaluation/*.json names)."""
     used = [entry['id'] for entry in runs.registry(REGISTRY, root=root)['runs']]
     for kind in ('sandbox', 'step-check', 'geology', 'page'):
-        used += _numbered(_parent(kind, None, root))
+        used += _numbered(_parent(kind, None))
     for profile in sorted((root / 'configs/evaluation').glob('*.json')):
-        used += _numbered(_parent('experiment', profile.stem, root))
+        used += _numbered(_parent('experiment', profile.stem))
     return max(used, default=0) + 1
 
 
 class _Lock:
-    """A byte-range lock (msvcrt.locking) on the first byte of out/scratch/naming.lock. The file is created
-    when missing and never removed; the system releases the lock when the handle closes or the process
+    """A byte-range lock (msvcrt.locking) on the first byte of out/scratch/naming.lock (on storage). The file is
+    created when missing and never removed; the system releases the lock when the handle closes or the process
     ends. Waits up to LOCK_TIMEOUT_SECONDS, then raises TimeoutError."""
 
-    def __init__(self, root):
-        self.path = root / LOCK
+    def __init__(self):
+        self.path = storage.data_path(LOCK)
         self.handle = None
 
     def __enter__(self):
@@ -224,25 +223,27 @@ def new_directory(kind, tag, *, module=None, label=''):
     """A new, empty directory of a kind, named by the next id and the tag (see the module docstring)."""
     _check_kind(kind, module)
     check_tag(tag)
-    store = _storage()
     root = main_root()
     if kind == 'run':
-        # runs/<module>/<id> of the main tree, numbered by its registry (storage.run_directory, from any checkout).
-        parent = _storage_parent(root / 'runs' / module, root, store)
+        # runs/<module>/<id> on storage, numbered by the main tree's registry (from any checkout).
+        parent = _storage_parent(f'runs/{module}')
         identifier = runs.next_id(module, root=root)
         path = parent / str(identifier)
         path.mkdir(exist_ok=False)
         return Named(identifier, kind, tag, module, str(identifier), path)
-    parent = _storage_parent(_parent(kind, module, root), root, store)
-    with _Lock(root):
+    parent = _storage_parent(PARENTS[kind].format(module=module))
+    with _Lock():
         identifier = next_id(root)
         name = f'{identifier}-{tag}'
         path = parent / name
+        logical = storage.logical(path)
+        if logical is None or not storage.on_storage(logical):
+            raise SystemExit(f'{path} has no logical repository path on storage')
         path.mkdir(exist_ok=False)
         entry = {'id': identifier, 'kind': kind, 'tag': tag}
         if module:
             entry['module'] = module
-        entry.update(run=path.relative_to(root).as_posix(),
+        entry.update(run=logical,
                      date=datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),
                      label=label or '', tool=_tool(), code=_code_state())
         runs.append_record(REGISTRY, entry, root=root)
@@ -256,9 +257,9 @@ def records(kind=None, module=None, root=None):
             if (kind is None or entry.get('kind') == kind) and (module is None or entry.get('module') == module)]
 
 
-def _legacy_step_check(ref, root):
+def _legacy_step_check(ref):
     for parent in LEGACY_STEP_CHECKS:
-        folder = root / parent
+        folder = storage.data_path(parent)
         if (folder / ref).is_dir():
             return folder / ref
         if any((folder / f'{ref}-{recipe}').is_dir() for recipe in LEGACY_STEP_CHECK_RECIPES):
@@ -284,12 +285,12 @@ def find(kind, ref, module=None):
             raise FileNotFoundError(f'{module} run {ref} is not in the main tree\'s runs/registry/{module}.json')
         if not entry.get('run'):
             raise FileNotFoundError(f'{module} run {ref} is sealed under runs/archive')
-        return root / entry['run']
-    parent = _parent(kind, module, root)
+        return storage.data_path(entry['run'])
+    parent = _parent(kind, module)
     if ref.isdigit():
         for entry in records(kind, module if kind == 'experiment' else None, root):
             if entry['id'] == int(ref):
-                return root / entry['run']
+                return storage.data_path(entry['run'])
         found = [entry for entry in parent.glob(f'{ref}-*') if entry.is_dir()] if parent.is_dir() else []
         if len(found) == 1:
             return found[0]
@@ -297,7 +298,7 @@ def find(kind, ref, module=None):
     if (parent / ref).is_dir():
         return parent / ref
     if kind == 'step-check':
-        legacy = _legacy_step_check(ref, root)
+        legacy = _legacy_step_check(ref)
         if legacy is not None:
             return legacy
     raise FileNotFoundError(f'No {kind} named {ref!r} in {parent}')
@@ -325,8 +326,9 @@ def _now():
 
 def tool_environment(directory, base=None):
     """base (default os.environ) with the UW_*_DIR variables pointing below directory (TOOL_OUTPUTS), so a headless
-    tool's own outputs land there; SystemExit when directory does not resolve under the storage root."""
-    directory = Path(os.path.abspath(directory))
+    tool's own outputs land there; SystemExit when directory does not resolve under the storage root. A relative
+    directory is a logical repository path (storage.data_path)."""
+    directory = Path(os.path.abspath(storage.data_path(directory)))
     store = _storage()
     if not _under(directory, store):
         raise SystemExit(f'{directory} does not resolve under the storage root {store}; a tool writes its own '
@@ -337,21 +339,27 @@ def tool_environment(directory, base=None):
 
 
 def page_directory(named):
-    """out/evaluation/<name> of the main tree (created when missing): the page folder of a scratch run, named like
-    the run (same id and tag; no record of its own). Its pages link the run's images by relative path."""
-    root = main_root()
-    parent = _storage_parent(root / PARENTS['page'], root, _storage())
+    """out/evaluation/<name> on storage (created when missing): the page folder of a scratch run, named like the run
+    (same id and tag; no record of its own). Its pages link the run's images by relative path."""
+    parent = _storage_parent(PARENTS['page'])
     path = parent / named.name
     path.mkdir(exist_ok=True)
     return path
 
 
 def _forms(path):
-    """A path as given (absolute) and resolved through links, case-folded."""
+    """A path as given (absolute), resolved through links, and a main-tree path of a storage place at its storage
+    location (storage.data_path of its logical path), case-folded."""
     path = Path(path)
     forms = {Path(os.path.normcase(os.path.abspath(path)))}
     try:
         forms.add(Path(os.path.normcase(os.path.realpath(path))))
+    except (OSError, ValueError):
+        pass
+    try:
+        relative = storage.logical(path)
+        if relative and storage.on_storage(relative):
+            forms.add(Path(os.path.normcase(os.path.abspath(storage.data_path(relative)))))
     except (OSError, ValueError):
         pass
     return forms
@@ -395,7 +403,8 @@ def _path_texts(text):
 
 def _config_paths(root):
     """(config file, path) of every path-like string in the main tree's and this checkout's PINNING_CONFIGS (also the
-    value of a key="path" setting); a relative path is read against the main tree, where the runs are."""
+    value of a key="path" setting); a relative path is a logical repository path (storage.data_path: on storage for
+    runs and scratch, else in the main tree)."""
     found = []
     for tree in dict.fromkeys([root, paths.ROOT]):
         for folder in PINNING_CONFIGS:
@@ -406,8 +415,7 @@ def _config_paths(root):
                     continue
                 for text in (item for string in _strings(document) for item in _path_texts(string)):
                     try:
-                        found.append((file.relative_to(tree).as_posix(), Path(text) if Path(text).is_absolute()
-                                      else root / text))
+                        found.append((file.relative_to(tree).as_posix(), storage.data_path(text)))
                     except (OSError, ValueError):
                         continue
     return found
@@ -467,7 +475,7 @@ def _mark_superseded(record, named):
     naming lock; every other byte of meaning stays (the document is checked after the write)."""
     root = main_root()
     path = runs.registry_path(REGISTRY, root)
-    with _Lock(root):
+    with _Lock():
         data = path.read_bytes()
         document = json.loads(data.decode('utf-8'))
         before = copy.deepcopy(document)
@@ -554,9 +562,9 @@ def _other_setting(named, path):
 
 def _finish_one(named, record, inputs, config_paths):
     """finish for one earlier record: its outcome; never raises."""
-    path = main_root() / record['run']
     outcome = {'previous': record['run'], 'id': record['id'], 'action': None, 'reason': ''}
     try:
+        path = storage.data_path(record['run'])
         if record.get('superseded_by'):
             outcome.update(action='already-superseded', reason=f'by {record["superseded_by"]}')
         elif not path.is_dir():

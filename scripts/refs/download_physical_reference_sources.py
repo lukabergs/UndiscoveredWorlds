@@ -14,6 +14,7 @@ import zipfile
 import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools import storage
 from uwtools.hashing import sha256
 from uwtools.protected_io import staged
 
@@ -116,7 +117,7 @@ def fetch(entry, root, budget, minimum_free, verify_only):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--catalog", type=Path, default=REPO / "configs/physical-reference-sources.json")
-    parser.add_argument("--output", type=Path, default=REPO / "refs/source/physical")
+    parser.add_argument("--output", type=Path, default=storage.data_path("refs/source/physical"))
     parser.add_argument("--dataset", action="append")
     parser.add_argument("--budget-gib", type=float, default=10)
     parser.add_argument("--minimum-free-gib", type=float, default=20)

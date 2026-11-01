@@ -5,6 +5,7 @@ import sys
 import traceback
 
 from physical_map_core import Atlas, REPO, atlas_lock
+from uwtools import storage
 import physical_map_rasters as rasters
 import physical_map_points as points
 import physical_map_vectors as vectors
@@ -19,8 +20,8 @@ FAMILIES.update({name:getattr(fields,name) for name in ('gravity','magnetism','p
 def main():
     sys.stdout.reconfigure(encoding='utf-8')
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--source',default=REPO/'refs/source/physical')
-    parser.add_argument('--output',default=REPO/'refs/processed/physical')
+    parser.add_argument('--source',default=storage.data_path('refs/source/physical'))
+    parser.add_argument('--output',default=storage.data_path('refs/processed/physical'))
     parser.add_argument('--width',type=int,nargs='+',default=[128,256,512,1024,2048])
     parser.add_argument('--family',nargs='+',choices=list(FAMILIES))
     parser.add_argument('--self-test',action='store_true')

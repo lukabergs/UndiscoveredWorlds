@@ -14,7 +14,10 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
-SANDBOX = ROOT / 'out' / 'scratch' / 'sandbox'
+sys.path.insert(0, str(ROOT / 'scripts'))
+from uwtools import storage  # noqa: E402
+
+SANDBOX = storage.data_path('out/scratch/sandbox')
 
 
 def main():

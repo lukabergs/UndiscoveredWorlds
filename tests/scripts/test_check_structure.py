@@ -1,13 +1,19 @@
 """Path rules of scripts/check_structure.py with the tracked configs/structure.json (no filesystem writes)."""
 import importlib.util
+import os
 from pathlib import Path
+import sys
+import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location('check_structure', ROOT / 'scripts/check_structure.py')
 structure = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(structure)
 CONFIG = structure.load(ROOT / 'configs/structure.json')
+sys.path.insert(0, str(ROOT / 'scripts'))
+from uwtools import storage  # noqa: E402  (check_structure.storage_path imports this same module)
 
 
 class StructureRuleTests(unittest.TestCase):
@@ -68,6 +74,25 @@ class StructureRuleTests(unittest.TestCase):
         self.assertIsNone(structure.repository_path(str(ROOT.parent / 'elsewhere/x.txt'), ROOT))
         self.assertIsNone(structure.repository_path(str(ROOT) + '-sibling/x.txt', ROOT))
         self.assertIsNone(structure.repository_path(str(ROOT), ROOT))
+
+    def test_storage_paths_are_judged_by_their_logical_path(self):
+        # No junctions since 2026-11-01: a file written at a storage place on the storage drive is judged as the
+        # repository path it stands for (the storage root is a temporary folder; nothing is written).
+        with tempfile.TemporaryDirectory() as store:
+            store = Path(os.path.realpath(store))
+            with patch.object(storage, 'storage_root', return_value=store):
+                self.assertEqual(structure.repository_path(str(store / 'runs/world/12/run.json'), ROOT),
+                                 'runs/world/12/run.json')
+                self.assertEqual(structure.repository_path(str(store / 'out/scratch/topic/x.txt'), ROOT),
+                                 'out/scratch/topic/x.txt')
+                self.assertIsNone(structure.repository_path(str(store / 'trash/entry/x.txt'), ROOT))
+                self.assertIsNone(structure.repository_path(str(store / 'receipts/x.json'), ROOT))
+                for path in ('runs/reports/x.py', 'runs/archive/climate/1/run.json', 'out/scratch/sandbox/compare.html'):
+                    event = {'tool_input': {'file_path': str(store / path)}, 'cwd': str(ROOT)}
+                    message = structure.hook_decision(event, CONFIG, ROOT)
+                    self.assertTrue(message and message.startswith(f'BLOCKED: {path}'), path)
+                event = {'tool_input': {'file_path': str(store / 'runs/world/12/maps/relief.png')}, 'cwd': str(ROOT)}
+                self.assertIsNone(structure.hook_decision(event, CONFIG, ROOT))
 
     def test_hook_decision(self):
         def event(path, tool='Write'):

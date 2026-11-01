@@ -6,9 +6,13 @@ Additive by design (erosion plan Phase D, 2026-10-07, after most of refs/process
 was deleted through a worktree junction): a file is copied when the backup lacks it
 or its size or modification time differs; nothing is deleted in the destination;
 a backup file that would be overwritten is first copied to
-<destination>/.versions/<timestamp>/<source>/<path>. Junctions inside a source
-(runs/<module>, refs/processed/physical) are read through, with a guard against
-cycles. Each run writes <destination>/receipts/<timestamp>.json.
+<destination>/.versions/<timestamp>/<into>/<path>. A source is a path (copied to
+<destination>/<name>) or {"path": P, "into": "runs"} (copied to <destination>/<into>):
+since 2026-11-01 there are no junctions, so the storage-side trees (runs/ and
+refs/*/physical on D) are sources of their own that land where the junctions put
+them before (<destination>/runs/..., <destination>/refs/processed/physical/...).
+Links inside a source are still read through, with a guard against cycles. Each
+run writes <destination>/receipts/<timestamp>.json.
 """
 import argparse
 import datetime
@@ -52,18 +56,18 @@ def same(source, target):
     return a.st_size == b.st_size and abs(a.st_mtime - b.st_mtime) < 2.0
 
 
-def back_up(name, source, destination, stamp, dry_run, counts):
-    target_root = destination / name
+def back_up(into, source, destination, stamp, dry_run, counts):
+    target_root = destination / into
     for path, relative in walk(source):
         target = target_root / relative
         counts['files'] += 1
-        # The destination is delete-protected (scripts/uwtools/protect.py: nothing inside may be deleted, renamed
-        # or replaced by rename), so the earlier copy is copied aside and the file is overwritten in place. An
-        # interrupted overwrite leaves a file whose size or time differs, so the next run copies it again.
+        # The earlier copy is copied aside and the file is overwritten in place (nothing in the backup is deleted
+        # or replaced by rename). An interrupted overwrite leaves a file whose size or time differs, so the next
+        # run copies it again.
         if target.exists():
             if same(path, target):
                 continue
-            kept = destination / '.versions' / stamp / name / relative
+            kept = destination / '.versions' / stamp / into / relative
             counts['versioned'] += 1
             if not dry_run:
                 kept.parent.mkdir(parents=True, exist_ok=True)
@@ -87,15 +91,16 @@ def main():
     for name, location in config['sources'].items():
         if args.only and name not in args.only:
             continue
+        location, into = (location['path'], location['into']) if isinstance(location, dict) else (location, name)
         source = Path(os.path.expanduser(location))
         source = source if source.is_absolute() else ROOT / source
         if not source.exists():
             print(f'{name}: {source} does not exist, skipped')
-            receipt['sources'][name] = {'path': str(source), 'missing': True}
+            receipt['sources'][name] = {'path': str(source), 'into': into, 'missing': True}
             continue
         counts = {'files': 0, 'copied': 0, 'versioned': 0, 'bytes': 0}
-        back_up(name, source, destination, stamp, args.dry_run, counts)
-        receipt['sources'][name] = {'path': str(source), **counts}
+        back_up(into, source, destination, stamp, args.dry_run, counts)
+        receipt['sources'][name] = {'path': str(source), 'into': into, **counts}
         print(f"{name}: {counts['files']} files, {counts['copied']} copied ({counts['bytes'] / 1e9:.2f} GB), "
               f"{counts['versioned']} earlier copies kept in .versions")
     receipt['finished'] = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')

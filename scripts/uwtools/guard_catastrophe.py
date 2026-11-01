@@ -83,9 +83,9 @@ DISK_TOOLS = re.compile(
     r'reset-physicaldisk|set-partition|resize-partition|mkfs(\.\w+)?|wipefs|sfdisk|cfdisk|sgdisk|sdelete(64)?|bcdedit|'
     r'manage-bde|remove-itemproperty)(?![\w-])|\b(vssadmin|wbadmin)\b.*\bdelete\b|\bwmic\b.*\bshadowcopy\b.*\bdelete\b|'
     r'\breg(\.exe)?\s+delete\b|'
-    # Permissions: the deny-delete protection (protect.py) must not be removable by an agent.
+    # Permissions: agents never change ACLs or ownership.
     r'(?<![\w-])(icacls|cacls|xcacls|takeown|set-acl|set-ntfsaccess|remove-ntfsaccess)(?![\w-])|'
-    r'protect(\.py)?\b.*\b(unlock|harden)\b|\bsetsecuritydescriptor|\bsetaccesscontrol', re.IGNORECASE)
+    r'\bsetsecuritydescriptor|\bsetaccesscontrol', re.IGNORECASE)
 DELETE_WORDS = re.compile(
     r'(?<![\w.-])(rm|rmdir|rd|del|erase|unlink|shred|rimraf|remove-item|ri|clear-recyclebin|forfiles)(?![\w-])|'
     r'rmtree|rmsync|rmdirsync|unlinksync|remove_directory|removedirs|os\.remove|\.unlink\(|\.rmdir\(|'
@@ -464,7 +464,7 @@ def check_segment(segment, cwd, piped, unbalanced=False, level=0):
             literal(target, cwd, 'cmake -E rm', protected)
         return cwd
     if head == 'git':
-        if deleting and '-c' in lowered:
+        if deleting and '-c' in words:  # git -c (config), not git -C (folder)
             block('git -c with a delete (an alias or a hook command can run it).')
         if 'clean' in lowered and not {'-n', '--dry-run'} & set(lowered):
             if any(re.fullmatch(r'-[a-z]*x[a-z]*', w, re.IGNORECASE) for w in words[1:lowered.index('clean') + 6]):

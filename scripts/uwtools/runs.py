@@ -6,15 +6,30 @@ Runs registered before are sealed under runs/archive/ (runs/archive/README.md): 
 path `runs/<kind>/...` is now `runs/archive/<kind>/...`. Read sealed runs, never write
 there: derived outputs of a run go to output_directory(), the run's evaluation/analysis/
 or, for a sealed run, runs/reports/<module>/<id>/analysis/.
+
+Recorded paths are logical repository paths; run data is on the storage drive at the same relative path
+(storage.data_path; no junctions since 2026-11-01).
 """
 import json
 import os
+import subprocess
 from pathlib import Path
 
+from . import storage
 from .paths import ROOT
 from .tectonics import run_snapshots
 
-ARCHIVE = ROOT / 'runs/archive'
+
+def data_path(relative):
+    """storage.data_path of a logical repository path; this checkout's path when storage is not configured (no
+    runs/storage.json, or the drive unavailable)."""
+    try:
+        return storage.data_path(relative)
+    except (OSError, subprocess.CalledProcessError):
+        return ROOT / relative
+
+
+ARCHIVE = data_path('runs/archive')
 SEALED_KINDS = ('checkpoints', 'diagnostics', 'fields', 'logs', 'maps', 'manifests', 'parameters', 'metrics')
 
 
@@ -38,7 +53,7 @@ def record(module, identifier):
 def directory(module, identifier):
     """runs/<module>/<id> of a run in the current layout; None for a sealed run."""
     path = record(module, identifier).get('run')
-    return ROOT / path if path else None
+    return data_path(path) if path else None
 
 
 def archived(path):
@@ -46,13 +61,13 @@ def archived(path):
     parts = Path(path).as_posix().split('/')
     if len(parts) > 1 and parts[0] == 'runs' and parts[1] in SEALED_KINDS:
         return ARCHIVE.joinpath(*parts[1:])
-    return ROOT / path
+    return data_path(path)
 
 
 def output_directory(module, identifier):
     """Where scripts write what they derive from one run (not created here)."""
     run = directory(module, identifier)
-    return run / 'evaluation/analysis' if run else ROOT / 'runs/reports' / module / str(identifier) / 'analysis'
+    return run / 'evaluation/analysis' if run else data_path(f'runs/reports/{module}/{identifier}/analysis')
 
 
 def derived(module, identifier, name):
@@ -64,19 +79,20 @@ def derived(module, identifier, name):
 
 
 def next_id(module, root=None):
-    """One more than every registered id and every run directory of the module (in root, default this checkout)."""
+    """One more than every id registered in root's registry (default this checkout) and every run directory of the
+    module (runs/<module> on storage)."""
     used = [entry['id'] for entry in registry(module, root)['runs']]
-    parent = (root or ROOT) / 'runs' / module
+    parent = data_path(f'runs/{module}')
     used += [int(path.name) for path in parent.iterdir() if path.name.isdigit()] if parent.is_dir() else []
     return max(used, default=0) + 1
 
 
 def refuse_archive(path):
-    """path as an absolute path; SystemExit when it lies in the sealed runs/archive (by its
-    workspace path or through the junction's target), which nothing may write into."""
+    """path as an absolute path; SystemExit when it lies in the sealed runs/archive (on storage, or at its
+    logical path in this checkout), which nothing may write into."""
     path = Path(os.path.abspath(path))
     for candidate in (path, path.resolve()):
-        for sealed in (ARCHIVE, ARCHIVE.resolve()):
+        for sealed in (ARCHIVE, ARCHIVE.resolve(), ROOT / 'runs/archive'):
             if candidate == sealed or sealed in candidate.parents:
                 raise SystemExit(f'{path} is in the sealed runs/archive; write derived outputs elsewhere '
                                  '(runs/reports/<module>/<id>/analysis or out/)')

@@ -34,12 +34,12 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path('C:/dev/undiscovered-worlds')  # data: refs/ and the sandbox runs (the main tree, also from a worktree)
-SANDBOX = ROOT / 'out' / 'scratch' / 'sandbox'
 CODE = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(CODE / 'scripts'))
 sys.path.insert(0, str(CODE / 'scripts' / 'sandbox'))
 import terrain_metrics as tm  # noqa: E402
-from uwtools import cell_grid  # noqa: E402
+from uwtools import cell_grid, storage  # noqa: E402
+SANDBOX = storage.data_path('out/scratch/sandbox')
 from uwtools.bundle import Bundle  # noqa: E402
 
 BANDS = ((0, 30), (30, 50), (50, 60), (60, 70), (70, 80))
@@ -93,7 +93,7 @@ def earth(columns):
     lat = 90.0 - (np.arange(rows) + 0.5) * 180.0 / rows
     dy = tm.RADIUS_KM * math.radians(180.0 / rows)
     land = ~tm.sea_from(z) & (z > 0)
-    record = {'source': path.relative_to(ROOT).as_posix(), 'shape': list(z.shape)}
+    record = {'source': storage.logical(path) or path.as_posix(), 'shape': list(z.shape)}
     if derived:
         record['derived'] = derived
     record['bands'] = measure(z, land, lat, dy)

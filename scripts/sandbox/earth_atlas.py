@@ -35,7 +35,7 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 ROOT = SCRIPTS.parent
 sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(SCRIPTS / 'evaluation'))
-from uwtools import etopo  # noqa: E402
+from uwtools import etopo, storage  # noqa: E402
 from uwtools.map_rendering import save_rgb  # noqa: E402
 from maps import hillshade, shade_factor, terrain_base  # noqa: E402
 import earth_windows as ew  # noqa: E402
@@ -82,7 +82,7 @@ SOURCE_TEXT = {'etopo60': 'ETOPO 2022 60 arc-second globe (about 1.85 km)',
 
 def relative(path):
     path = Path(path)
-    return path.relative_to(ROOT).as_posix() if path.is_relative_to(ROOT) else path.as_posix()
+    return storage.logical(path) or (path.relative_to(ROOT).as_posix() if path.is_relative_to(ROOT) else path.as_posix())
 
 
 def relief_rgb(elevation, sea, north, pixel_deg, exaggeration):

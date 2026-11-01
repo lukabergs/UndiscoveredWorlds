@@ -16,13 +16,17 @@ atlas:STEM for refs/processed/earth-atlas/STEM.npy, STEM-sea.npy and STEM.json.
 """
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
 from scipy import ndimage
 
 ROOT = Path(__file__).resolve().parents[2]
-SANDBOX = ROOT / 'out' / 'scratch' / 'sandbox'
+sys.path.insert(0, str(ROOT / 'scripts'))
+from uwtools import storage  # noqa: E402
+
+SANDBOX = storage.data_path('out/scratch/sandbox')
 ATLAS = ROOT / 'refs' / 'processed' / 'earth-atlas'
 BANDS = ((0, 200), (200, 500), (500, 1000), (1000, 1500), (1500, None))
 

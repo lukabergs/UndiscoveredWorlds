@@ -1,10 +1,10 @@
-"""Writes into refs/ that work under its deny-delete permission (scripts/uwtools/protect.py).
+"""Writes into refs/ that never delete, rename or move a file there.
 
-Inside the protected trees a file can be created or overwritten in place, but nothing can
-be deleted, renamed or moved away: a temporary file renamed onto its target fails, and so
-do libraries that delete a file before writing it again (GDAL/rasterio 'w', NetCDF writers,
-download clients). Such writes go to a fresh staging folder on D (see staging_root), outside the
-protected trees, and are copied onto the target, which is overwritten in place:
+Written for an NTFS deny-delete permission on refs/ (2026-10-20 to 2026-11-01, since removed by the user);
+kept because a copied, verified overwrite is still the safer write for data that cannot be regenerated: a
+temporary file renamed onto its target, or a library that deletes a file before writing it again
+(GDAL/rasterio 'w', NetCDF writers, download clients), writes to a fresh staging folder on D (see
+staging_root) instead, and the result is copied onto the target, which is overwritten in place:
 
     with staged(target) as temporary:
         write(temporary)        # any writer; the target is untouched if this raises

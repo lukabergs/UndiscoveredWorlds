@@ -6,10 +6,11 @@
 
 A file is allowed when its folder is a named place and its kind (suffix) or name is one the place takes; per-run
 HTML is allowed only where scripts/evaluation/ renders pages, scripts never under runs/, and runs/archive/ is
-sealed. The hook judges only paths inside this repository, and only files that do not exist yet (except the
-sealed folders): exit 0 allows, exit 2 blocks with the reason on stderr. Standard library only, so that the hook
-runs with the plain interpreter. Beside check_layout.py (root items, includes, run directories) and
-repository_scope.py (local-only data, blob size).
+sealed. The hook judges only paths inside this repository and files at its storage places on the storage drive (by
+their logical path: runs/..., out/scratch/..., out/evaluation/...; no junctions since 2026-11-01), and only files
+that do not exist yet (except the sealed folders): exit 0 allows, exit 2 blocks with the reason on stderr. Standard
+library only (scripts/uwtools/storage.py is too), so that the hook runs with the plain interpreter. Beside
+check_layout.py (root items, includes, run directories) and repository_scope.py (local-only data, blob size).
 """
 import argparse
 import fnmatch
@@ -114,15 +115,34 @@ def judge(path, config, existing=False):
     return f'the folder {where} is not a place the layout names'
 
 
+def storage_path(absolute):
+    """The logical repository path of a file at a storage place on the storage drive (runs/..., out/scratch/...,
+    out/evaluation/..., refs/*/physical/...: scripts/uwtools/storage.py, no junctions since 2026-11-01), or None
+    (elsewhere, or storage not configured). Imported only for paths outside the repository."""
+    try:
+        if str(Path(__file__).resolve().parent) not in sys.path:
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from uwtools import storage
+        relative = storage.logical(absolute)
+        if not relative or not storage.on_storage(relative):
+            return None
+        if os.path.normcase(os.path.abspath(storage.data_path(relative))) != os.path.normcase(absolute):
+            return None  # a main-tree path, not the storage location
+        return relative
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError):
+        return None
+
+
 def repository_path(path, root=ROOT, cwd=None):
-    """The path relative to root with forward slashes, or None when it lies outside root (junctions not followed)."""
+    """The path relative to root with forward slashes, the logical path of a file at a storage place on the storage
+    drive (storage_path), or None when it lies elsewhere (links not followed)."""
     absolute = os.path.abspath(os.path.join(cwd or os.getcwd(), path))
     base = os.path.abspath(str(root))
     if os.path.normcase(absolute) == os.path.normcase(base):
         return None
     prefix = os.path.normcase(base.rstrip('\\/')) + os.sep
     if not os.path.normcase(absolute).startswith(prefix):
-        return None
+        return storage_path(absolute)
     return absolute[len(prefix):].replace('\\', '/')
 
 
@@ -135,7 +155,7 @@ def hook_decision(event, config, root=ROOT):
     relative = repository_path(path, root, event.get('cwd'))
     if relative is None:
         return None
-    existing = os.path.exists(os.path.join(str(root), relative))
+    existing = os.path.exists(os.path.abspath(os.path.join(event.get('cwd') or os.getcwd(), path)))
     reason = judge(relative, config, existing)
     return f'BLOCKED: {relative}: {reason}. {ADVICE}' if reason else None
 

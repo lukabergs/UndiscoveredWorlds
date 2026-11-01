@@ -3217,6 +3217,7 @@ def render_domain(domain, fields, result, config, directory, physics_on, nest_in
 
 def main():
     from uwtools import naming  # scripts/uwtools/naming.py: out/scratch/sandbox/<id>-<tag> of the main tree
+    from uwtools import storage  # data_path: the base bundle's place on the storage drive
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--label', required=True, metavar='TAG',
                         help='the tag of the run (naming.py tag rule): it writes out/scratch/sandbox/<id>-<TAG>; '
@@ -3249,7 +3250,7 @@ def main():
         named = naming.new_directory('sandbox', arguments.label)
         directory, name = named.path, named.name
     print(directory, flush=True)
-    bundle = Bundle.open(ROOT / config['base_bundle'])
+    bundle = Bundle.open(storage.data_path(config['base_bundle']))
     world = world_fields(bundle, native=cube_on(config, bundle))
     radius_m = float(bundle.manifest.get('parameters', {}).get('world.body.radius_km', 6371.0)) * 1000.0
     world['precipitation'] = precipitation(world, config['precipitation'], radius_m)
@@ -3320,7 +3321,7 @@ def main():
                       naming.page_directory(named) if named is not None else None)
     print(page)
     if named is not None:  # the earlier runs of the tag are marked superseded unless pinned or an input of this one
-        naming.finish(named, True, [parent_run, ROOT / config['base_bundle']])
+        naming.finish(named, True, [parent_run, storage.data_path(config['base_bundle'])])
 
 
 if __name__ == '__main__':

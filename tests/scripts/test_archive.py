@@ -205,9 +205,8 @@ class ArchiveTests(unittest.TestCase):
     def test_refuses_anything_but_one_run_level_folder(self):
         sandbox = self.store / "out" / "scratch" / "sandbox" / "7-base"
         write(sandbox / "terrain.png", b"\x89PNG sandbox")
-        for path in (sandbox, self.store / "runs" / "regional"):  # no evaluation.json of its own
-            with self.assertRaises(archive.NotARun):
-                archive.archive(path, "x", apply=True)
+        with self.assertRaises(archive.NotARun):  # no evaluation.json of its own
+            archive.archive(sandbox, "x", apply=True)
         self.assertTrue((sandbox / "terrain.png").is_file())
         make_run(self.run_dir / "inner")  # a second run inside the first
         with self.assertRaises(archive.Refused) as raised:
@@ -232,15 +231,16 @@ class ArchiveTests(unittest.TestCase):
         self.assert_refused(self.run_dir)
         self.assert_untouched()
 
-    def test_refuses_a_junction_target(self):
-        import _winapi
-        target = self.store / "out" / "scratch-target"
-        make_run(target)
-        (self.workspace / "out").mkdir()
-        _winapi.CreateJunction(str(target), str(self.workspace / "out" / "scratch"))
-        self.assert_refused(target)
-        self.assert_refused(self.workspace / "out" / "scratch")
-        self.assert_untouched(target)
+    def test_refuses_a_storage_side_root(self):
+        # The storage-side roots tools open directly (no junctions since 2026-11-01) are never archived whole.
+        make_run(self.store / "out" / "scratch")
+        for path in (self.store / "out" / "scratch", self.store / "runs" / "regional"):
+            with self.assertRaises(archive.Refused) as raised:
+                archive.archive(path, "x", apply=True)
+            self.assertNotIsInstance(raised.exception, archive.NotARun)
+            self.assertIn("protected place", str(raised.exception))
+        self.assert_untouched(self.store / "out" / "scratch")
+        self.assert_untouched()
 
     def test_refuses_a_path_outside_the_storage_root(self):
         run = self.workspace / "out" / "scratch" / "run"
@@ -255,7 +255,7 @@ class ArchiveTests(unittest.TestCase):
         self.assert_untouched()
 
     def test_refuses_files_tracked_at_the_main_tree_path(self):
-        # The storage path maps back to runs/regional/44 in the main tree, which holds a tracked file.
+        # The storage path's logical path, runs/regional/44, holds a tracked file in the main tree.
         write(self.workspace / "runs/regional/44/run.json", "{}")
         subprocess.run(["git", "-C", str(self.workspace), "add", "--", "runs/regional/44/run.json"], check=True)
         self.assert_refused(self.run_dir)

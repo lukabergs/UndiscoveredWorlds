@@ -8,11 +8,11 @@ import sys
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from uwtools import grid, references
+from uwtools import grid, references, storage
 from uwtools.hashing import sha256
 
 ROOT = Path(__file__).resolve().parents[2]
-A = ROOT / 'runs/reports/climate-reference-experiments-20260915'
+A = storage.data_path('runs/reports/climate-reference-experiments-20260915')
 OUT = A / 'prepared-inputs'
 MISSING = np.float32(-9999.9)
 

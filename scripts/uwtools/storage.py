@@ -1,10 +1,13 @@
-"""Bulk run data on the storage drive: runs/storage.json and directory junctions.
+"""Bulk data on the storage drive (runs/storage.json): where a logical repository path is on disk.
 
-Run directories keep their repository-relative paths; a routed directory is a junction
-to the same relative path under the storage root. Without runs/storage.json nothing is
-routed and directories are ordinary ones.
+Since 2026-11-01 (the user) nothing is linked: generated data and the large reference trees live under the storage
+root (D) at the same relative path as their logical repository path, and tools open them there through data_path.
+Records (runs/registry/*.json) keep logical repository-relative paths; logical() maps a real path back. Without
+runs/storage.json nothing is on storage and data_path refuses the storage-side paths.
+
+    uv run --offline python scripts/uwtools/storage.py status
 """
-import datetime
+import functools
 import json
 import os
 import re
@@ -13,21 +16,13 @@ import stat
 from pathlib import Path
 
 if __package__:
-    from .hashing import sha256
-    from .paths import ROOT
+    from .paths import ROOT, main_root
 else:  # run as a script: uv run python scripts/uwtools/storage.py status
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from uwtools.hashing import sha256
-    from uwtools.paths import ROOT
+    from uwtools.paths import ROOT, main_root
 
 CONFIG = ROOT / 'runs/storage.json'
-# Only generated data may leave the workspace: one directory level under runs/, or a
-# direct child of the two parents that hold one directory per experiment or module.
-# runs/archive is sealed (already routed, never written), so it is not routable.
-# Run data under runs/, and the bulk scratch and evaluation trees under out/ (routed 2026-10-16 when C filled up).
-ROUTABLE = re.compile(r'runs/(reports/[^/]+|work/[^/]+|[a-z][a-z0-9_-]*)|out/(scratch|evaluation)')
-RESERVED = {'archive', 'registry', 'ledger', 'reports', 'work'}
 
 
 def storage_root(config=None):
@@ -45,19 +40,48 @@ def storage_root(config=None):
     return root
 
 
-def relative_path(path):
-    relative = Path(os.path.abspath(path)).relative_to(ROOT).as_posix()
-    if not ROUTABLE.fullmatch(relative) or relative.split('/')[1] in RESERVED and relative.count('/') == 1:
-        raise ValueError(f'Only run data directories are routed to storage: {relative}')
-    return relative
+# Since 2026-11-01 (the user) there are no junctions: generated data and the large reference trees live under the
+# storage root at the same relative path as their logical repository path, and tools open them there. On storage:
+# runs/<anything but registry, ledger, storage.json>, out/scratch, out/evaluation, refs/processed/physical,
+# refs/source/physical (and everything below them).
+ON_STORAGE = re.compile(r'(runs/(?!(registry|ledger|storage\.json)(/|$))[^/]+|out/(scratch|evaluation)|'
+                        r'refs/(processed|source)/physical)(/.*)?')
 
 
-def junction_target(path):
-    """Resolved target of a junction, or None for anything else."""
-    if not os.path.isjunction(path):
-        return None
-    # readlink returns the extended-length form (\\?\D:\...).
-    return Path(os.readlink(path).removeprefix('\\\\?\\')).resolve()
+@functools.lru_cache(maxsize=None)
+def _main():
+    return main_root()
+
+
+def on_storage(relative):
+    """True when a logical repository path (posix, relative) lives under the storage root."""
+    return bool(ON_STORAGE.fullmatch(Path(relative).as_posix().strip('/')))
+
+
+def data_path(relative):
+    """Where a logical repository path (runs/erosion/9, out/scratch/x, refs/processed/physical/y) is on disk:
+    under the storage root when on_storage, else in the main tree. An absolute path comes back unchanged."""
+    if Path(relative).is_absolute():
+        return Path(relative)
+    relative = Path(relative).as_posix().strip('/')
+    if on_storage(relative):
+        storage = storage_root(_main() / 'runs/storage.json')
+        if storage is None:
+            raise OSError('runs/storage.json is missing: data on storage cannot be found')
+        return storage / relative
+    return _main() / relative
+
+
+def logical(path):
+    """The logical repository path (posix) of a path under the storage root or the main tree, or None."""
+    path = Path(os.path.abspath(path))
+    storage = storage_root(_main() / 'runs/storage.json')
+    for base in ([storage] if storage else []) + [_main(), ROOT]:
+        try:
+            return path.relative_to(base).as_posix()
+        except ValueError:
+            continue
+    return None
 
 
 def long_path(path):
@@ -134,188 +158,15 @@ def remove_tree(root):
     remove(root)
 
 
-def make_junction(path, target):
-    import _winapi
-    _winapi.CreateJunction(str(target), str(path))
-    if junction_target(path) != Path(target).resolve():
-        raise OSError(f'Junction verification failed: {path}')
-
-
-def copy_verified(source, destination):
-    """Copy a directory tree, checking every file's SHA-256; returns {relative path: digest}."""
-    digests = {}
-    source, destination = long_path(source), long_path(destination)
-    items = list(source.rglob('*'))
-    links = [item for item in items if os.path.isjunction(item) or item.is_symlink()]
-    if links:
-        raise ValueError(f'Nested links require separate review: {links[0]}')
-    for file in sorted(item for item in items if item.is_file()):
-        relative = file.relative_to(source)
-        target = destination / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(file, target)
-        digests[relative.as_posix()] = sha256(file)
-        if sha256(target) != digests[relative.as_posix()]:
-            raise OSError(f'Copy verification failed: {file}')
-    for directory in (item for item in items if item.is_dir()):
-        (destination / directory.relative_to(source)).mkdir(parents=True, exist_ok=True)
-    return digests
-
-
-def route(path):
-    """Make path a junction into the storage root, moving existing contents there.
-
-    Returns the logical path (never the resolved one: helpers must keep seeing the
-    workspace path). A directory that is already routed is left alone.
-    """
-    path = Path(os.path.abspath(path))
-    root = storage_root()
-    if root is None:
-        path.mkdir(parents=True, exist_ok=True)
-        return path
-    relative = relative_path(path)
-    destination = root / relative
-    current = junction_target(path)
-    if current is not None:
-        if current != destination.resolve():
-            raise OSError(f'Unexpected existing link: {path} -> {current}')
-        return path
-    if path.exists() and not path.is_dir():
-        raise NotADirectoryError(path)
-    receipt_path = root / 'receipts' / (relative.replace('/', '__') + '.json')
-    if destination.exists() and any(destination.iterdir()) and not receipt_path.is_file():
-        raise FileExistsError(f'Destination already exists without a receipt: {destination}')
-    if receipt_path.is_file() and path.is_dir():
-        # A verified copy whose swap was refused (an open handle, 2026-10-17): finish it without copying
-        # again, unless something on the source side is newer than the receipt.
-        receipt = json.loads(receipt_path.read_text(encoding='utf-8'))
-        if receipt.get('status') == 'verified':
-            stamp = receipt_path.stat().st_mtime
-            newer = [item for item in path.rglob('*') if item.is_file() and item.stat().st_mtime > stamp]
-            if newer:
-                raise OSError(f'{len(newer)} files newer than the verified copy, e.g. {newer[0]}: route again after removing them or re-copy')
-            backup = path.with_name(path.name + '.storage-migration-backup')
-            path.rename(backup)
-            make_junction(path, destination)
-            remove_tree(backup)
-            receipt['status'] = 'complete'
-            receipt['completed_utc'] = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')
-            receipt_path.write_text(json.dumps(receipt, indent=2) + '\n', encoding='utf-8')
-            return path
-    destination.mkdir(parents=True, exist_ok=True)
-    receipt = {'source': str(path), 'destination': str(destination), 'status': 'copying', 'sha256': {}}
-    receipt_path.parent.mkdir(parents=True, exist_ok=True)
-    write = lambda: receipt_path.write_text(json.dumps(receipt, indent=2) + '\n', encoding='utf-8')
-    write()
-    backup = path.with_name(path.name + '.storage-migration-backup')
-    if backup.exists():
-        raise FileExistsError(f'Unexpected backup exists: {backup}')
-    if path.exists():
-        receipt['sha256'] = copy_verified(path, destination)
-        receipt['status'] = 'verified'
-        write()
-        path.rename(backup)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        make_junction(path, destination)
-    except Exception:
-        if backup.exists() and not path.exists():
-            backup.rename(path)
-        raise
-    if backup.exists():
-        remove_tree(backup)
-    receipt['status'] = 'complete'
-    receipt['completed_utc'] = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')
-    write()
-    return path
-
-
-def run_directory(module, identifier):
-    """runs/<module>/<id>: the module directory is routed, the run directory is created inside it."""
-    directory = route(ROOT / 'runs' / module) / str(identifier)
-    directory.mkdir(parents=True, exist_ok=False)
-    return directory
-
-
-def check_backup(path):
-    """Compare a leftover <path>.storage-migration-backup with its receipt and the storage copy.
-
-    Returns counts: ok (the file is unchanged since the copy and the storage copy has the same digest),
-    newer_on_storage (the storage copy was rewritten since, by a later run), and the blocking kinds
-    not_in_receipt, changed_since_copy, missing_on_storage, links.
-    """
-    path = Path(os.path.abspath(path))
-    relative = relative_path(path)
-    backup = long_path(path.with_name(path.name + '.storage-migration-backup'))
-    receipt = json.loads((storage_root() / 'receipts' / (relative.replace('/', '__') + '.json')).read_text(encoding='utf-8'))
-    destination, digests = long_path(receipt['destination']), receipt['sha256']
-    counts = dict.fromkeys(('files', 'ok', 'newer_on_storage', 'not_in_receipt', 'changed_since_copy',
-                            'missing_on_storage', 'links'), 0)
-    examples = {}
-    counts['links'] = len(find_links(backup))
-    for file in (item for item in backup.rglob('*') if item.is_file() and not is_link(item)):
-        key = file.relative_to(backup).as_posix()
-        counts['files'] += 1
-        target = destination / key
-        kind = ('not_in_receipt' if key not in digests else 'changed_since_copy' if sha256(file) != digests[key]
-                else 'missing_on_storage' if not target.is_file() else 'ok' if sha256(target) == digests[key]
-                else 'newer_on_storage')
-        counts[kind] += 1
-        examples.setdefault(kind, key)
-    return backup, receipt, counts, examples
-
-
-def finish(path, accept_newer=False):
-    """Delete the leftover backup of a routed directory once every file in it is verified on storage.
-
-    A swap whose clean-up stopped (an open handle, 2026-10-17) leaves the junction in place and the
-    old tree beside it. Refuses unless every file is unchanged since the receipt's copy and the storage
-    copy matches its digest; a storage copy rewritten since by a later run passes only with accept_newer.
-    A backup already gone (removed by hand) only marks the receipt complete, once the junction is verified.
-    """
-    path = Path(os.path.abspath(path))
-    receipt_path = storage_root() / 'receipts' / (relative_path(path).replace('/', '__') + '.json')
-    if not path.with_name(path.name + '.storage-migration-backup').exists():
-        receipt = json.loads(receipt_path.read_text(encoding='utf-8'))
-        if junction_target(path) != Path(receipt['destination']).resolve():
-            raise OSError(f'{path} is not the junction to {receipt["destination"]}')
-        receipt['status'] = 'complete'
-        receipt['completed_utc'] = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')
-        receipt['backup_check'] = 'backup already absent; nothing removed'
-        receipt_path.write_text(json.dumps(receipt, indent=2) + '\n', encoding='utf-8')
-        return receipt['backup_check']
-    backup, receipt, counts, examples = check_backup(path)
-    blocking = [kind for kind in ('not_in_receipt', 'changed_since_copy', 'missing_on_storage', 'links') if counts[kind]]
-    if not accept_newer and counts['newer_on_storage']:
-        blocking.append('newer_on_storage')
-    if junction_target(path) != Path(receipt['destination']).resolve():
-        raise OSError(f'{path} is not the junction to {receipt["destination"]}')
-    if blocking:
-        raise OSError(f'Backup not removed: {counts}; first of each: {examples}')
-    remove_tree(backup)
-    receipt['status'] = 'complete'
-    receipt['completed_utc'] = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')
-    receipt['backup_check'] = counts
-    receipt_path.write_text(json.dumps(receipt, indent=2) + '\n', encoding='utf-8')
-    return counts
-
-
 # A session starts with a warning below this much free space on the workspace drive.
 LOW_SPACE_GB = 60
 # status lists the folders under out/ other than these that hold more than OUT_LISTED_MB.
 OUT_KEPT = ('build', 'scratch', 'evaluation', 'inputs')  # out/inputs: derived inputs (scripts/evaluation/inputs.py)
 OUT_LISTED_MB = 10
 COMMAND = 'uv run --offline python scripts/uwtools/'
-
-
-def keep_on_primary(config=None):
-    """The repository-relative paths runs/storage.json keeps on the workspace drive (posix, no trailing slash)."""
-    path = Path(CONFIG if config is None else config)
-    try:
-        items = json.loads(path.read_text(encoding='utf-8-sig')).get('keep_on_primary', [])
-    except (OSError, ValueError, AttributeError):
-        return []
-    return [str(item).replace('\\', '/').strip('/') for item in items]
+# The logical places outside runs/ whose data belongs on storage (ON_STORAGE); every child of runs/ but registry,
+# ledger and storage.json too.
+STORAGE_PLACES = ('out/scratch', 'out/evaluation', 'refs/processed/physical', 'refs/source/physical')
 
 
 def folder_bytes(path):
@@ -340,45 +191,47 @@ def folder_bytes(path):
 
 
 def plain_folders(parent):
-    """The folders of parent that are neither links nor leftover migration backups."""
+    """The folders of parent that are not links."""
     if not parent.is_dir():
         return []
-    return [item for item in sorted(parent.iterdir()) if item.is_dir() and not is_link(item)
-            and not item.name.endswith('.storage-migration-backup')]
+    return [item for item in sorted(parent.iterdir()) if item.is_dir() and not is_link(item)]
 
 
-def unrouted(keep):
-    """Lines for the folders on C that the routing rules would send to storage: plain folders under runs/reports and
-    runs/work not kept on the primary drive (a folder holding a kept path lists its other children, for the trash,
-    since routing it would move the kept path too; a __pycache__ for the trash), folders under out/ other than OUT_KEPT
-    over OUT_LISTED_MB, and out/build folders that are neither a CMakePresets.json build nor the tracking build."""
+def misplaced():
+    """Lines for data on C that belongs on storage: a path of this checkout at a storage place (a child of runs/ other
+    than registry, ledger and storage.json, out/scratch, out/evaluation, refs/processed/physical,
+    refs/source/physical), a link there (no junctions since 2026-11-01) or a folder holding links."""
+    places = [f'runs/{item.name}' for item in sorted((ROOT / 'runs').iterdir())] if (ROOT / 'runs').is_dir() else []
+    places = [place for place in places + list(STORAGE_PLACES) if on_storage(place) and os.path.lexists(ROOT / place)]
     lines = []
-    for parent in ('runs/reports', 'runs/work'):
-        for item in plain_folders(ROOT / parent):
-            relative = f'{parent}/{item.name}'
-            if relative in keep:
-                continue
-            if item.name == '__pycache__':  # a Python cache, not run data: nothing to route
-                lines.append(f'{relative} is a Python cache on C ({folder_bytes(item) / 1e6:.0f} MB): '
-                             f'{COMMAND}trash.py move {relative} --reason TEXT')
-                continue
-            kept = [path for path in keep if path.startswith(relative + '/')]
-            if not kept:
-                lines.append(f'{relative} is a folder on C ({folder_bytes(item) / 1e6:.0f} MB), not a junction: '
-                             f'{COMMAND}storage.py route {relative}')
-                continue
-            for child in plain_folders(item):
-                inner = f'{relative}/{child.name}'
-                if inner in keep or any(path.startswith(inner + '/') for path in keep):
-                    continue
-                lines.append(f'{inner} on C ({folder_bytes(child) / 1e6:.0f} MB; not routable, {relative} holds the kept '
-                             f'{", ".join(kept)}): when no longer needed, {COMMAND}trash.py move {inner} --reason TEXT')
+    for relative in places:
+        path = ROOT / relative
+        try:
+            target = data_path(relative)
+        except (OSError, ValueError) as error:
+            target = f'the storage root ({error})'
+        if is_link(path):
+            lines.append(f'{relative} is a link on C (no junctions since 2026-11-01): tools read {target} directly')
+        elif path.is_dir():
+            links = find_links(path)
+            inside = f', {len(links)} links inside, e.g. {links[0]}' if links else ''
+            lines.append(f'{relative} is a folder on C ({folder_bytes(path) / 1e6:.0f} MB{inside}): its data belongs at '
+                         f'{target}')
+        else:
+            lines.append(f'{relative} is a file on C: it belongs at {target}')
+    return lines
+
+
+def primary_clutter():
+    """Lines for the bulky folders on C that are no storage place: folders under out/ other than OUT_KEPT over
+    OUT_LISTED_MB, and out/build folders that are neither a CMakePresets.json build nor the tracking build."""
+    lines = []
     for item in plain_folders(ROOT / 'out'):
-        if item.name in OUT_KEPT or f'out/{item.name}' in keep:
+        if item.name in OUT_KEPT:
             continue
         size = folder_bytes(item)
         if size > OUT_LISTED_MB * 1e6:
-            lines.append(f'out/{item.name} on C ({size / 1e6:.0f} MB; not routable): when no longer needed, '
+            lines.append(f'out/{item.name} on C ({size / 1e6:.0f} MB): when no longer needed, '
                          f'{COMMAND}trash.py move out/{item.name} --reason TEXT')
     presets = preset_builds()
     for item in plain_folders(ROOT / 'out' / 'build') if presets else []:  # no presets read: nothing to judge by
@@ -414,17 +267,11 @@ def tracking_build(folder):
 
 
 def status():
-    """Lines describing the workspace drive: free space, leftover backups, unrouted bulk directories, worktrees."""
+    """Lines describing the workspace drive: free space, data on C that belongs on storage, bulky folders, worktrees."""
     free = shutil.disk_usage(ROOT).free / 1e9
     lines = [f'C free {free:.0f} GB' + (f' (below {LOW_SPACE_GB} GB)' if free < LOW_SPACE_GB else '')]
-    for parent in (ROOT / 'out', ROOT / 'runs', ROOT / 'runs' / 'reports'):
-        for item in parent.glob('*.storage-migration-backup'):
-            lines.append(f'leftover backup {item.relative_to(ROOT).as_posix()}: '
-                         f'storage.py finish {item.relative_to(ROOT).as_posix().removesuffix(".storage-migration-backup")}')
-    for name in ('scratch', 'evaluation'):
-        if junction_target(ROOT / 'out' / name) is None and (ROOT / 'out' / name).exists():
-            lines.append(f'out/{name} is a directory on C, not the junction: storage.py route out/{name}')
-    lines += unrouted(keep_on_primary())
+    lines += misplaced()
+    lines += primary_clutter()
     worktrees = ROOT / '.claude' / 'worktrees'
     count = sum(1 for item in worktrees.iterdir() if item.is_dir()) if worktrees.is_dir() else 0
     if count:
@@ -436,24 +283,9 @@ def main():
     import argparse
     parser = argparse.ArgumentParser(description='Bulk data on the storage drive (runs/storage.json).', allow_abbrev=False)
     commands = parser.add_subparsers(dest='command', required=True)
-    commands.add_parser('status', help='free space and pending storage work')
-    for name, text in (('route', 'make a directory a junction into storage, moving its contents'),
-                       ('check', 'compare a leftover backup with its receipt and the storage copy (read-only)'),
-                       ('finish', 'delete a leftover backup once every file in it is verified on storage')):
-        command = commands.add_parser(name, help=text, allow_abbrev=False)
-        command.add_argument('path')
-        if name == 'finish':
-            command.add_argument('--accept-newer', action='store_true',
-                                 help='also when a later run rewrote the storage copy of some files')
-    args = parser.parse_args()
-    if args.command == 'status':
-        print('\n'.join(status()))
-    elif args.command == 'route':
-        print(route(ROOT / args.path))
-    elif args.command == 'check':
-        print(check_backup(ROOT / args.path)[2:])
-    else:
-        print(finish(ROOT / args.path, args.accept_newer))
+    commands.add_parser('status', help='free space and data on C that belongs on storage')
+    parser.parse_args()
+    print('\n'.join(status()))
 
 
 if __name__ == '__main__':

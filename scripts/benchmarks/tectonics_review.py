@@ -8,7 +8,7 @@ import sys
 import numpy as np
 from PIL import Image, ImageDraw
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from uwtools import palettes, runs
+from uwtools import palettes, runs, storage
 from uwtools.hashing import sha256
 from tectonics_report_data import load_bundle, diagnostics, write_json
 from uwtools.tectonics_earth_reference import load_earth_reference, compare_to_earth
@@ -20,15 +20,16 @@ ROOT = Path(__file__).resolve().parents[2]
 def write_overview(results, output):
     """Small visual index; detailed comparisons and APNGs remain in the common report."""
     output = Path(output)
-    if output.parent.resolve() != (ROOT / 'runs/reports/tectonics').resolve():
+    reports = storage.data_path('runs/reports/tectonics')
+    if output.parent.resolve() != reports.resolve():
         raise ValueError('Overview must use the existing tectonics report directory')
     rows, cards = [], []
     for result in results:
         run, m = result['run'], result['final']
-        note = ROOT / f'runs/reports/tectonics/{run}.md'
+        note = reports / f'{run}.md'
         links = [f'<a href="{run}.md">Findings</a>'] if note.exists() else []
         for other in [run-1] + [r['run'] for r in results if r['run'] < run]:
-            report = ROOT / f'runs/reports/tectonics/{other}-{run}.html'
+            report = reports / f'{other}-{run}.html'
             link = f'<a href="{report.name}">{other} → {run}: maps + animations</a>'
             if other != run and report.is_file() and link not in links:
                 links.append(link)

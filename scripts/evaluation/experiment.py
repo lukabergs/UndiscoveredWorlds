@@ -64,7 +64,7 @@ def now():
 
 def relative(path):
     path = Path(path)
-    return path.relative_to(ROOT).as_posix() if path.is_relative_to(ROOT) else str(path)
+    return storage.logical(path) or (path.relative_to(ROOT).as_posix() if path.is_relative_to(ROOT) else str(path))
 
 
 def recipe_options(recipe):
@@ -124,12 +124,20 @@ def run_tool(command, directory, label, environment, outputs):
     return {'label': label, 'command': command, 'exit_code': code, 'seconds': round(time.time() - started, 3), 'log': log}
 
 
+def here(part):
+    """A path named on a command line or in a record: logical data paths on storage (out/scratch/..., runs/...)
+    resolve there, anything else against this tree."""
+    return storage.data_path(part) if storage.on_storage(part) else ROOT / part
+
+
 def archive_directory(archive, name):
-    return storage.route(ROOT / archive) / name
+    directory = storage.data_path(archive)
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory / name
 
 
 def record_in_archive(archive, module, name, record):
-    path = ROOT / archive / 'experiment.json'
+    path = storage.data_path(archive) / 'experiment.json'
     document = json.loads(path.read_text(encoding='utf-8')) if path.is_file() else \
         {'schema': 'uw-experiment/v1', 'module': module, 'runs': []}
     document['runs'].append({'name': name, 'recorded': record['finished'], 'verdict': record.get('verdict')})
@@ -216,7 +224,7 @@ def main():
         recipe_path = ROOT / recipe_name
         explicit = recipe_options(json.loads(recipe_path.read_text(encoding='utf-8')))
     if args.archive:
-        runs.refuse_archive(ROOT / args.archive)
+        runs.refuse_archive(storage.data_path(args.archive))
     baseline = Bundle.open(args.baseline) if args.baseline else None
     environment = dict(os.environ)
     declared = []
@@ -241,7 +249,7 @@ def main():
     else:
         seed = [] if args.seed is None else ['--seed', str(args.seed)]
     base = [*tool_command(arguments + scenario + extra), *seed, *native]
-    files = [part for part in base[1:] if not part.startswith('-') and (ROOT / part).is_file()]
+    files = [part for part in base[1:] if not part.startswith('-') and here(part).is_file()]
     commands = {'run': base, 'repeat': without_checkpoints(base)}
     if args.explicit_recipe:
         # The recipe-equality pair: a run given every value of the recipe file as an option and a
@@ -249,11 +257,11 @@ def main():
         # its second run is the one without them; a scratch run's second run adds them.
         commands['explicit'] = without_checkpoints([*tool_command(arguments + extra), *explicit, *seed, *native])
     files += [relative(recipe_path)] if recipe_path else []
-    declared += [{'path': relative(ROOT / part), 'sha256': sha256(ROOT / part)} for part in files]
+    declared += [{'path': relative(here(part)), 'sha256': sha256(here(part))} for part in files]
     if not seeded:
         # A bundle the tool reads (region --from-bundle) is declared by its manifest.
-        manifests = [ROOT / part / 'manifest.json' for part in base[1:]
-                     if not part.startswith('-') and (ROOT / part / 'manifest.json').is_file()]
+        manifests = [here(part) / 'manifest.json' for part in base[1:]
+                     if not part.startswith('-') and (here(part) / 'manifest.json').is_file()]
         declared += [{'path': relative(path), 'sha256': sha256(path)} for path in manifests]
 
     record = {'schema': 'uw-run/v1', 'module': args.module, 'id': identifier, 'name': name, 'label': args.label,
@@ -268,7 +276,7 @@ def main():
         record['recipe'] = recipe
     print(f"{'Run ' + args.module + ' ' + name if args.register else 'Scratch run ' + name}: {' '.join(record['command'])}", flush=True)
     labels = ['run'] + ['repeat'] * args.repeat + ['explicit'] * args.explicit_recipe
-    outputs = naming.main_root() / 'out/evaluation/outputs' / args.module / name  # routed out/evaluation (D)
+    outputs = storage.data_path('out/evaluation/outputs') / args.module / name  # out/evaluation on storage (D)
     start = time.time()
     document, failure, succeeded = None, None, False
     try:
@@ -333,7 +341,7 @@ def main():
             # The main tree's registry and runs/<module>/<id> (naming.py), also from a worktree.
             main = naming.main_root()
             entry = {'id': identifier, 'status': 'complete' if complete else 'failed',
-                     'run': directory.relative_to(main).as_posix(),
+                     'run': storage.logical(directory) or directory.relative_to(main).as_posix(),
                      'date': record['started'], 'label': args.label or '', 'tag': tag}
             score = document['validation']['scores'].get('run', {}).get('score') if complete else None
             if score is not None:
@@ -344,7 +352,7 @@ def main():
     if not args.archive:
         # The earlier runs of the topic are archived once this one passed (scripts/uwtools/naming.py, finish).
         passed = succeeded and document is not None and failure is None and document['verdict'].get('checks') != 'fail'
-        pins = [Path(item['path']) if Path(item['path']).is_absolute() else ROOT / item['path'] for item in declared]
+        pins = [Path(item['path']) if Path(item['path']).is_absolute() else here(item['path']) for item in declared]
         naming.finish(named, passed, pins + ([args.baseline] if args.baseline else []))
     if not succeeded:
         raise SystemExit(f"Tool failed; see {directory / record['runs'][-1]['log']}")

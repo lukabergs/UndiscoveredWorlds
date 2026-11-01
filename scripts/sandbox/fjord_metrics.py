@@ -26,14 +26,16 @@ from scipy import ndimage
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts" / "sandbox"))
+sys.path.insert(0, str(ROOT / "scripts"))
 import terrain_metrics as tm  # noqa: E402
+from uwtools import storage  # noqa: E402
 
 EARTH_RADIUS_KM = 6371.0
 
 
 def domain_geometry(label: str, domain: str) -> tuple[float, float]:
     """North-south pixel size (km) and the window's centre latitude (degrees) from the run's config."""
-    config = json.loads((ROOT / "out/scratch/sandbox" / label / "config.json").read_text(encoding="utf-8"))
+    config = json.loads((storage.data_path("out/scratch/sandbox") / label / "config.json").read_text(encoding="utf-8"))
     spec = config["domains"][domain]
     bundle_columns = 256  # the base world's grid (configs/sandbox/terrain.json base_bundle)
     if "columns" in spec:
@@ -53,7 +55,7 @@ def ellipse(ry: int, rx: int) -> np.ndarray:
 
 
 def measure(label: str, domain: str, radius_km: float) -> dict:
-    directory = ROOT / "out/scratch/sandbox" / label
+    directory = storage.data_path("out/scratch/sandbox") / label
     elevation = np.load(directory / f"{domain}-elevation.npy")
     pixel_km, latitude = domain_geometry(label, domain)
     ew_km = pixel_km * math.cos(math.radians(latitude))

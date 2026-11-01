@@ -13,11 +13,14 @@ Usage: uv run python scripts/sandbox/crop_views.py --labels A,B --domain global 
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts"))
+from uwtools import storage  # noqa: E402
 
 
 def main() -> None:
@@ -33,7 +36,7 @@ def main() -> None:
         name, _, box = item.partition("=")
         views[name] = tuple(int(v) for v in box.split(","))
     for label in args.labels.split(","):
-        directory = ROOT / "out/scratch/sandbox" / label
+        directory = storage.data_path("out/scratch/sandbox") / label
         for name, box in views.items():
             for map_name in args.maps.split(","):
                 source = directory / f"{args.domain}-{map_name}.png"

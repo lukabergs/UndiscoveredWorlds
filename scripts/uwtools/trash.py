@@ -8,16 +8,18 @@ The user's rule (2026-10-20): agents may get rid of files as long as code makes 
 A delete of untracked data is refused by delete_guard.py; this moves it instead to
 <storage root>/trash/<entry>/ (the entry is a UTC time stamp and a number) with a receipt (original path, reason,
 files, bytes, SHA-256 of every file). On the same drive the move is a rename, so nothing is copied or deleted; from
-another drive every file is copied, verified by digest, and only then removed from its source. The trash carries
-protect.py's deny-delete permission (each moved item's permissions are reset to inherit it), so nothing in it can
-be deleted until the user unlocks it to empty it; `restore` copies an entry back and leaves it in place.
+another drive every file is copied, verified by digest, and only then removed from its source. Each moved item's
+permissions are reset to inherit the trash's. Only the user empties the trash; `restore` copies an entry back and
+leaves it in place.
 A read-only file or folder is made writable and its removal tried once more. A move that stopped half-way (its
 item still 'moving' in an entry's receipt) is finished by naming the same path again, alone: see resume.
 
 Refuses: links (the path itself or anything inside it: a recursive move must never follow a junction,
-2026-10-07), tracked files (use git rm), anything outside the repository and the storage root, and the protected
-places: the repository root, .git, refs/, runs/registry, runs/ledger, runs/archive, the storage root, its
-worktree-archive, receipts and trash, and the junction points themselves.
+2026-10-07), tracked files (use git rm; a path on storage is checked at its logical path in the main tree), anything
+outside the repository and the storage root, and the protected places: the repository root, .git, refs/, meta/,
+runs/registry, runs/ledger, runs/archive, out/, runs/, the storage root, its worktree-archive, receipts and trash, and
+the storage-side roots tools open directly (STORAGE_PLACES and every folder of <storage root>/runs; no junctions
+since 2026-11-01).
 """
 import argparse
 import datetime
@@ -32,7 +34,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from uwtools import storage  # noqa: E402
 from uwtools.hashing import sha256  # noqa: E402
-from uwtools.paths import ROOT  # noqa: E402
+from uwtools.paths import ROOT, main_root  # noqa: E402
 
 
 def trash_root():
@@ -46,21 +48,29 @@ def trash_root():
 SEALED = ('.git', 'refs', 'meta', 'registry', 'ledger', 'archive', 'worktree-archive', 'receipts', 'trash')
 
 
+# The storage-side roots that are never removed whole (no junctions since 2026-11-01: tools open these folders
+# directly), below the storage root; every folder of <storage root>/runs (one per module, reports, work, archive) too.
+STORAGE_PLACES = ('worktree-archive', 'receipts', 'trash', 'refs', 'refs/processed', 'refs/source',
+                  'refs/processed/physical', 'refs/source/physical', 'out', 'out/scratch', 'out/evaluation', 'runs',
+                  'runs/reports', 'runs/work', 'runs/archive')
+
+
+def storage_places(storage_root):
+    """The storage root, its STORAGE_PLACES and every folder of its runs/ (none when storage_root is None)."""
+    if storage_root is None:
+        return []
+    storage_root = Path(storage_root)
+    places = [storage_root] + [storage_root / place for place in STORAGE_PLACES]
+    runs = storage_root / 'runs'
+    places += [item for item in sorted(runs.iterdir()) if item.is_dir()] if runs.is_dir() else []
+    return places
+
+
 def protected_places():
     """Places that may not be moved, nor anything holding them; the SEALED ones not even partly."""
-    storage_root = storage.storage_root()
     places = [ROOT, ROOT / '.git', ROOT / 'refs', ROOT / 'meta', ROOT / 'runs' / 'registry', ROOT / 'runs' / 'ledger',
-              ROOT / 'runs' / 'archive', ROOT / 'out', ROOT / 'runs', storage_root, storage_root / 'worktree-archive',
-              storage_root / 'receipts', storage_root / 'trash', storage_root / 'refs', storage_root / 'out', storage_root / 'out' / 'scratch',
-              storage_root / 'out' / 'evaluation', storage_root / 'runs']
-    # The storage side of every junction (runs/<module>, runs/reports/<name>, out/scratch, out/evaluation): moving
-    # it would leave the junction on C pointing at nothing.
-    for parent in (ROOT / 'runs', ROOT / 'runs' / 'reports', ROOT / 'runs' / 'work', ROOT / 'out'):
-        for item in parent.iterdir() if parent.is_dir() else []:
-            target = storage.junction_target(item)
-            if target is not None:
-                places.append(target)
-    return places
+              ROOT / 'runs' / 'archive', ROOT / 'out', ROOT / 'runs']
+    return places + storage_places(storage.storage_root())
 
 
 def inside(path, parent):
@@ -94,14 +104,23 @@ def check(path):
         links = storage.find_links(real)
         if links:
             raise OSError(f'{real}: {len(links)} links or unreadable folders inside, e.g. {links[0]}')
+    # Tracked files at the path in this checkout, or, for a path on storage, at its logical path in the main tree.
+    # git lists the top folder and the names are filtered here, so git never has to follow a link in the path.
     if inside(given, ROOT):
-        relative = given.relative_to(ROOT).as_posix()
-        result = subprocess.run(['git', '-C', str(ROOT), 'ls-files', '--', relative], capture_output=True, text=True)
-        if result.returncode != 0:
-            raise OSError(f'{given}: git ls-files failed; nothing moved')
-        tracked = result.stdout.strip()
-        if tracked:
-            raise OSError(f'{given}: holds tracked files (e.g. {tracked.splitlines()[0]}); use git rm')
+        tree, relative = ROOT, given.relative_to(ROOT).as_posix()
+    else:
+        tree, relative = main_root(), storage.logical(real)
+        if relative is None:
+            raise OSError(f'{real}: no logical repository path; nothing moved')
+    result = subprocess.run(['git', '-C', str(tree), 'ls-files', '-z', '--', relative.split('/')[0]],
+                            capture_output=True, text=True, encoding='utf-8', errors='replace')
+    if result.returncode != 0:
+        raise OSError(f'{given}: git ls-files failed; nothing moved')
+    folded = relative.lower().rstrip('/')
+    tracked = [name for name in result.stdout.split('\0')
+               if name and (name.lower() == folded or name.lower().startswith(folded + '/'))]
+    if tracked:
+        raise OSError(f'{given}: holds tracked files (e.g. {tracked[0]}); use git rm')
     return real, label
 
 
@@ -155,8 +174,7 @@ def pending(real):
 
 
 def finish(target, item, receipt, receipt_path):
-    # A rename keeps the item's old permissions; reset them to the trash's inherited ones, so the trash's
-    # deny-delete permission (scripts/uwtools/protect.py) covers the item too.
+    # A rename keeps the item's old permissions; reset them to the trash's inherited ones.
     reset = subprocess.run(['icacls', str(target), '/reset', '/T', '/C', '/Q'], capture_output=True, text=True,
                            encoding='mbcs', errors='replace')
     item['status'] = 'moved' if reset.returncode == 0 else 'moved; permissions not reset: ' + reset.stdout[-200:]
@@ -300,7 +318,7 @@ def restore(name):
             raise OSError(f'{item["original"]}: its move did not finish (status {item.get("status")}); '
                           f'copy it back by hand from {entry / item["label"]}')
     for item in receipt['items']:
-        # A copy back: the trash is delete-protected (protect.py), so the entry stays until the user empties it.
+        # A copy back: the entry stays until the user empties the trash.
         original = Path(item['original'])
         original.parent.mkdir(parents=True, exist_ok=True)
         source = storage.long_path(entry / item['label'])

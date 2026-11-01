@@ -23,7 +23,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from uwtools import ledger, runs
+from uwtools import ledger, runs, storage
 from uwtools.bundle import SEASONS
 import review
 
@@ -419,7 +419,7 @@ def comparison_earth(runs, module, output, name):
     bundles = []
     for _, document, _ in runs:
         path = Path(document['run']['bundle'])
-        bundles.append(Bundle.open(path if path.is_absolute() else ROOT / path))
+        bundles.append(Bundle.open(storage.data_path(path) if storage.on_storage(path) else ROOT / path))
     if any(bundle.manifest.get('window') is None for bundle in bundles):
         raise SystemExit('--earth: every run of the comparison must be a regional map (a bundle with a window block)')
     metres = [earth_windows.map_request(bundle.manifest)['metres_per_pixel'] for bundle in bundles]
@@ -556,7 +556,7 @@ def comparison_page(evaluation_dirs, output_dir, earth=None):
 def climate_rankings():
     """Run id -> (global-balanced-v1 score, report directory) from the registered ranking batches, latest last."""
     scores = {}
-    for path in sorted(ROOT.glob('runs/reports/*/ranking.json'), key=lambda item: item.stat().st_mtime):
+    for path in sorted(storage.data_path('runs/reports').glob('*/ranking.json'), key=lambda item: item.stat().st_mtime):
         ranking = read_json(path)
         for identifier, value in ranking.get('scores', {}).items():
             scores[int(identifier)] = (value, path.parent)
@@ -565,12 +565,13 @@ def climate_rankings():
 
 def registered_run(record):
     """A record of the current layout (it names its run directory): run.json and the registry entry."""
-    run = read_json(ROOT / record['run'] / 'run.json') or {}
+    directory = storage.data_path(record['run'])
+    run = read_json(directory / 'run.json') or {}
     grid = run.get('grid')
     return {'id': record['id'], 'date': (record.get('date') or '')[:16].replace('T', ' '), 'status': record.get('status'),
             'label': record.get('label', ''), 'grid': f'{grid[0]} × {grid[1]}' if grid else None,
             'score': record.get('score'), 'metrics': {'elapsed_s': run.get('seconds')},
-            'links': [('run.json', ROOT / record['run'] / 'run.json'), ('log', ROOT / record['run'] / 'log.txt')]}
+            'links': [('run.json', directory / 'run.json'), ('log', directory / 'log.txt')]}
 
 
 def climate_run(record, rankings):
@@ -580,8 +581,9 @@ def climate_run(record, rankings):
     stamp = str(record.get('datetime', ''))
     date = f'{stamp[:4]}-{stamp[4:6]}-{stamp[6:8]} {stamp[8:10]}:{stamp[10:12]}' if len(stamp) >= 12 else stamp
     score, source = rankings.get(identifier, (None, None))
-    links = [('run page', ROOT / f'runs/reports/{identifier}.html'), ('record', ROOT / f'runs/reports/{identifier}.md'),
-             ('gallery', ROOT / f'runs/reports/{identifier}-gallery.html')]
+    reports = storage.data_path('runs/reports')
+    links = [('run page', reports / f'{identifier}.html'), ('record', reports / f'{identifier}.md'),
+             ('gallery', reports / f'{identifier}-gallery.html')]
     if source is not None:
         links += [('ranking', next(iter(sorted(source.parent.glob(f'{source.name}*.html'))), source / 'ranking.json'))]
     grid = record.get('horizontal_resolution')
@@ -605,7 +607,8 @@ def tectonics_run(record):
     manifest = read_json(runs.archived(record['manifest'])) if record.get('manifest') else None
     manifest = manifest or {}
     recipe = manifest.get('recipe', {})
-    links = [('run page', ROOT / f'runs/reports/tectonics/{identifier}.html'), ('record', ROOT / f'runs/reports/tectonics/{identifier}.md'),
+    reports = storage.data_path('runs/reports/tectonics')
+    links = [('run page', reports / f'{identifier}.html'), ('record', reports / f'{identifier}.md'),
              ('manifest', runs.archived(record['manifest']) if record.get('manifest') else ROOT / 'missing')]
     label = recipe.get('name', '') + (f" ({record['kind']})" if record.get('kind') else '')
     return {'id': identifier, 'date': (manifest.get('started_utc') or '')[:16].replace('T', ' '), 'status': record.get('status'),
@@ -625,7 +628,7 @@ def dashboard_data(module, output_dir):
         entry = climate_run(record, rankings) if module == 'climate' else tectonics_run(record) if module == 'tectonics' else \
             {'id': record['id'], 'date': None, 'status': record.get('status'), 'label': '', 'grid': None, 'score': None,
              'metrics': {}, 'links': []}
-        evaluation = ROOT / f"runs/{module}/{record['id']}/evaluation"
+        evaluation = storage.data_path(f"runs/{module}/{record['id']}/evaluation")
         document = read_json(evaluation / 'evaluation.json')
         entry['evaluation_score'] = score_value(document['validation']['scores'].get('run')) if document else None
         links = [('evaluation', evaluation / 'index.html')] + entry['links']

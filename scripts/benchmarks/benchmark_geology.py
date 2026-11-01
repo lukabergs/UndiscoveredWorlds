@@ -9,7 +9,7 @@ import numpy as np
 import rasterio
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from uwtools import grid
+from uwtools import grid, storage
 from uwtools.hashing import sha256
 from uwtools.bundle import Bundle
 from uwtools.tectonics import BUNDLE_FIELDS, bundle_files, is_run_bundle, snapshot_manifest
@@ -189,7 +189,7 @@ table{border-collapse:collapse;width:100%;margin:24px 0}th,td{padding:10px;text-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bundle", type=Path, nargs="+", required=True)
-    parser.add_argument("--references", type=Path, default=REPO / "refs/processed/physical")
+    parser.add_argument("--references", type=Path, default=storage.data_path("refs/processed/physical"))
     parser.add_argument("--width", type=int, choices=(128, 256, 512, 1024, 2048), default=512)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()

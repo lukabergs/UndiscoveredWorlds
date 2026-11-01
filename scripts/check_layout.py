@@ -1,10 +1,11 @@
 """Check repository paths after manual cleanup; does not move or delete files."""
 from pathlib import Path
 import re
+import subprocess
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from uwtools import palettes
+from uwtools import palettes, storage
 
 ROOT = Path(__file__).resolve().parents[1]
 ROOT_DIRECTORIES = {
@@ -72,6 +73,32 @@ def include_issues(root=ROOT):
     return issues
 
 
+def data(relative):
+    """Where a logical repository path is on disk (storage.data_path: run data and refs/*/physical on the storage
+    drive, no junctions since 2026-11-01); this checkout's path when storage is not configured."""
+    try:
+        return storage.data_path(relative)
+    except (OSError, ValueError, subprocess.CalledProcessError):
+        return ROOT / relative
+
+
+def shown(path):
+    """A path as its logical repository path (posix) when it has one."""
+    return storage.logical(path) or Path(path).as_posix()
+
+
+def processed_files(pattern):
+    """refs/processed/**/<pattern>: the main tree's part, then refs/processed/physical on the storage drive (skipped
+    in the main tree's walk while it is still a link there)."""
+    base, physical = data("refs/processed"), data("refs/processed/physical")
+    separate = physical != base / "physical"
+    found = [path for path in base.rglob(pattern)
+             if not (separate and path.relative_to(base).parts[0] == "physical")] if base.is_dir() else []
+    if separate and physical.is_dir():
+        found += list(physical.rglob(pattern))
+    return found
+
+
 def root_item_issues(root=ROOT):
     issues = []
     for path in root.iterdir():
@@ -103,34 +130,36 @@ def main():
 
     issues.extend(include_issues())
 
-    for path in (ROOT / "refs/processed").rglob("*.xml"):
+    for path in processed_files("*.xml"):
         if path.name.endswith(".png.aux.xml"):
             if not path.with_name(path.name.removesuffix(".aux.xml")).is_file():
-                issues.append(f"Orphan PNG georeferencing: {path.relative_to(ROOT)}")
+                issues.append(f"Orphan PNG georeferencing: {shown(path)}")
         elif "<PAMDataset>" in path.read_text(encoding="utf-8", errors="replace"):
-            issues.append(f"GDAL sidecar must retain the image filename and .aux.xml: {path.relative_to(ROOT)}")
+            issues.append(f"GDAL sidecar must retain the image filename and .aux.xml: {shown(path)}")
 
-    # Run layout (docs/architecture/consolidation-plan.md, section 4): runs/<module>/<id>/run.json;
-    # the sealed layout under runs/archive/ is not checked.
-    for module in ((ROOT / "runs").iterdir() if (ROOT / "runs").exists() else ()):
+    # Run layout (docs/architecture/consolidation-plan.md, section 4): runs/<module>/<id>/run.json, on the
+    # storage drive (runs/reports stands for any storage-side child of runs/); the sealed layout under runs/archive/
+    # is not checked.
+    runs = data("runs/reports").parent
+    for module in (runs.iterdir() if runs.exists() else ()):
         if not module.is_dir() or module.name in RUNS_RESERVED:
             continue
         for path in module.iterdir():
             if not path.name.isdigit() or not path.is_dir():
-                issues.append(f"Run directories are numeric ids: {path.relative_to(ROOT).as_posix()}")
+                issues.append(f"Run directories are numeric ids: {shown(path)}")
             elif not (path / "run.json").is_file():
-                issues.append(f"Run directory without run.json: {path.relative_to(ROOT).as_posix()}")
+                issues.append(f"Run directory without run.json: {shown(path)}")
             else:
                 # Every maps folder of a run names the palettes it was rendered with.
                 for maps in sorted(folder for folder in path.rglob("maps") if folder.is_dir()):
                     problem = palettes.sidecar_issue(maps)
                     if problem:
-                        issues.append(f"{maps.relative_to(ROOT).as_posix()}: {problem}")
+                        issues.append(f"{shown(maps)}: {problem}")
     # Reference maps rendered before the sidecar existed have none; one that exists must be sound.
-    for sidecar in (ROOT / "refs/processed").rglob(f"maps/{palettes.SIDECAR}"):
+    for sidecar in processed_files(f"maps/{palettes.SIDECAR}"):
         problem = palettes.sidecar_issue(sidecar.parent)
         if problem:
-            issues.append(f"{sidecar.parent.relative_to(ROOT).as_posix()}: {problem}")
+            issues.append(f"{shown(sidecar.parent)}: {problem}")
 
     reference_maps = ROOT / "refs/processed/climate/maps"
     for path in reference_maps.rglob("*.png"):
