@@ -55,10 +55,8 @@ RELIEF_EXAGGERATION = 100.0                # the maps' hillshade: about 300 km p
 
 
 def default_scratch():
-    try:
-        return storage.data_path('out/scratch/sphere')
-    except (OSError, subprocess.CalledProcessError):
-        return ROOT / 'out/scratch/sphere'
+    """The main tree's out/scratch/sphere on the storage drive; its error (no storage) surfaces, nothing falls back to C."""
+    return storage.data_path('out/scratch/sphere')
 
 
 def code_revision():

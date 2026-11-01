@@ -44,11 +44,21 @@ def legacy_run_directory(parts):
             "ascent": f"wind/ascent/{season}/u", "heating": f"energy/heating/{season}/column"}[first]
 
 
+# The only places the migration touches (logical paths): everything it moves, stages or removes lies below one of them.
+PLACES = ("runs/maps/climate", "runs/fields/climate", "runs/work/legacy-map-notes", "runs/work/legacy-maps",
+          "runs/work/map-layout-staging", "refs/processed/climate")
+
+
 def checked(relative):
+    """Where a path of the migration is (storage.data_path), or ValueError unless it lies below one of PLACES or is
+    the journal: nothing else under the main tree or the storage root (.git, the trash) may pass."""
     path = storage.data_path(relative).resolve()
-    if storage.logical(path) in (None, "."):
-        raise ValueError(f"Path escaped workspace: {path}")
-    return path
+    if path == Path(JOURNAL).resolve():
+        return path
+    for place in PLACES:
+        if storage.data_path(place).resolve() in path.parents:
+            return path
+    raise ValueError(f"Path escaped the migrated places: {path}")
 
 
 def plan():

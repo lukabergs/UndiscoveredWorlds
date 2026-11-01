@@ -17,7 +17,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from uwtools import runs
+from uwtools import runs, storage
 from uwtools.bundle import SEASONS
 
 VERDICTS = ('approved', 'rejected', 'revise')
@@ -82,7 +82,8 @@ def record(directory, verdict, notes, reviewer, against, answers=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('evaluation', type=Path, help='Directory written by evaluate.py')
+    parser.add_argument('evaluation', type=storage.data_path,
+                        help='Directory written by evaluate.py (a logical runs/... path resolves on the storage drive)')
     parser.add_argument('--verdict', choices=VERDICTS)
     parser.add_argument('--notes', default='')
     parser.add_argument('--reviewer', default='user')

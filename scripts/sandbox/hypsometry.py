@@ -24,7 +24,7 @@ import numpy as np  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'scripts'))
-from uwtools import naming  # noqa: E402
+from uwtools import naming, storage  # noqa: E402
 from uwtools.tectonics_earth_reference import compare_to_earth, load_earth_reference, measure_earth  # noqa: E402
 
 TAG_PREFIX = 'hypsometry-'  # the page's tag: hypsometry-<name>
@@ -75,7 +75,7 @@ def main():
         worlds.append((label, np.load(run / 'global-elevation.npy')))
     for item in arguments.array:
         name, _, path = item.partition('=')
-        worlds.append((name, np.load(ROOT / path)))
+        worlds.append((name, np.load(storage.data_path(path))))  # runs/... on the storage drive
     if len(worlds) > len(SERIES):
         raise SystemExit(f'at most {len(SERIES)} worlds per chart')
 

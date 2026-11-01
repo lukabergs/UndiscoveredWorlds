@@ -166,15 +166,18 @@ def evaluate_into(profile, profile_path, bundle, output, baseline, repeat, input
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--profile', required=True, help='Module name in configs/evaluation/ or a profile path')
-    parser.add_argument('--bundle', required=True, type=Path)
-    parser.add_argument('--output', required=True, type=Path)
-    parser.add_argument('--baseline', type=Path, help='Bundle compared with the run on common masks')
-    parser.add_argument('--repeat', type=Path, help='Second run of the same seed and code (determinism check)')
-    parser.add_argument('--explicit', type=Path, help='Run given the recipe file explicitly (recipe-equality check)')
-    parser.add_argument('--input', type=Path, help='Bundle holding the inputs of frozen components')
-    parser.add_argument('--coarser', type=Path, help='Coarser refinement hierarchy bundle of the same world '
+    # Bundle and output paths are logical: runs/... and out/scratch|evaluation/... resolve on the storage drive
+    # (storage.data_path; no junctions since 2026-11-01).
+    data = storage.data_path
+    parser.add_argument('--bundle', required=True, type=data)
+    parser.add_argument('--output', required=True, type=data)
+    parser.add_argument('--baseline', type=data, help='Bundle compared with the run on common masks')
+    parser.add_argument('--repeat', type=data, help='Second run of the same seed and code (determinism check)')
+    parser.add_argument('--explicit', type=data, help='Run given the recipe file explicitly (recipe-equality check)')
+    parser.add_argument('--input', type=data, help='Bundle holding the inputs of frozen components')
+    parser.add_argument('--coarser', type=data, help='Coarser refinement hierarchy bundle of the same world '
                         '(regional level-consistency and resolution-invariance checks)')
-    parser.add_argument('--checkpoints', type=Path, help='Directory of checkpoint bundles (default <bundle>/../checkpoints)')
+    parser.add_argument('--checkpoints', type=data, help='Directory of checkpoint bundles (default <bundle>/../checkpoints)')
     parser.add_argument('--no-maps', action='store_true')
     parser.add_argument('--earth', metavar='NAME', help='Earth reference window of the catalogue beside a regional map '
                         '(profiles with an "earth" block; default: the nearest-latitude entry holding the map\'s metres per pixel)')

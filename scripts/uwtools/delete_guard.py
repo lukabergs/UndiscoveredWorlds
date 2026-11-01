@@ -4,9 +4,10 @@ Since 2026-11-01 (the user: too many false positives) this guard no longer judge
 runs/, out/scratch and the like may be cleaned up, and guard_catastrophe.py (global) still refuses drive-level and
 protected-tree deletes. It keeps one job, because several sessions share this working tree and one agent's git
 command can wipe another's uncommitted work. Refused, before the command runs:
-- `clean` (unless a dry run), `reset --hard/--merge/--keep` on a dirty tree, `checkout`/`restore`/`switch --force`
-  over uncommitted changes, `stash drop`/`clear`, `worktree remove`, `branch -D` (use
-  `scripts/uwtools/worktrees.py drop-branches`, which bundles first);
+- `clean` (unless a dry run), `reset --hard/--merge/--keep` on a dirty tree, `checkout`/`restore`/`switch --force`,
+  `rm -f`, `checkout-index -f`, `read-tree -u` and `merge`/`rebase`/`am`/`cherry-pick`/`revert --abort` over
+  uncommitted changes, `stash drop`/`clear`, `worktree remove`, `branch -D` (use
+  `scripts/uwtools/worktrees.py drop-branches`, which bundles first) and `branch -M`/`-C` (they overwrite a branch);
 - `worktrees.py retire --allow-unlanded` (the user's only).
 
 Reads the hook JSON on stdin; exit 2 blocks the call. Fails closed: an error inside the guard, or a git check past
@@ -108,6 +109,15 @@ def check_git(words, cwd):
     flags = {a for a in rest if a.startswith('-')}
     if sub == 'clean' and not ({'-n', '--dry-run'} & set(rest)):
         block('git clean deletes untracked files.')
+    if sub == 'rm' and any(re.fullmatch(r'-[a-z]*f[a-z]*|--force', a) for a in rest) and '--cached' not in rest \
+            and dirty_paths(cwd, [a for a in args[1:] if not a.startswith('-')]):
+        block('git rm -f on a file with uncommitted changes.')
+    if sub in ('merge', 'rebase', 'am', 'cherry-pick', 'revert') and '--abort' in rest and dirty_tree(cwd):
+        block(f'git {sub} --abort on a tree with uncommitted changes (it resets them).')
+    if sub == 'checkout-index' and ({'-f', '--force'} & set(rest)) and dirty_tree(cwd):
+        block('git checkout-index -f over uncommitted changes.')
+    if sub == 'read-tree' and '-u' in rest and dirty_tree(cwd):
+        block('git read-tree -u over uncommitted changes.')
     if sub == 'reset' and {'--hard', '--merge', '--keep'} & set(rest) and dirty_tree(cwd):
         block('git reset --hard on a tree with uncommitted changes.')
     if sub == 'checkout' and (('--' in rest or '.' in rest or '-f' in rest or '--force' in rest) and dirty_tree(cwd)
@@ -127,6 +137,8 @@ def check_git(words, cwd):
     if sub == 'worktree' and rest and rest[0] == 'remove':
         block('git worktree remove deletes the worktree\'s untracked files (scripts/uwtools/worktrees.py preserve, '
               'then retire).')
+    if sub == 'branch' and any(re.fullmatch(r'-[a-zA-Z]*[MC][a-zA-Z]*', a) for a in args[1:]):
+        block('git branch -M / -C overwrites an existing branch, whose commits may be unmerged.')
     if sub == 'branch' and (any(re.fullmatch(r'-[a-zA-Z]*D[a-zA-Z]*', a) for a in args[1:])
                             or any(re.fullmatch(r'-[a-z]*d[a-z]*f[a-z]*|-[a-z]*f[a-z]*d[a-z]*', a) for a in rest)
                             or (({'--delete', '-d'} & set(rest)) and ({'--force', '-f'} & set(rest)))):
@@ -177,6 +189,8 @@ def main():
         command = (payload.get('tool_input') or {}).get('command') or ''
         cwd = to_native(payload.get('cwd') or os.getcwd(), os.getcwd())  # also a Git Bash /c/... form
         if re.search(r'\bgit\b|worktrees', command, re.IGNORECASE):
+            # Text (a heredoc or here-string commit message) is not commands (guard_text.readable).
+            command, _ = guard_text.readable(command, payload.get('tool_name') == 'PowerShell')
             for segment, _, _ in guard_text.split_command(command):
                 cwd = check_segment(segment, cwd)
     except SystemExit:

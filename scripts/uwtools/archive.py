@@ -184,22 +184,20 @@ def shown(path):
 
 
 def resolve_bundle(text):
-    """A bundle path as evaluation.json records it: absolute, or relative to the repository (the main tree's, when
-    run from a worktree that lacks runs/)."""
-    path = Path(text)
-    if path.is_absolute() or (ROOT / path).exists():
-        return ROOT / path
-    try:
-        return main_root() / path
-    except (OSError, subprocess.CalledProcessError):
-        return ROOT / path
+    """A bundle path as evaluation.json records it, where it is now (storage.data_path): a logical path, or an
+    absolute one into the repository written before 2026-11-01 (C:/dev/undiscovered-worlds/runs/erosion/1/bundle),
+    on the storage drive; ValueError for a relative path leaving the repository."""
+    return storage.data_path(text)
 
 
 def bundle_matches(record):
     """True when record names a bundle whose manifest.json exists and has the digest record holds."""
     if not isinstance(record, dict) or not record.get('bundle') or not record.get('manifest_sha256'):
         return False
-    manifest = resolve_bundle(str(record['bundle'])) / 'manifest.json'
+    try:
+        manifest = resolve_bundle(str(record['bundle'])) / 'manifest.json'
+    except ValueError:  # a recorded path leaving the repository names no bundle: nothing is dropped
+        return False
     return manifest.is_file() and sha256(manifest) == record['manifest_sha256']
 
 
@@ -438,10 +436,11 @@ def receipts():
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     commands = parser.add_subparsers(dest='command', required=True)
+    # A run folder named by its logical path (runs/erosion/9) or by its former C path resolves on the storage drive.
     planning = commands.add_parser('plan', help='dry run: per class, the files and bytes that would be dropped')
-    planning.add_argument('paths', nargs='+')
+    planning.add_argument('paths', nargs='+', type=storage.data_path)
     applying = commands.add_parser('apply', help='drop the regenerable files, with a receipt', allow_abbrev=False)
-    applying.add_argument('paths', nargs='+')
+    applying.add_argument('paths', nargs='+', type=storage.data_path)
     applying.add_argument('--reason', required=True)
     commands.add_parser('list', help='the archive receipts')
     args = parser.parse_args()

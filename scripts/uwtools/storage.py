@@ -10,6 +10,7 @@ runs/storage.json nothing is on storage and data_path refuses the storage-side p
 import functools
 import json
 import os
+import posixpath
 import re
 import shutil
 import stat
@@ -22,13 +23,22 @@ else:  # run as a script: uv run python scripts/uwtools/storage.py status
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from uwtools.paths import ROOT, main_root
 
-CONFIG = ROOT / 'runs/storage.json'
+@functools.lru_cache(maxsize=None)
+def _main():
+    return main_root()
+
+
+CONFIG = None  # tests point it at a fixture; None: the main tree's runs/storage.json
+
+
+def _config():
+    """runs/storage.json of the main tree (it is untracked: a worktree has none of its own)."""
+    return Path(CONFIG) if CONFIG is not None else _main() / 'runs/storage.json'
 
 
 def storage_root(config=None):
-    """The storage root of a runs/storage.json (default this checkout's CONFIG; naming.py passes the main
-    tree's), or None when storage is not configured."""
-    config = Path(CONFIG if config is None else config)
+    """The storage root of a runs/storage.json (default the main tree's), or None when storage is not configured."""
+    config = Path(_config() if config is None else config)
     if not config.is_file():
         return None
     root = Path(json.loads(config.read_text(encoding='utf-8-sig'))['storage_root']).resolve()
@@ -45,38 +55,55 @@ def storage_root(config=None):
 # runs/<anything but registry, ledger, storage.json>, out/scratch, out/evaluation, refs/processed/physical,
 # refs/source/physical (and everything below them).
 ON_STORAGE = re.compile(r'(runs/(?!(registry|ledger|storage\.json)(/|$))[^/]+|out/(scratch|evaluation)|'
-                        r'refs/(processed|source)/physical)(/.*)?')
+                        r'refs/(processed|source)/physical)(/.*)?', re.IGNORECASE)
 
 
-@functools.lru_cache(maxsize=None)
-def _main():
-    return main_root()
+def _clean(relative):
+    """A relative path as normalised posix text ('..' folded, no leading ./ or slashes); None if it leaves its root."""
+    text = posixpath.normpath(Path(relative).as_posix()).strip('/')
+    return None if text == '..' or text.startswith('../') else ('' if text == '.' else text)
 
 
 def on_storage(relative):
     """True when a logical repository path (posix, relative) lives under the storage root."""
-    return bool(ON_STORAGE.fullmatch(Path(relative).as_posix().strip('/')))
+    text = _clean(relative)
+    return bool(text and ON_STORAGE.fullmatch(text))
 
 
-def data_path(relative):
-    """Where a logical repository path (runs/erosion/9, out/scratch/x, refs/processed/physical/y) is on disk:
-    under the storage root when on_storage, else in the main tree. An absolute path comes back unchanged."""
-    if Path(relative).is_absolute():
-        return Path(relative)
-    relative = Path(relative).as_posix().strip('/')
+def data_path(path):
+    """Where a path is on disk. A logical repository path (runs/erosion/9, out/scratch/x, refs/processed/physical/y)
+    on storage is under the storage root; another one is in the main tree when it starts with runs/ or refs/ (a
+    worktree holds neither), else in this checkout. An absolute path into the repository (the main tree or this
+    checkout) whose logical path is on storage is mapped to the storage root too: records written before
+    2026-11-01 name C paths like C:/dev/undiscovered-worlds/runs/erosion/1/bundle. Any other absolute path comes
+    back unchanged."""
+    path = Path(path)
+    if path.is_absolute():
+        for base in (ROOT, _main()):
+            try:
+                relative = path.resolve().relative_to(base.resolve()).as_posix()
+            except ValueError:
+                continue
+            return data_path(relative) if on_storage(relative) else path
+        return path
+    relative = _clean(path)
+    if relative is None:
+        raise ValueError(f'{path}: a logical path may not leave the repository')
     if on_storage(relative):
-        storage = storage_root(_main() / 'runs/storage.json')
+        storage = storage_root()
         if storage is None:
             raise OSError('runs/storage.json is missing: data on storage cannot be found')
         return storage / relative
-    return _main() / relative
+    first = relative.split('/')[0].lower()
+    return (_main() if first in ('runs', 'refs') else ROOT) / relative
 
 
 def logical(path):
-    """The logical repository path (posix) of a path under the storage root or the main tree, or None."""
+    """The logical repository path (posix) of a path under the storage root, this checkout or the main tree (most
+    specific first: a worktree lies inside the main tree), or None."""
     path = Path(os.path.abspath(path))
-    storage = storage_root(_main() / 'runs/storage.json')
-    for base in ([storage] if storage else []) + [_main(), ROOT]:
+    storage = storage_root()
+    for base in ([storage] if storage else []) + [ROOT, _main()]:
         try:
             return path.relative_to(base).as_posix()
         except ValueError:

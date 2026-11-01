@@ -18,8 +18,9 @@ Refuses: links (the path itself or anything inside it: a recursive move must nev
 2026-10-07), tracked files (use git rm; a path on storage is checked at its logical path in the main tree), anything
 outside the repository and the storage root, and the protected places: the repository root, .git, refs/, meta/,
 runs/registry, runs/ledger, runs/archive, out/, runs/, the storage root, its worktree-archive, receipts and trash, and
-the storage-side roots tools open directly (STORAGE_PLACES and every folder of <storage root>/runs; no junctions
-since 2026-11-01).
+the storage-side roots tools open directly (STORAGE_PLACES and every folder of <storage root>/runs, runs/reports and
+runs/work; no junctions since 2026-11-01). A relative PATH is logical (storage.data_path: out/scratch/x is on the
+storage drive); an absolute PATH is taken as given.
 """
 import argparse
 import datetime
@@ -55,14 +56,20 @@ STORAGE_PLACES = ('worktree-archive', 'receipts', 'trash', 'refs', 'refs/process
                   'runs/reports', 'runs/work', 'runs/archive')
 
 
+# The folders whose every direct child is a root tools open directly too (runs/reports/<name> and runs/work/<name>
+# were junction targets before 2026-11-01).
+STORAGE_PARENTS = ('runs/reports', 'runs/work')
+
+
 def storage_places(storage_root):
-    """The storage root, its STORAGE_PLACES and every folder of its runs/ (none when storage_root is None)."""
+    """The storage root, its STORAGE_PLACES, every folder of its runs/ and every folder of STORAGE_PARENTS (none
+    when storage_root is None)."""
     if storage_root is None:
         return []
     storage_root = Path(storage_root)
     places = [storage_root] + [storage_root / place for place in STORAGE_PLACES]
-    runs = storage_root / 'runs'
-    places += [item for item in sorted(runs.iterdir()) if item.is_dir()] if runs.is_dir() else []
+    for parent in [storage_root / 'runs'] + [storage_root / place for place in STORAGE_PARENTS]:
+        places += [item for item in sorted(parent.iterdir()) if item.is_dir()] if parent.is_dir() else []
     return places
 
 
@@ -335,11 +342,18 @@ def restore(name):
     return len(receipt['items'])
 
 
+def argument(text):
+    """A path of the command line: a relative one is logical (storage.data_path: out/scratch/x and runs/... on the
+    storage drive, out/build/x in this checkout); an absolute one is taken as given, so a leftover copy on C is
+    never mistaken for its storage counterpart."""
+    return text if Path(text).is_absolute() else str(storage.data_path(text))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     commands = parser.add_subparsers(dest='command', required=True)
     moving = commands.add_parser('move', help='move untracked files or folders into the trash', allow_abbrev=False)
-    moving.add_argument('paths', nargs='+')
+    moving.add_argument('paths', nargs='+', type=argument)
     moving.add_argument('--reason', default='')
     commands.add_parser('list', help='entries with their sizes')
     back = commands.add_parser('restore', help='copy an entry back where it was (the entry stays)')

@@ -214,15 +214,17 @@ def main():
     parser.add_argument('--seed', type=int, help='World seed (default 1; regional: the world bundle\'s, checked when given)')
     parser.add_argument('--resolution', type=int, help='Grid width W; height is W/2')
     parser.add_argument('--executable', type=Path)
-    parser.add_argument('--output', type=Path)
+    # Data paths (bundles, evaluations, outputs, a run's ledger-entry.json) are logical: runs/... and
+    # out/scratch|evaluation/... resolve on the storage drive (storage.data_path; no junctions since 2026-11-01).
+    parser.add_argument('--output', type=storage.data_path)
     parser.add_argument('--label', help='Change summary stored with the run')
     parser.add_argument('--runs', type=int, nargs='+')
-    parser.add_argument('--bundle', type=Path, help='Run bundle to evaluate (evaluate)')
-    parser.add_argument('--evaluation', type=Path, nargs='+',
+    parser.add_argument('--bundle', type=storage.data_path, help='Run bundle to evaluate (evaluate)')
+    parser.add_argument('--evaluation', type=storage.data_path, nargs='+',
                         help='Evaluation directories for report pages (report); the first is the baseline')
     parser.add_argument('--topic', help='Ledger entries naming this text (ledger; printed before an experiment)')
     parser.add_argument('--draft', action='store_true', help='ledger: print a new entry to fill in')
-    parser.add_argument('--add', type=Path, help='ledger: JSON file of one entry to append')
+    parser.add_argument('--add', type=storage.data_path, help='ledger: JSON file of one entry to append')
     parser.add_argument('--earth', metavar='NAME',
                         help='Earth reference window beside regional maps (evaluate; report with several evaluations)')
     parser.add_argument('--reference-width', type=int, default=512, help='Earth reference width (geology)')

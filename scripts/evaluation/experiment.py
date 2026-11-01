@@ -171,7 +171,8 @@ def main():
     parser.add_argument('--archive', help='runs/reports/<experiment> archive for kept scratch evidence')
     parser.add_argument('--seed', type=int, help='World seed (default 1; a profile with "seeded": false passes it only when given)')
     parser.add_argument('--resolution', type=int, help='Grid width W (default from the profile)')
-    parser.add_argument('--baseline', type=Path, help='Bundle compared with the run')
+    parser.add_argument('--baseline', type=storage.data_path,
+                        help='Bundle compared with the run (a logical runs/... path resolves on the storage drive)')
     parser.add_argument('--repeat', action='store_true', help='Run twice and check the bundles are identical')
     parser.add_argument('--explicit-recipe', action='store_true',
                         help="Run again with the profile's recipe file as options (registered: without them) "
@@ -180,7 +181,10 @@ def main():
     parser.add_argument('--label', help='Change summary stored with the run')
     parser.add_argument('--topic', help='Print the ledger entries naming this text before the run (default: the last five)')
     args, native = parser.parse_known_args()
-    native = [argument for argument in native if argument != '--']
+    # A native value naming data by its logical path (--from-bundle runs/world/5/bundle) is passed to the tool as
+    # its place on the storage drive: the tool runs in this tree, where nothing is linked since 2026-11-01.
+    native = [str(storage.data_path(argument)) if not argument.startswith('-') and storage.on_storage(argument)
+              else argument for argument in native if argument != '--']
     if args.register and (args.name or args.archive):
         raise SystemExit('A registered run lives in runs/<module>/<id>/; --name and --archive are for scratch runs')
     if args.tag and not args.register:

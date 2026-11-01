@@ -12,7 +12,6 @@ Recorded paths are logical repository paths; run data is on the storage drive at
 """
 import json
 import os
-import subprocess
 from pathlib import Path
 
 from . import storage
@@ -21,15 +20,20 @@ from .tectonics import run_snapshots
 
 
 def data_path(relative):
-    """storage.data_path of a logical repository path; this checkout's path when storage is not configured (no
-    runs/storage.json, or the drive unavailable)."""
-    try:
-        return storage.data_path(relative)
-    except (OSError, subprocess.CalledProcessError):
-        return ROOT / relative
+    """storage.data_path of a logical repository path; its error (no runs/storage.json, the drive unavailable)
+    surfaces: nothing falls back to C."""
+    return storage.data_path(relative)
 
 
-ARCHIVE = data_path('runs/archive')
+ARCHIVE = None  # tests point it at a fixture; None: the sealed runs/archive on storage (archive())
+
+
+def archive():
+    """The sealed runs/archive on the storage drive (ARCHIVE when set); resolved at use, so importing this module
+    needs no storage."""
+    return Path(ARCHIVE) if ARCHIVE is not None else data_path('runs/archive')
+
+
 SEALED_KINDS = ('checkpoints', 'diagnostics', 'fields', 'logs', 'maps', 'manifests', 'parameters', 'metrics')
 
 
@@ -60,7 +64,7 @@ def archived(path):
     """A repository path recorded before the seal, as it is now."""
     parts = Path(path).as_posix().split('/')
     if len(parts) > 1 and parts[0] == 'runs' and parts[1] in SEALED_KINDS:
-        return ARCHIVE.joinpath(*parts[1:])
+        return archive().joinpath(*parts[1:])
     return data_path(path)
 
 
@@ -74,7 +78,7 @@ def derived(module, identifier, name):
     """An existing derived file of a run: its output directory first, then a sealed run's diagnostics."""
     candidates = [output_directory(module, identifier) / name]
     if directory(module, identifier) is None:
-        candidates.append(ARCHIVE / 'diagnostics' / module / str(identifier) / name)
+        candidates.append(archive() / 'diagnostics' / module / str(identifier) / name)
     return next((path for path in candidates if path.is_file()), None)
 
 
@@ -91,8 +95,9 @@ def refuse_archive(path):
     """path as an absolute path; SystemExit when it lies in the sealed runs/archive (on storage, or at its
     logical path in this checkout), which nothing may write into."""
     path = Path(os.path.abspath(path))
+    sealed_archive = archive()
     for candidate in (path, path.resolve()):
-        for sealed in (ARCHIVE, ARCHIVE.resolve(), ROOT / 'runs/archive'):
+        for sealed in (sealed_archive, sealed_archive.resolve(), ROOT / 'runs/archive'):
             if candidate == sealed or sealed in candidate.parents:
                 raise SystemExit(f'{path} is in the sealed runs/archive; write derived outputs elsewhere '
                                  '(runs/reports/<module>/<id>/analysis or out/)')
@@ -137,9 +142,9 @@ def tectonics(identifier):
     identifier = int(identifier)
     run = directory('tectonics', identifier)
     if run is None:
-        manifest = json.loads((ARCHIVE / f'manifests/tectonics/{identifier}.json').read_text(encoding='utf-8'))
+        manifest = json.loads((archive() / f'manifests/tectonics/{identifier}.json').read_text(encoding='utf-8'))
         for snapshot in manifest.get('snapshots', []):
-            snapshot['path'] = ARCHIVE / f'checkpoints/tectonics/{identifier}' / snapshot['directory']
+            snapshot['path'] = archive() / f'checkpoints/tectonics/{identifier}' / snapshot['directory']
         return manifest
     document = json.loads((run / 'run.json').read_text(encoding='utf-8'))
     snapshots = run_snapshots(run)

@@ -45,27 +45,39 @@ class MapLayoutTests(unittest.TestCase):
             self.assertEqual(organize.legacy_run_directory(old.split("/")), new)
 
     def test_staging_preserves_files_when_destination_is_another_source(self):
+        # The main tree and the storage root are temporary directories (as in test_naming.py): the migration
+        # resolves its paths through storage.data_path, so nothing reaches the real storage drive.
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary).resolve()
+            root = Path(temporary).resolve() / "main"
+            store = Path(temporary).resolve() / "store"
+            config = root / "runs/storage.json"
+            config.parent.mkdir(parents=True)
+            config.write_text(json.dumps({"storage_root": str(store)}), encoding="utf-8")
             manifest = root / "refs/processed/metadata/reference-maps/manifest.json"
             manifest.parent.mkdir(parents=True)
             manifest.write_text('{"outputs": []}', encoding="utf-8")
-            journal_path = root / "runs/manifests/climate-map-layout.json"
+            journal_path = store / "runs/manifests/climate-map-layout.json"
             journal_path.parent.mkdir(parents=True)
             moves = {"runs/maps/climate/wind/lic/0/s/7.png": "runs/maps/climate/wind/lic/1/s/7.png",
                      "runs/maps/climate/wind/lic/1/s/7.png": "runs/maps/climate/wind/lic/2/s/7.png"}
             for i, source in enumerate(moves):
-                path = root / source
+                path = store / source
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(bytes([i]))
             journal = {"version": 1, "phase": "staging", "moves": moves}
-            with patch.object(organize, "ROOT", root), patch.object(organize, "JOURNAL", journal_path):
+            with patch.object(organize.storage, "_main", return_value=root), \
+                    patch.object(organize.storage, "CONFIG", config), \
+                    patch.object(organize, "ROOT", root), patch.object(organize, "JOURNAL", journal_path):
                 organize.apply(journal)
                 for i, destination in enumerate(moves.values()):
-                    self.assertEqual((root / destination).read_bytes(), bytes([i]))
+                    self.assertEqual((store / destination).read_bytes(), bytes([i]))
                 self.assertEqual(json.loads(journal_path.read_text())["phase"], "complete")
-                with self.assertRaises(ValueError):
-                    organize.checked(root / "../outside")
+                # Only the migrated places and the journal pass: not the trees' roots, .git or the trash.
+                for outside in (root / "../outside", root / ".git/config", store / "trash/x", store / "runs/maps/x",
+                                "runs/registry/climate.json"):
+                    with self.assertRaises(ValueError, msg=str(outside)):
+                        organize.checked(outside)
+                self.assertEqual(organize.checked("runs/maps/climate/a.png"), store / "runs/maps/climate/a.png")
 
 
 if __name__ == "__main__":

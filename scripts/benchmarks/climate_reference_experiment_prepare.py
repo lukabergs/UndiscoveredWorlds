@@ -11,7 +11,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from uwtools import grid, references, storage
 from uwtools.hashing import sha256
 
-ROOT = Path(__file__).resolve().parents[2]
 A = storage.data_path('runs/reports/climate-reference-experiments-20260915')
 OUT = A / 'prepared-inputs'
 MISSING = np.float32(-9999.9)
@@ -77,17 +76,17 @@ def main():
         for width, values in outputs.items():
             target = OUT / str(width) / f'{role}.npy'
             references.write_npy(target, values, mode='xb')
-            receipts.append(dict(path=target.relative_to(ROOT).as_posix(), role=role,
+            receipts.append(dict(path=storage.logical(target), role=role,
                 units=units.get(role, 'm/s east' if role.startswith('u') else 'm/s north'),
                 sha256=sha256(target),
-                sources=[references.path(name).relative_to(ROOT).as_posix() for name in sources],
+                sources=[storage.logical(references.path(name)) for name in sources],
                 width=width, height=width//2,
                 valid_fractions=[float(np.mean(m != MISSING)) for m in values]))
         print(f'Prepared {role}: widths {widths}', flush=True)
     source_hashes = {}
     for name in sorted({name for sources in source_names.values() for name in sources}):
         path = references.path(name)
-        source_hashes[path.relative_to(ROOT).as_posix()] = sha256(path)
+        source_hashes[storage.logical(path)] = sha256(path)
     (OUT / 'manifest.json').write_text(json.dumps(dict(
         period='ERA5 2001-2020 monthly climatology',
         remap='Spherical-area conservative restriction of valid cells; minimum 5% source coverage; qa and evaporation use ERA5 SST coverage.',

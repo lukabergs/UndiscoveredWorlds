@@ -1,7 +1,6 @@
 """Check repository paths after manual cleanup; does not move or delete files."""
 from pathlib import Path
 import re
-import subprocess
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -75,11 +74,9 @@ def include_issues(root=ROOT):
 
 def data(relative):
     """Where a logical repository path is on disk (storage.data_path: run data and refs/*/physical on the storage
-    drive, no junctions since 2026-11-01); this checkout's path when storage is not configured."""
-    try:
-        return storage.data_path(relative)
-    except (OSError, ValueError, subprocess.CalledProcessError):
-        return ROOT / relative
+    drive, no junctions since 2026-11-01); its error (no runs/storage.json, the drive unavailable) surfaces: nothing
+    falls back to C."""
+    return storage.data_path(relative)
 
 
 def shown(path):

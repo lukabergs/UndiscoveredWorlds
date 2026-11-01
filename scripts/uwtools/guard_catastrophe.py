@@ -55,6 +55,7 @@ PROTECTED_TREES = [
     r'D:\dev\undiscovered-worlds\worktree-archive',
     r'D:\dev\undiscovered-worlds\receipts',
     r'D:\dev\undiscovered-worlds\trash',
+    r'D:\dev\undiscovered-worlds\runs\archive',  # the sealed earlier layout, never written
     os.path.join(HOME, '.claude', 'hooks'),
     os.path.join(HOME, '.claude', 'settings.json'),
     os.path.join(HOME, '.codex'),
@@ -69,6 +70,7 @@ ROOT_ONLY = [
     r'C:\dev\undiscovered-worlds\out', r'C:\dev\undiscovered-worlds\runs', r'C:\dev\undiscovered-worlds\scripts',
     r'C:\dev\undiscovered-worlds\src', r'D:\dev\undiscovered-worlds\out', r'D:\dev\undiscovered-worlds\out\scratch',
     r'D:\dev\undiscovered-worlds\out\evaluation', r'D:\dev\undiscovered-worlds\runs',
+    r'D:\dev\undiscovered-worlds\runs\reports', r'D:\dev\undiscovered-worlds\runs\work',
     os.path.join(HOME, '.claude', 'projects'),
 ]
 SYSTEM_TREES = [r'C:\Windows', r'C:\Program Files', r'C:\Program Files (x86)', r'C:\ProgramData', r'C:\Users\Public',
@@ -470,8 +472,8 @@ def check_segment(segment, cwd, piped, unbalanced=False, level=0):
             if any(re.fullmatch(r'-[a-z]*x[a-z]*', w, re.IGNORECASE) for w in words[1:lowered.index('clean') + 6]):
                 block('git clean -x / -X deletes ignored files, which often hold data; the user runs it.')
             where = cwd
-            if '-c' in lowered[1:lowered.index('clean')]:
-                index = lowered.index('-c')
+            if '-C' in words[1:lowered.index('clean')]:  # git -C <folder> clean (not git -c key=value)
+                index = words.index('-C')
                 where = expand(words[index + 1], cwd) if index + 1 < len(words) else None
             if where is None:
                 block('git clean in a folder the guard could not follow.')

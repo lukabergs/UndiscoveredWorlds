@@ -25,6 +25,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools import storage
 from uwtools.bundle import SCHEMAS, read_manifest
 
 # Manifest lists compared entry by entry: native fields, lat-lon exports, the cell table, tables.
@@ -97,10 +98,11 @@ def compare_field(left, right, entry_left, entry_right, legacy=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('left', type=Path)
-    parser.add_argument('right', type=Path)
+    # Logical runs/... and out/scratch|evaluation/... paths resolve on the storage drive (storage.data_path).
+    parser.add_argument('left', type=storage.data_path)
+    parser.add_argument('right', type=storage.data_path)
     parser.add_argument('--fields', nargs='*', default=[], help='Only compare ids starting with these prefixes')
-    parser.add_argument('--json', type=Path, help='Write the full comparison as JSON')
+    parser.add_argument('--json', type=storage.data_path, help='Write the full comparison as JSON')
     parser.add_argument('--legacy-encoding', action='store_true',
                         help='Compare float fields with their former int16 encoding in the other bundle')
     args = parser.parse_args()

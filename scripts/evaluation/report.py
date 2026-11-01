@@ -418,8 +418,8 @@ def comparison_earth(runs, module, output, name):
         raise SystemExit(f'--earth: the {module} profile draws no Earth windows')
     bundles = []
     for _, document, _ in runs:
-        path = Path(document['run']['bundle'])
-        bundles.append(Bundle.open(storage.data_path(path) if storage.on_storage(path) else ROOT / path))
+        # A recorded path, logical or absolute (C paths written before 2026-11-01 are remapped to the storage drive).
+        bundles.append(Bundle.open(storage.data_path(document['run']['bundle'])))
     if any(bundle.manifest.get('window') is None for bundle in bundles):
         raise SystemExit('--earth: every run of the comparison must be a regional map (a bundle with a window block)')
     metres = [earth_windows.map_request(bundle.manifest)['metres_per_pixel'] for bundle in bundles]
@@ -656,14 +656,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest='command', required=True)
     run = commands.add_parser('run', help='Rewrite index.html and report.md of an evaluation directory')
-    run.add_argument('evaluation', type=Path)
+    # Logical runs/... and out/scratch|evaluation/... paths resolve on the storage drive (storage.data_path).
+    run.add_argument('evaluation', type=storage.data_path)
     compare = commands.add_parser('compare', help='Comparison page; the first evaluation is the baseline')
-    compare.add_argument('evaluations', type=Path, nargs='+')
-    compare.add_argument('--output', type=Path, required=True)
+    compare.add_argument('evaluations', type=storage.data_path, nargs='+')
+    compare.add_argument('--output', type=storage.data_path, required=True)
     compare.add_argument('--earth', metavar='NAME', help='Earth reference window (catalogue entry) drawn for the first run')
     board = commands.add_parser('dashboard', help='Module dashboard over the registry and the ledger')
     board.add_argument('module')
-    board.add_argument('--output', type=Path, required=True)
+    board.add_argument('--output', type=storage.data_path, required=True)
     args = parser.parse_args()
     if args.command == 'run':
         path = run_page(args.evaluation)
